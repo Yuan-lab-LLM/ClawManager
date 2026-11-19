@@ -103,3 +103,27 @@ func (c *slotRuntimeAgentClient) requireExternalWriterAbsence(ctx context.Contex
 	}
 	return proof(ctx, identity)
 }
+
+func ConfigureSlotResetExternalWriterCleanup(client RuntimeAgentClient, cleanup func(context.Context, runtimeauth.Identity, bool) error) error {
+	c, ok := client.(*slotRuntimeAgentClient)
+	if !ok || cleanup == nil {
+		return fmt.Errorf("invalid slot reset external writer authority")
+	}
+	c.admissionMu.Lock()
+	defer c.admissionMu.Unlock()
+	if c.slotResetExternalCleanup != nil {
+		return fmt.Errorf("slot reset external writer authority already configured")
+	}
+	c.slotResetExternalCleanup = cleanup
+	return nil
+}
+
+func (c *slotRuntimeAgentClient) requireSlotResetExternalWriterCleanup(ctx context.Context, identity runtimeauth.Identity, exactCurrentBinding bool) error {
+	c.admissionMu.RLock()
+	cleanup := c.slotResetExternalCleanup
+	c.admissionMu.RUnlock()
+	if cleanup == nil {
+		return fmt.Errorf("slot reset requires scoped external writer authority")
+	}
+	return cleanup(ctx, identity, exactCurrentBinding)
+}

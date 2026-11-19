@@ -13,7 +13,7 @@ import (
 	"clawreef/internal/systembackup/team"
 )
 
-// VerifyMySQL only issues SELECTs, using a read-only repeatable-read transaction.
+// VerifyMySQL only reads rows/metadata in a read-only repeatable-read transaction.
 // Rows are compared through one ordered cursor per table, avoiding a SQL round
 // trip for every row while retaining exact value and extra/missing-row checks.
 // expected must describe the normalized copy, not the unmodified source archive.
@@ -119,6 +119,9 @@ func VerifyMySQL(ctx context.Context, db *sql.DB, expected io.Reader, maxRows in
 		return result, err
 	}
 	if err = finish(); err != nil {
+		return result, err
+	}
+	if err = verifyHistoryAllocators(ctx, tx, result.AutoIncrement); err != nil {
 		return result, err
 	}
 	return result, tx.Commit()

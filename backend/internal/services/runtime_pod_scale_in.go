@@ -222,7 +222,7 @@ func (s *RuntimeManagementService) scaleInPlan(ctx context.Context, req RuntimeP
 		return block(err)
 	}
 	maintenance := &RuntimePodMaintenanceService{sess: s.sess, scheduler: s.scheduler}
-	target, snapshot, err := maintenance.defaultScaleSnapshot(ctx, s.sess, kube, req.RuntimeType)
+	target, snapshot, err := maintenance.defaultScaleSnapshot(ctx, s.sess, kube, req.RuntimeType, scaleHealthySource)
 	if err != nil {
 		return block(err)
 	}
@@ -384,6 +384,9 @@ func (s *RuntimeManagementService) submitScaleInJournal(ctx context.Context, jou
 				return errors.New("automatic idle scale-in disabled")
 			}
 			if err := s.idlePoolDemandAdmission(ctx, tx, journal.Plan.SourcePods); err != nil {
+				return err
+			}
+			if err := idleUnscheduledReplicaAdmission(ctx, tx, journal); err != nil {
 				return err
 			}
 			if err := repository.CheckRuntimePodDeletionIntent(ctx, tx, journal.Target.Namespace, journal.Target.DeploymentName); err != nil {

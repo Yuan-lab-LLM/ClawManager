@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -14,24 +15,65 @@ import (
 	"time"
 )
 
+var (
+	errRedisReplyBudget    = errors.New("redis reply budget exceeded")
+	errRedisReplyMalformed = errors.New("malformed redis reply")
+	errRedisServerReply    = errors.New("redis server rejected command")
+)
+
+type redisReplyBudgetError struct{ limit string }
+
+func (e *redisReplyBudgetError) Error() string        { return "redis reply " + e.limit + " budget exceeded" }
+func (e *redisReplyBudgetError) Is(target error) bool { return target == errRedisReplyBudget }
+
+// These fixed reasons deliberately exclude server reply text, URLs and payloads.
+func redisReadFailureReason(err error) string {
+	var budgetErr *redisReplyBudgetError
+	var networkErr net.Error
+	switch {
+	case errors.As(err, &budgetErr):
+		return "Redis response " + budgetErr.limit + " budget exceeded at COUNT 1; operator recovery required"
+	case errors.Is(err, errRedisReplyMalformed):
+		return "Redis response framing is invalid"
+	case errors.Is(err, errRedisServerReply):
+		return "Redis server rejected the command"
+	case errors.Is(err, io.EOF), errors.Is(err, io.ErrUnexpectedEOF):
+		return "Redis connection closed before a complete response"
+	case errors.As(err, &networkErr):
+		if networkErr.Timeout() {
+			return "Redis connection timed out"
+		}
+		return "Redis connection failed"
+	default:
+		return "Redis read failed"
+	}
+}
+
 type redisStreamMessage struct {
 	ID     string
 	Fields map[string]string
 }
 
 type redisBus struct {
-	address  string
-	username string
-	password string
-	db       int
-	useTLS   bool
-	pool     *redisConnPool
+	commandHook   func(context.Context, []string) (any, bool, error)
+	teamLiveGuard func(context.Context, int) error
+	address       string
+	username      string
+	password      string
+	db            int
+	useTLS        bool
+	pool          *redisConnPool
 }
 
 const (
 	redisPoolMaxOpen = 256
 	redisPoolMaxIdle = 128
 	redisDialTimeout = 5 * time.Second
+
+	redisReplyMaxBytes    = 8 << 20
+	redisReplyMaxElements = 100000
+	redisReplyMaxDepth    = 16
+	redisReplyMaxLine     = 4096
 )
 
 // redisConnPool is intentionally small and shared by all redisBus values with
@@ -110,6 +152,11 @@ func (b *redisBus) XAdd(ctx context.Context, key string, fields map[string]strin
 		return "", err
 	}
 	id, ok := reply.(string)
+	if ok && id == "" && b.commandHook != nil {
+		// A projection transaction queued this command in its durable outbox.
+		// No Redis stream ID exists until the post-commit sender executes it.
+		return "", nil
+	}
 	if !ok || strings.TrimSpace(id) == "" {
 		return "", fmt.Errorf("unexpected redis XADD response")
 	}
@@ -164,16 +211,29 @@ func (b *redisBus) XRead(ctx context.Context, key, lastID string, block time.Dur
 	if blockMillis <= 0 {
 		blockMillis = 5000
 	}
-	reply, err := b.do(ctx, "XREAD", "BLOCK", strconv.Itoa(blockMillis), "STREAMS", key, lastID)
-	if err != nil {
-		return nil, err
+	// Retry the same cursor with progressively smaller batches only when the
+	// complete response exceeds a safety budget. At most seven attempts reach
+	// COUNT 1; a single oversized entry remains retained and explicitly blocked.
+	var reply interface{}
+	for count := 100; ; count = max(1, count/2) {
+		var err error
+		reply, err = b.do(ctx, "XREAD", "COUNT", strconv.Itoa(count), "BLOCK", strconv.Itoa(blockMillis), "STREAMS", key, lastID)
+		if err == nil {
+			break
+		}
+		if !errors.Is(err, errRedisReplyBudget) {
+			return nil, err
+		}
+		if count == 1 {
+			return nil, fmt.Errorf("redis XREAD COUNT 1 exceeds response budget: %w", err)
+		}
 	}
 	if reply == nil {
 		return nil, nil
 	}
 	root, ok := reply.([]interface{})
 	if !ok {
-		return nil, fmt.Errorf("unexpected redis XREAD response")
+		return nil, fmt.Errorf("%w: unexpected XREAD response", errRedisReplyMalformed)
 	}
 	var messages []redisStreamMessage
 	for _, streamRaw := range root {
@@ -256,6 +316,66 @@ func parseRedisStreamEntries(entries []interface{}) []redisStreamMessage {
 }
 
 func (b *redisBus) do(ctx context.Context, args ...string) (interface{}, error) {
+	if b != nil && b.commandHook != nil {
+		if reply, handled, err := b.commandHook(ctx, args); handled {
+			return reply, err
+		}
+	}
+	if len(args) == 5 && strings.EqualFold(args[0], "EVAL") && args[1] == publishTeamWorkflowContextScript {
+		if id, ok := teamRedisID(args[3]); ok {
+			if err := b.initializeTeamCapacity(ctx, id, false); err != nil {
+				return nil, err
+			}
+			p := teamCapacityPrefix(id)
+			return b.doRaw(ctx, "EVAL", capacityGuardedScript(args[1], 1, true), "3", args[3], p+"usage", p+"lock", args[4])
+		}
+	}
+	if len(args) > 6 && strings.EqualFold(args[0], "XADD") && args[1] == runtimeEventStreamKey {
+		fieldStart := 3
+		if args[2] == "MAXLEN" {
+			fieldStart = 6
+		}
+		if len(args) < fieldStart+2 {
+			return nil, fmt.Errorf("invalid runtime UI event")
+		}
+		bytes := 0
+		for _, v := range args[fieldStart:] {
+			bytes += len(v)
+		}
+		if bytes > 16<<10 {
+			return nil, fmt.Errorf("runtime UI event exceeds 16 KiB")
+		}
+		out := []string{"EVAL", `local now=redis.call('TIME'); local minimum=tostring(tonumber(now[1])*1000-86400000)..'-0'; redis.call('XTRIM',KEYS[1],'MINID','=',minimum); return redis.call('XADD',KEYS[1],'MAXLEN','=',10000,'*',unpack(ARGV))`, "1", runtimeEventStreamKey}
+		return b.doRaw(ctx, append(out, args[fieldStart:]...)...)
+	}
+	if len(args) >= 5 && strings.EqualFold(args[0], "XADD") && reliableTeamStream(args[1]) {
+		if args[2] != "*" || (len(args)-3)%2 != 0 {
+			return nil, fmt.Errorf("invalid reliable Team append")
+		}
+		fields := make(map[string]string, (len(args)-3)/2)
+		for i := 3; i < len(args); i += 2 {
+			fields[args[i]] = args[i+1]
+		}
+		return b.xAddReliableOnce(ctx, args[1], fields, "")
+	}
+	if teamStateCommand(args) {
+		id, _ := teamRedisID(args[1])
+		if err := b.initializeTeamCapacity(ctx, id, false); err != nil {
+			return nil, err
+		}
+		return b.doRaw(ctx, teamStateArgs(args)...)
+	}
+	if transformed, ok := teamGroupArgs(args); ok {
+		id, _ := teamRedisID(args[2])
+		if err := b.initializeTeamCapacity(ctx, id, false); err != nil {
+			return nil, err
+		}
+		return b.doRaw(ctx, transformed...)
+	}
+	return b.doRaw(ctx, args...)
+}
+
+func (b *redisBus) doRaw(ctx context.Context, args ...string) (interface{}, error) {
 	if b == nil || b.pool == nil {
 		return nil, fmt.Errorf("redis bus is not initialized")
 	}
@@ -399,71 +519,105 @@ func writeRedisCommand(conn net.Conn, args ...string) error {
 	return nil
 }
 
+// One budget covers the entire response, including nested headers and payloads.
+// Callers must discard the connection after any parsing error: unread bytes may
+// still belong to the rejected response.
+type redisReplyBudget struct {
+	bytes    int
+	elements int
+}
+
 func readRedisReply(reader *bufio.Reader) (interface{}, error) {
+	budget := redisReplyBudget{bytes: redisReplyMaxBytes, elements: redisReplyMaxElements}
+	return readRedisReplyBudget(reader, &budget, 0)
+}
+
+func readRedisReplyBudget(reader *bufio.Reader, budget *redisReplyBudget, depth int) (interface{}, error) {
+	if depth > redisReplyMaxDepth {
+		return nil, &redisReplyBudgetError{limit: "depth"}
+	}
+	if budget.bytes <= 0 {
+		return nil, &redisReplyBudgetError{limit: "byte"}
+	}
 	prefix, err := reader.ReadByte()
+	if err != nil {
+		return nil, err
+	}
+	budget.bytes--
+	line, err := readRedisLine(reader, budget)
 	if err != nil {
 		return nil, err
 	}
 	switch prefix {
 	case '+':
-		line, err := readRedisLine(reader)
-		return line, err
+		return line, nil
 	case '-':
-		line, _ := readRedisLine(reader)
-		return nil, fmt.Errorf("redis error: %s", line)
+		return nil, fmt.Errorf("%w: %s", errRedisServerReply, line)
 	case ':':
-		line, err := readRedisLine(reader)
+		value, err := strconv.ParseInt(line, 10, 64)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("%w: invalid integer", errRedisReplyMalformed)
 		}
-		return strconv.ParseInt(line, 10, 64)
-	case '$':
-		line, err := readRedisLine(reader)
-		if err != nil {
-			return nil, err
+		return value, nil
+	case '$', '*':
+		size, err := strconv.ParseInt(line, 10, 64)
+		if err != nil || size < -1 {
+			return nil, fmt.Errorf("%w: invalid length", errRedisReplyMalformed)
 		}
-		size, err := strconv.Atoi(line)
-		if err != nil {
-			return nil, err
-		}
-		if size < 0 {
+		if size == -1 {
 			return nil, nil
 		}
-		buf := make([]byte, size+2)
-		if _, err := io.ReadFull(reader, buf); err != nil {
-			return nil, err
+		if prefix == '$' {
+			if size > int64(budget.bytes)-2 {
+				return nil, &redisReplyBudgetError{limit: "byte"}
+			}
+			buf := make([]byte, int(size)+2)
+			if _, err := io.ReadFull(reader, buf); err != nil {
+				return nil, err
+			}
+			budget.bytes -= len(buf)
+			if buf[len(buf)-2] != '\r' || buf[len(buf)-1] != '\n' {
+				return nil, fmt.Errorf("%w: invalid bulk CRLF", errRedisReplyMalformed)
+			}
+			return string(buf[:len(buf)-2]), nil
 		}
-		return string(buf[:size]), nil
-	case '*':
-		line, err := readRedisLine(reader)
-		if err != nil {
-			return nil, err
+		// Even an empty scalar needs at least three wire bytes. Check both
+		// budgets before allocating an array from a server-provided length.
+		if size > int64(budget.elements) || size > int64(budget.bytes/3) {
+			return nil, &redisReplyBudgetError{limit: "element"}
 		}
-		count, err := strconv.Atoi(line)
-		if err != nil {
-			return nil, err
-		}
-		if count < 0 {
-			return nil, nil
-		}
-		items := make([]interface{}, 0, count)
-		for i := 0; i < count; i++ {
-			item, err := readRedisReply(reader)
+		budget.elements -= int(size)
+		items := make([]interface{}, int(size))
+		for i := range items {
+			items[i], err = readRedisReplyBudget(reader, budget, depth+1)
 			if err != nil {
 				return nil, err
 			}
-			items = append(items, item)
 		}
 		return items, nil
 	default:
-		return nil, fmt.Errorf("unexpected redis reply prefix %q", prefix)
+		return nil, fmt.Errorf("%w: unexpected prefix", errRedisReplyMalformed)
 	}
 }
 
-func readRedisLine(reader *bufio.Reader) (string, error) {
-	line, err := reader.ReadString('\n')
-	if err != nil {
-		return "", err
+func readRedisLine(reader *bufio.Reader, budget *redisReplyBudget) (string, error) {
+	line := make([]byte, 0, 32)
+	for len(line) < redisReplyMaxLine {
+		if budget.bytes <= 0 {
+			return "", &redisReplyBudgetError{limit: "byte"}
+		}
+		b, err := reader.ReadByte()
+		if err != nil {
+			return "", err
+		}
+		budget.bytes--
+		line = append(line, b)
+		if b == '\n' {
+			if len(line) < 2 || line[len(line)-2] != '\r' {
+				return "", fmt.Errorf("%w: invalid line CRLF", errRedisReplyMalformed)
+			}
+			return string(line[:len(line)-2]), nil
+		}
 	}
-	return strings.TrimSuffix(strings.TrimSuffix(line, "\n"), "\r"), nil
+	return "", &redisReplyBudgetError{limit: "line"}
 }

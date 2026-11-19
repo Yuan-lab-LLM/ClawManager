@@ -5,7 +5,26 @@ import (
 	"context"
 	"fmt"
 	"strings"
+
+	"github.com/upper/db/v4"
 )
+
+// CountRuntimeSlotDemand rechecks live, unbound Lite instances for a replica mutation.
+func CountRuntimeSlotDemand(ctx context.Context, sess db.Session, runtimeType string) (int, error) {
+	var count int
+	row, err := sess.SQL().QueryRowContext(ctx, `SELECT COUNT(*) FROM instances i
+		WHERE i.type=? AND i.runtime_type='gateway' AND i.instance_mode='lite'
+		  AND i.status='creating' AND TRIM(i.workspace_path)<>''
+		  AND LOWER(TRIM(COALESCE(i.description,''))) NOT LIKE 'openclaw-upgrade-lab:%'
+		  AND NOT EXISTS (SELECT 1 FROM instance_runtime_bindings b WHERE b.instance_id=i.id)
+		  AND NOT EXISTS (SELECT 1 FROM instance_lifecycle_manual_guards mg WHERE mg.instance_id=i.id AND mg.token LIKE 'runtime_mgmt_%')
+		  AND NOT EXISTS (SELECT 1 FROM gateway_runtime_upgrades u WHERE u.instance_id=i.id AND u.state NOT IN ('cancelled','completed'))
+		  AND NOT EXISTS (SELECT 1 FROM instance_desired_state ds WHERE ds.instance_id=i.id AND ds.desired_power_state<>'running')`, runtimeType)
+	if err == nil {
+		err = row.Scan(&count)
+	}
+	return count, err
+}
 
 // RuntimeSchedulerInstancePager is optional so older adapters remain compatible.
 // throughID=0 starts a bounded keyset sweep; the returned watermark stays fixed

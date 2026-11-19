@@ -17,6 +17,32 @@ func (f *emptyRuntime) ListContainers(context.Context) ([]runtimeeviction.Contai
 	return nil, nil
 }
 func (f *emptyRuntime) StopContainer(context.Context, string) error { panic("unexpected stop") }
+
+type physicalRuntime struct{ stopped bool }
+
+func (f *physicalRuntime) ListContainers(context.Context) ([]runtimeeviction.Container, error) {
+	state := "running"
+	if f.stopped {
+		state = "exited"
+	}
+	return []runtimeeviction.Container{{ID: strings.Repeat("a", 64), Namespace: "ns", PodName: "pod", PodUID: "uid", Name: "slot-0", State: state}}, nil
+}
+func (f *physicalRuntime) StopContainer(context.Context, string) error { f.stopped = true; return nil }
+func TestPhysicalSlotModeNeedsNoWorkspace(t *testing.T) {
+	boot := filepath.Join(t.TempDir(), "boot")
+	os.WriteFile(boot, []byte("boot"), 0600)
+	s := runtimeeviction.SlotScope{Version: 1, OperationID: "op", Namespace: "ns", PodName: "pod", PodUID: "uid", NodeName: "node", NodeUID: "node-uid", NodeBootID: "boot", ContainerName: "slot-0", ContainerID: "containerd://" + strings.Repeat("a", 64)}
+	b, _ := json.Marshal(s)
+	f := &physicalRuntime{}
+	reply, err := runSlotWithRuntime(context.Background(), f, boot, string(b))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var receipt runtimeeviction.SlotReceipt
+	if json.Unmarshal(reply, &receipt) != nil || runtimeeviction.ValidateSlotReceipt(s, &receipt) != nil || !f.stopped {
+		t.Fatalf("invalid slot reply: %s", reply)
+	}
+}
 func TestPodModeDispatchAndBoundedReply(t *testing.T) {
 	root := t.TempDir()
 	boot := filepath.Join(t.TempDir(), "boot")

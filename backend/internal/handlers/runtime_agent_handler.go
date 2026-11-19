@@ -379,6 +379,17 @@ func (h *RuntimeAgentHandler) ReportGateways(c *gin.Context) {
 			continue
 		}
 		lifecycle := services.NormalizeRuntimeGatewayLifecycle(gateway.State, gateway.ErrorMessage)
+		if writer, ok := h.bindingRepo.(interface {
+			ApplyReportedGateway(context.Context, models.InstanceRuntimeBinding, models.InstanceRuntimeBinding, string) error
+		}); ok {
+			report := models.InstanceRuntimeBinding{InstanceID: gateway.InstanceID, RuntimePodID: podID, GatewayID: strings.TrimSpace(gateway.GatewayID), GatewayPort: gateway.GatewayPort, GatewayPID: gateway.GatewayPID, WorkspacePath: strings.TrimSpace(gateway.WorkspacePath), Generation: gateway.Generation, State: lifecycle.BindingState, ErrorMessage: lifecycle.Message}
+			err := writer.ApplyReportedGateway(c.Request.Context(), *binding, report, lifecycle.InstanceState)
+			if err != nil && !errors.Is(err, models.ErrRuntimeUpgradeInProgress) && !errors.Is(err, repository.ErrStaleRuntimeGeneration) && !errors.Is(err, models.ErrInstanceStopping) {
+				utils.HandleError(c, err)
+				return
+			}
+			continue
+		}
 		if lifecycle.Running {
 			if err := h.bindingRepo.UpdateRunning(c.Request.Context(), gateway.InstanceID, gateway.Generation, strings.TrimSpace(gateway.GatewayID), gateway.GatewayPort, gateway.GatewayPID); err != nil {
 				if errors.Is(err, models.ErrRuntimeUpgradeInProgress) {

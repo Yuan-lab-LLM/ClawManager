@@ -80,8 +80,9 @@ func TestProviderCatalogRemovalBeforeDispatchIsDenied(t *testing.T) {
 	s.modelRepo = repository.ForModelUser(&changingProviderCatalogRepository{stubLLMModelRepository: &stubLLMModelRepository{active: []models.LLMModel{parent}}, after: []models.LLMModel{updated}}, 2)
 	req := routingRequest("hello")
 	req.Model = "glm-5.3"
-	if _, err := s.prepareChatRequest(t.Context(), 2, req); err == nil {
-		t.Fatal("removed catalog model can fall back to a stale selection before dispatch")
+	prepared, err := s.prepareChatRequest(t.Context(), 2, req)
+	if !errors.Is(err, models.ErrModelUnavailable) || prepared == nil {
+		t.Fatalf("removed model should be denied with its audit context available for cleanup: %v", err)
 	}
 	selected := models.ExpandLLMModelCatalog([]models.LLMModel{parent})[1]
 	s.modelRepo = repository.ForModelUser(&stubLLMModelRepository{active: []models.LLMModel{updated}}, 2)

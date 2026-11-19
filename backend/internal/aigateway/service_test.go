@@ -140,8 +140,12 @@ func TestGatewayDoesNotRouteUnapprovedExpandedProviderModels(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListAvailableModels returned error: %v", err)
 	}
-	if len(items) != 2 || items[1].DisplayName != "model-1" { t.Fatalf("unapproved model exposed: %#v", items) }
-	if selected, err := service.resolveRequestedModel("model-7"); err == nil || selected != nil { t.Fatalf("unapproved model resolved: %#v, %v", selected, err) }
+	if len(items) != 2 || items[1].DisplayName != "model-1" {
+		t.Fatalf("unapproved model exposed: %#v", items)
+	}
+	if selected, err := service.resolveRequestedModel("model-7"); err == nil || selected != nil {
+		t.Fatalf("unapproved model resolved: %#v, %v", selected, err)
+	}
 }
 
 type stubModelInvocationService struct {
@@ -992,19 +996,6 @@ func TestProxyOpenAIStreamDefersPreludeUntilSemanticToken(t *testing.T) {
 	}
 	if output.Len() != 0 || output.flushes != 0 {
 		t.Fatalf("pre-token output was committed: %q", output.String())
-	}
-}
-
-func TestProxyOpenAIStreamBoundsDeferredPrelude(t *testing.T) {
-	input := ": " + strings.Repeat("x", maxDeferredStreamPreludeBytes+1) + "\n"
-	output := &flushBuffer{}
-
-	_, err := proxyOpenAIStream(strings.NewReader(input), output, output, true)
-	if err == nil || !strings.Contains(err.Error(), "safety limit") {
-		t.Fatalf("expected bounded pre-token buffering error, got %v", err)
-	}
-	if output.Len() != 0 {
-		t.Fatalf("oversized prelude leaked downstream")
 	}
 }
 

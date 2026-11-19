@@ -18,8 +18,8 @@ func (r *teamRepository) CreateSingleMemberTask(task *models.TeamTask, item *mod
 	if task == nil || item == nil {
 		return fmt.Errorf("single-member task and work item are required")
 	}
-	return r.sess.Tx(func(sess db.Session) error {
-		tx := &teamRepository{sess: sess}
+	return r.withTransaction(func(sess db.Session) error {
+		tx := &teamRepository{sess: sess, inTransaction: true}
 		if err := tx.CreateTask(task); err != nil {
 			return err
 		}

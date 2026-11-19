@@ -36,9 +36,10 @@ type slotRuntimeAgentClient struct {
 	security                 *RuntimeSecurityAuthority
 	protectTeamPreview       func(context.Context, runtimeauth.Identity) error
 	admissionMu              sync.RWMutex
-	assignmentAdmission      func(context.Context, string, string, int, int, func() error) error
+	assignmentAdmission      func(context.Context, string, string, int, int, int, func() error) error
 	workspaceWriteFence      func(context.Context, runtimeauth.Identity) error
 	workspaceWriteActivation func(context.Context, runtimeauth.Identity) error
+	slotResetExternalCleanup func(context.Context, runtimeauth.Identity, bool) error
 	workspaceExternalStop    func(context.Context, runtimeauth.Identity) error
 	workspaceExternalAbsence func(context.Context, runtimeauth.Identity) error
 	recoveryStorageProof     func(context.Context, kubernetes.Interface, models.RuntimePod, models.RuntimePod, string, int) (k8sservice.StoppedSourceStorage, error)
@@ -236,7 +237,7 @@ func (c *slotRuntimeAgentClient) CreateGateway(ctx context.Context, endpoint str
 	admit := c.assignmentAdmission
 	c.admissionMu.RUnlock()
 	if admit != nil {
-		err = admit(ctx, podUID, req.AgentType, req.InstanceID, req.Generation, publish)
+		err = admit(ctx, podUID, req.AgentType, req.InstanceID, req.Generation, req.GatewayPort, publish)
 	} else {
 		err = publish()
 	}

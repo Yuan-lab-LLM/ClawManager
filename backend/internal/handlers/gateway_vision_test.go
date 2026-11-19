@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"github.com/gin-gonic/gin"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -64,6 +65,39 @@ func TestVisionThreeProtocolEntrypointsPreserveImagesAndOwner(t *testing.T) {
 			raw, _ := json.Marshal(svc.request.Messages)
 			if !strings.Contains(string(raw), "https://example.com/fixture.png") || !strings.Contains(string(raw), "describe") {
 				t.Fatal(string(raw))
+			}
+		})
+	}
+}
+
+func TestGatewayAcceptsRequestBodiesBeyondThirtyTwoMiB(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	padding := strings.Repeat(" ", 32<<20)
+	for _, test := range []struct {
+		name   string
+		body   string
+		handle func(*AIGatewayHandler, *gin.Context)
+	}{
+		{"chat", `{"model":"auto","messages":[{"role":"user","content":"hello"}]}`, (*AIGatewayHandler).ChatCompletions},
+		{"responses", `{"model":"auto","input":"hello"}`, (*AIGatewayHandler).Responses},
+		{"anthropic", `{"model":"auto","max_tokens":32,"messages":[{"role":"user","content":"hello"}]}`, (*AIGatewayHandler).AnthropicMessages},
+		{"images", `{"model":"img","prompt":"draw a cat"}`, (*AIGatewayHandler).ImageGenerations},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var service aigateway.Service = &visionCaptureGateway{}
+			if test.name == "images" {
+				service = &imageHandlerService{}
+			}
+			handler := &AIGatewayHandler{service: service}
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Set("userID", 7)
+			body := io.MultiReader(strings.NewReader(padding), strings.NewReader(test.body))
+			c.Request = httptest.NewRequest(http.MethodPost, "/"+test.name, body)
+			c.Request.Header.Set("Content-Type", "application/json")
+			test.handle(handler, c)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
 			}
 		})
 	}

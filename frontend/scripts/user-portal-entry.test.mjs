@@ -24,11 +24,11 @@ assert(
   "User sidebar must not expose Portal as a top-level navigation entry.",
 );
 assert(
-  routerSource.includes('path="/portal"'),
-  "Portal route must remain available for instance-page entry points.",
+  /path="\/portal"\s+element=\{\s*<ProtectedRoute>\s*<InstancePortalPage \/>/.test(routerSource),
+  "The legacy Portal route must remain available to authenticated direct links.",
 );
 
-// Render the real user shell: Portal is discoverable from its account actions.
+// Check the rendered shell for the retired Portal navigation entry.
 const { default: React } = await import('react');
 const { renderToStaticMarkup } = await import('react-dom/server');
 const { MemoryRouter } = await import('react-router-dom');
@@ -43,6 +43,6 @@ try {
   const html = renderToStaticMarkup(React.createElement(MemoryRouter, { initialEntries: ['/instances'] },
     React.createElement(AuthProvider, null, React.createElement(I18nProvider, null,
       React.createElement(Layout, { title: 'Instances' }, React.createElement('p', null, 'Instance list'))))));
-  assert((html.match(/href="\/portal"/g) || []).length === 1, 'instance user shell retains a Portal link');
+  assert(!html.includes('href="/portal"'), 'the instance shell uses unified workspace navigation');
 } finally { await server.close(); }
-console.log('Portal remains available from instance account actions without a top-level sidebar entry.');
+console.log('Portal direct links remain protected and the unified user shell omits redundant Portal navigation.');

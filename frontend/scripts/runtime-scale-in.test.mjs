@@ -17,16 +17,17 @@ function setup({ allowed = true, executeError } = {}) {
     if (name.endsWith('/runtimePoolService')) return { runtimePoolService: { preflightScaleIn: async () => { previews++; return plan; }, scaleIn: async () => { executions++; if (executeError) throw executeError; return { id: 'operation-1', kind: 'scale_in', items: [] }; } } };
     if (name.endsWith('/runtimeManagement')) return { runtimeError: error => error.message, summarizePod: () => ({ occupied: 0 }) };
     if (name.endsWith('/instance')) return { formatInstanceType: value => value };
+    if (name === '../../components/FilterSelect') return { default: 'filter-select' };
     if (name === './RuntimeManagementUI') return { RuntimeDialog: 'dialog', ErrorMessage: 'error' };
     return require(name);
   } });
   function render() { cursor = 0; tree = exports.default({ onClose() {}, onChanged() {}, onViewScheduling() {} }); return tree; }
   function nodes(node = tree) { return !node || typeof node !== 'object' ? [] : [node, ...[node.props?.children, node.props?.footer].flat(Infinity).flatMap(child => child == null ? [] : nodes(child))]; }
   function find(predicate) { const node = nodes().find(predicate); assert.ok(node, 'Expected control was rendered'); return node; }
-  const label = key => find(node => node.props?.['aria-label'] === `runtimePods.${key}`);
+  const label = key => find(node => (node.props?.['aria-label'] ?? node.props?.label) === `runtimePods.${key}`);
   const button = key => find(node => node.type === 'button' && node.props.children === `runtimePods.${key}`);
   render(); button('scaleIn').props.onClick(); render();
-  label('runtimeType').props.onChange({ target: { value: 'hermes' } }); render();
+  label('runtimeType').props.onChange('hermes'); render();
   return { render, label, button, nodes, counts: () => ({ executions, previews }) };
 }
 test('scale-in requires a reviewed matching plan and acknowledgement; changing count discards it', async () => {

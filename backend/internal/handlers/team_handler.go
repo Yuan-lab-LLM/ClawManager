@@ -1,11 +1,13 @@
 package handlers
 
 import (
+	"errors"
 	"io"
 	"net/http"
 	"strconv"
 	"strings"
 
+	"clawreef/internal/repository"
 	"clawreef/internal/services"
 	"clawreef/internal/utils"
 
@@ -267,10 +269,15 @@ func (h *TeamHandler) DispatchTask(c *gin.Context) {
 	}
 	task, err := h.teamService.DispatchTask(userID.(int), teamID, req)
 	if err != nil {
+		if errors.Is(err, repository.ErrTeamOutboxCapacity) || errors.Is(err, services.ErrTeamRedisCapacity) {
+			c.Header("Retry-After", "5")
+			utils.Error(c, http.StatusTooManyRequests, err.Error())
+			return
+		}
 		utils.HandleError(c, err)
 		return
 	}
-	utils.Success(c, http.StatusCreated, "Team task dispatched successfully", task)
+	utils.Success(c, http.StatusCreated, "Team task accepted", task)
 }
 
 func (h *TeamHandler) DeleteTeam(c *gin.Context) {

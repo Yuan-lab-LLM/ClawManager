@@ -72,13 +72,13 @@ func TestRuntimeMaintenanceMySQLEmptyDeletionAdmission(t *testing.T) {
 	// an attacker-reported duplicate UID or a rewritten controller name.
 	published := 0
 	client := scheduler.agentClient.(*slotRuntimeAgentClient)
-	if err := client.assignmentAdmission(ctx, "pod-uid", "opencode", 101, 1, func() error { published++; return nil }); err != nil {
+	if err := client.assignmentAdmission(ctx, "pod-uid", "opencode", 101, 1, 20000, func() error { published++; return nil }); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := sess.SQL().Exec("INSERT INTO runtime_pods(runtime_type,namespace,pod_name,pod_uid,deployment_name,image_ref,state,capacity) VALUES('opencode','other','shadow','pod-uid','other','image','ready',2)"); err != nil {
 		t.Fatal(err)
 	}
-	if err := client.assignmentAdmission(ctx, "pod-uid", "opencode", 101, 1, func() error { published++; return nil }); err == nil {
+	if err := client.assignmentAdmission(ctx, "pod-uid", "opencode", 101, 1, 20000, func() error { published++; return nil }); err == nil {
 		t.Fatal("duplicate SQL UID bypassed actual controller identity")
 	}
 	if _, err := sess.SQL().Exec("DELETE FROM runtime_pods WHERE namespace='other'"); err != nil {
@@ -87,7 +87,7 @@ func TestRuntimeMaintenanceMySQLEmptyDeletionAdmission(t *testing.T) {
 	if _, err := sess.SQL().Exec("UPDATE runtime_pods SET deployment_name='other' WHERE id=9"); err != nil {
 		t.Fatal(err)
 	}
-	if err := client.assignmentAdmission(ctx, "pod-uid", "opencode", 101, 1, func() error { published++; return nil }); err == nil {
+	if err := client.assignmentAdmission(ctx, "pod-uid", "opencode", 101, 1, 20000, func() error { published++; return nil }); err == nil {
 		t.Fatal("rewritten SQL owner bypassed actual controller identity")
 	}
 	if _, err := sess.SQL().Exec("UPDATE runtime_pods SET deployment_name='managed' WHERE id=9"); err != nil {
@@ -243,7 +243,7 @@ func TestRuntimeMaintenanceMySQLDeleteFenceRejectsLastMomentAdmission(t *testing
 						claims++
 						unsafeDeletes++
 					}
-					if err := repository.WithRuntimePodAssignmentAdmission(ctx, second, models.RuntimePod{Namespace: "runtime", PodName: "pod", PodUID: &podUIDForFenceTest, DeploymentName: "managed", RuntimeType: "opencode"}, 101, 1, func() error { publications++; return nil }); err == nil {
+					if err := repository.WithRuntimePodAssignmentAdmission(ctx, second, models.RuntimePod{Namespace: "runtime", PodName: "pod", PodUID: &podUIDForFenceTest, DeploymentName: "managed", RuntimeType: "opencode"}, 101, 1, 20000, func() error { publications++; return nil }); err == nil {
 						t.Fatal("fenced assignment publication was admitted")
 					}
 

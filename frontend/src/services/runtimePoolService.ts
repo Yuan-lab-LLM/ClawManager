@@ -16,6 +16,8 @@ import type {
   RuntimeSchedulingRequest,
   RuntimeSchedulingOperation,
   RuntimeSchedulingPreflight,
+  RuntimeSlotResetRequest,
+  RuntimeSlotResetPreflight,
   RuntimePodPage,
   RuntimePodPageRequest,
   RuntimeManagedPool,
@@ -171,6 +173,21 @@ export const runtimePoolService = {
 
   async schedulingHistory(): Promise<{ items: RuntimeSchedulingOperation[]; supported_modes: string[]; force_unavailable_reason?: string }> {
     const response = await api.get('/admin/runtime-scheduling');
+    return response.data.data;
+  },
+
+  async slotResetOperation(requestId: string): Promise<RuntimeSchedulingOperation | null> {
+    const response = await api.get('/admin/runtime-scheduling', { params: { slot_reset_request_id: requestId }, timeout: 15000 });
+    return response.data.data ?? null;
+  },
+
+  async preflightSlotReset(podId: number, slot: string, identity: Pick<RuntimeSlotResetRequest, 'source_pod_uid'>, signal?: AbortSignal): Promise<RuntimeSlotResetPreflight> {
+    const response = await api.post(`/admin/runtime-pods/${podId}/slots/${encodeURIComponent(slot)}/reset/preflight`, identity, { signal, timeout: 15000 });
+    return response.data.data;
+  },
+
+  async resetSlot(podId: number, slot: string, request: RuntimeSlotResetRequest): Promise<RuntimeSchedulingOperation> {
+    const response = await api.post(`/admin/runtime-pods/${podId}/slots/${encodeURIComponent(slot)}/reset`, request, { timeout: 15000 });
     return response.data.data;
   },
 

@@ -32,16 +32,16 @@ The cluster profile is validated with Longhorn as the example CSI implementation
 - Kubernetes cluster manifest: [`deployments/k8s/cluster/clawmanager.yaml`](../deployments/k8s/cluster/clawmanager.yaml)
 - K3s single-node manifest: [`deployments/k3s/single-node/clawmanager.yaml`](../deployments/k3s/single-node/clawmanager.yaml)
 - K3s cluster manifest: [`deployments/k3s/cluster/clawmanager.yaml`](../deployments/k3s/cluster/clawmanager.yaml)
-- Optional Northbound API add-on: [`deployments/k8s/northbound/`](../deployments/k8s/northbound/README.md)
-- Container startup script: [`deployments/container/start.sh`](../deployments/container/start.sh)
-- Nginx config: [`deployments/nginx/nginx.conf`](../deployments/nginx/nginx.conf)
+- Optional Northbound API add-on: [`tools/k8s/northbound/`](../tools/k8s/northbound/README.md)
+- Container startup script: [`tools/images/container/start.sh`](../tools/images/container/start.sh)
+- Nginx config: [`tools/images/nginx/nginx.conf`](../tools/images/nginx/nginx.conf)
 
 ## Deployment Workflow
 
 1. Choose the Kubernetes distribution: `k3s` or `k8s`.
 2. Choose the storage profile: `single-node` or `cluster`.
 3. Check the storage prerequisites for that profile.
-4. Review the bundled manifest and adjust secrets, images, StorageClass names, and ingress exposure for your environment.
+4. Review the bundled manifest and adjust secrets, images, StorageClass names, and ingress exposure. Prepare the [audit and history credentials](#audit-and-history-credentials).
 5. Deploy the platform components into the cluster.
 6. Wait for the core services to become ready.
 7. Validate frontend access, AI Gateway management pages, Security Protection connectivity, and OpenClaw/Hermes/OpenCode/DeepSeek Harness runtime creation flows.
@@ -65,11 +65,21 @@ kubectl get pvc -n clawmanager-system
 kubectl get pods -n clawmanager-system
 ```
 
+## Audit and history credentials
+
+Each profile uses one `clawmanager.yaml`, which includes the audit PVC and credential mounts. The single-node profiles store audit logs under `/data/clawmanager/system/observability`. The cluster profiles use a dedicated RWX claim.
+
+1. Use the [credential preparation scripts](../tools/k8s/observability/README.md) to generate the audit key and isolated restore account for a new installation. Create the `clawmanager-system` namespace before applying the two Secret objects.
+2. Apply the selected profile. After the bundled MySQL deployment is ready, have the database administrator run the private `bootstrap.sql` for the restore account, then verify application readiness.
+3. On an existing installation, reuse its audit key, audit volume and restore account. Match the manifest to the StorageClass of any bound audit claim.
+
+Installation details are available for [Kubernetes single-node](./install/k8s/single-node.md), [Kubernetes cluster](./install/k8s/cluster.md), [K3s single-node](./install/k3s/single-node.md) and [K3s cluster](./install/k3s/cluster.md).
+
 ## Optional Northbound API
 
 The base deployment profiles do not expose the Northbound API. To enable it,
 upgrade the ClawManager Core first, then apply the separate
-[Northbound Kubernetes add-on](../deployments/k8s/northbound/README.md). The
+[Northbound Kubernetes add-on](../tools/k8s/northbound/README.md). The
 Northbound Gateway is the only public API endpoint; keep the Core service
 private and preserve the documented mTLS, credential, and network-policy
 boundaries. The external port may be published through a NodePort, load
@@ -226,7 +236,7 @@ For mixed-architecture clusters, use architecture-compatible tags together with 
 - [Security Protection Platform](./security-platform.md)
 - [Resource Management Guide](./resource-management.md)
 - [Skill Hub Guide](./skill-hub-guide_en.md)
-- [Northbound API Deployment Add-on](../deployments/k8s/northbound/README.md)
+- [Northbound API Deployment Add-on](../tools/k8s/northbound/README.md)
 - [Northbound API Guide (Chinese)](./northbound-api-guide.md)
 - [Northbound API Upgrade Guide (Chinese)](./northbound-upgrade-guide.md)
 - [Northbound OpenAPI 3.1 Specification](./northbound-openapi.yaml)

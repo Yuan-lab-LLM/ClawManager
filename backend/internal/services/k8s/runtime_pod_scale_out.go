@@ -2,13 +2,13 @@ package k8s
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net"
 	"syscall"
 
+	appsv1 "k8s.io/api/apps/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -22,6 +22,8 @@ type RuntimeDeploymentScaleOut interface {
 
 // ErrRuntimeScaleOutPending requests a fresh observation on the next tick.
 var ErrRuntimeScaleOutPending = errors.New("automatic Runtime scale-out awaits observation")
+
+var ErrRuntimeScaleWriteUnconfirmed = errors.New("Runtime replica write could not be confirmed")
 
 // ErrRuntimeScaleOutRejected prevents transport diagnostics from overriding a confirmed refusal.
 var ErrRuntimeScaleOutRejected = errors.New("automatic Runtime scale-out rejected")
@@ -49,7 +51,41 @@ func (s *runtimeDeploymentService) ScaleOut(ctx context.Context, namespace, name
 	if *d.Spec.Replicas >= minReplicas {
 		return nil
 	}
-	patch, err := json.Marshal([]map[string]any{{"op": "test", "path": "/metadata/uid", "value": string(d.UID)}, {"op": "test", "path": "/metadata/resourceVersion", "value": d.ResourceVersion}, {"op": "replace", "path": "/spec/replicas", "value": minReplicas}})
+	snapshot := &RuntimePodScaleSnapshot{Option: RuntimePodScaleOption{DeploymentUID: string(d.UID), Replicas: *d.Spec.Replicas}, ResourceVersion: d.ResourceVersion}
+	return s.writeRuntimeScaleOut(ctx, namespace, name, d, snapshot, minReplicas, 0)
+}
+
+func (s *runtimeDeploymentService) ScaleOutApproved(ctx context.Context, target RuntimePodScaleTarget, expected *RuntimePodScaleSnapshot, minReplicas int32, failures int) error {
+	if expected == nil || expected.ApprovalDigest == "" || minReplicas <= 0 {
+		return fmt.Errorf("verified expansion approval and positive replica floor required")
+	}
+	latest, err := s.InspectRuntimeScaleConfiguration(ctx, target)
+	if err != nil {
+		return err
+	}
+	if latest.ApprovalDigest != expected.ApprovalDigest || latest.ScaleInOperation != "" {
+		return fmt.Errorf("Runtime expansion configuration changed or scale-in is active")
+	}
+	if latest.Option.Replicas >= minReplicas {
+		return nil
+	}
+	if latest.ResourceVersion != expected.ResourceVersion {
+		return ErrRuntimeScaleOutPending
+	}
+	d, err := s.client.AppsV1().Deployments(target.Namespace).Get(ctx, target.DeploymentName, metav1.GetOptions{})
+	if err != nil {
+		return err
+	}
+	if string(d.UID) != latest.Option.DeploymentUID || d.ResourceVersion != latest.ResourceVersion {
+		return ErrRuntimeScaleOutPending
+	}
+	latest.ExpansionWriteID = expected.ExpansionWriteID
+	return s.writeRuntimeScaleOut(ctx, target.Namespace, target.DeploymentName, d, latest, minReplicas, failures)
+}
+
+func (s *runtimeDeploymentService) writeRuntimeScaleOut(ctx context.Context, namespace, name string, d *appsv1.Deployment, snapshot *RuntimePodScaleSnapshot, minReplicas int32, failures int) error {
+	deployments := s.client.AppsV1().Deployments(namespace)
+	patch, err := runtimeExpansionPatch(snapshot, minReplicas, failures)
 	if err != nil {
 		return err
 	}
@@ -77,10 +113,10 @@ func (s *runtimeDeploymentService) ScaleOut(ctx context.Context, namespace, name
 					return errors.Join(ErrRuntimeScaleOutRejected, diagnostic)
 				}
 				if uncertain || current.ResourceVersion != d.ResourceVersion {
-					return errors.Join(ErrRuntimeScaleOutPending, diagnostic)
+					return errors.Join(ErrRuntimeScaleOutPending, ErrRuntimeScaleWriteUnconfirmed, diagnostic)
 				}
 			} else if uncertain {
-				return errors.Join(ErrRuntimeScaleOutPending, diagnostic)
+				return errors.Join(ErrRuntimeScaleOutPending, ErrRuntimeScaleWriteUnconfirmed, diagnostic)
 			}
 		}
 		return errors.Join(ErrRuntimeScaleOutRejected, diagnostic)

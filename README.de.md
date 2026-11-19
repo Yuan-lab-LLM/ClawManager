@@ -167,7 +167,7 @@ OpenClaw-, Hermes-, OpenCode- oder DeepSeek-Harness-Workspaces in Lite oder Pro 
 
 Externe Systeme werden ueber ein separat bereitgestelltes Northbound Gateway angebunden. Einmalige JWE-Anmeldung, Scopes, Owner-Isolation, idempotente asynchrone Operationen, Rate Limits, Audit-Eintraege und mTLS zwischen Gateway und Core trennen die oeffentliche Integrationsgrenze von der Management-Konsole. Administratoren koennen ausserdem LDAP/LDAPS oder StartTLS konfigurieren, Verzeichnisbenutzer pruefen und importieren sowie Gruppen auf Plattformrollen abbilden.
 
-Die Northbound API verwaltet unterstuetzte OpenClaw-, Hermes-, OpenCode- und DeepSeek-Harness-Instanzen in Lite und Pro, einschliesslich Erstellung, Abfrage, Neustart, bestaetigtem Reset und passwortgeschuetzten Share Links. Siehe [Northbound API Guide](./docs/northbound-api-guide.md) und [Deployment Add-on](./deployments/k8s/northbound/README.md).
+Die Northbound API verwaltet unterstuetzte OpenClaw-, Hermes-, OpenCode- und DeepSeek-Harness-Instanzen in Lite und Pro, einschliesslich Erstellung, Abfrage, Neustart, bestaetigtem Reset und passwortgeschuetzten Share Links. Siehe [Northbound API Guide](./docs/northbound-api-guide.md) und [Deployment Add-on](./tools/k8s/northbound/README.md).
 
 <a id="ai-gateway"></a>
 ### AI Gateway
@@ -327,7 +327,7 @@ Technische Runtime- und Protokollreferenzen bleiben fuer Mitwirkende unter `docs
 - [Resource Management Guide](./docs/resource-management_de.md)
 - [Skill Hub Guide](./docs/skill-hub-guide_de.md)
 - [OpenCode Workspace Guide](./docs/opencode-lite-pro-agent-development_de.md)
-- [Northbound API Deployment Add-on](./deployments/k8s/northbound/README.md)
+- [Northbound API Deployment Add-on](./tools/k8s/northbound/README.md)
 - [Northbound API Guide (Chinesisch)](./docs/northbound-api-guide.md)
 - [Northbound API Upgrade Guide (Chinesisch)](./docs/northbound-upgrade-guide.md)
 - [Northbound OpenAPI 3.1 Specification](./docs/northbound-openapi.yaml)

@@ -1,0 +1,746 @@
+[
+  {
+    "antipattern": "cramped-padding",
+    "name": "Cramped padding",
+    "description": "Text is too close to the edge of its container. Two shapes: (1) an element with its own text where the space between the rendered text and the border box is too small for the font size, and (2) a wrapper whose children's text lands flush against a visible boundary (border, outline, or non-transparent background) with nothing to inset it. Add at least 8px (ideally 12–16px) of space inside bordered, outlined, or colored containers.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "/Users/mowen/code/src/github.com/iamlovingit/cm-github/ClawManager/docs/reports/2026-11-18-database-functional-test-report.html",
+    "line": 0,
+    "snippet": "<div> \"table-wrap\": children flush against border on all sides (no inset)"
+  },
+  {
+    "antipattern": "tiny-text",
+    "name": "Tiny body text",
+    "description": "Body text below 12px is hard to read, especially on high-DPI screens. Use at least 14px for body content, 16px is ideal.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "/Users/mowen/code/src/github.com/iamlovingit/cm-github/ClawManager/docs/reports/2026-11-18-database-functional-test-report.html",
+    "line": 0,
+    "snippet": "11px body text"
+  },
+  {
+    "antipattern": "tiny-text",
+    "name": "Tiny body text",
+    "description": "Body text below 12px is hard to read, especially on high-DPI screens. Use at least 14px for body content, 16px is ideal.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "/Users/mowen/code/src/github.com/iamlovingit/cm-github/ClawManager/docs/reports/2026-11-18-database-functional-test-report.html",
+    "line": 0,
+    "snippet": "11px body text"
+  },
+  {
+    "antipattern": "tiny-text",
+    "name": "Tiny body text",
+    "description": "Body text below 12px is hard to read, especially on high-DPI screens. Use at least 14px for body content, 16px is ideal.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "/Users/mowen/code/src/github.com/iamlovingit/cm-github/ClawManager/docs/reports/2026-11-18-database-functional-test-report.html",
+    "line": 0,
+    "snippet": "11px body text"
+  },
+  {
+    "antipattern": "tiny-text",
+    "name": "Tiny body text",
+    "description": "Body text below 12px is hard to read, especially on high-DPI screens. Use at least 14px for body content, 16px is ideal.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "/Users/mowen/code/src/github.com/iamlovingit/cm-github/ClawManager/docs/reports/2026-11-18-database-functional-test-report.html",
+    "line": 0,
+    "snippet": "11px body text"
+  },
+  {
+    "antipattern": "tiny-text",
+    "name": "Tiny body text",
+    "description": "Body text below 12px is hard to read, especially on high-DPI screens. Use at least 14px for body content, 16px is ideal.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "/Users/mowen/code/src/github.com/iamlovingit/cm-github/ClawManager/docs/reports/2026-11-18-database-functional-test-report.html",
+    "line": 0,
+    "snippet": "11px body text"
+  },
+  {
+    "antipattern": "tiny-text",
+    "name": "Tiny body text",
+    "description": "Body text below 12px is hard to read, especially on high-DPI screens. Use at least 14px for body content, 16px is ideal.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "/Users/mowen/code/src/github.com/iamlovingit/cm-github/ClawManager/docs/reports/2026-11-18-database-functional-test-report.html",
+    "line": 0,
+    "snippet": "11px body text"
+  },
+  {
+    "antipattern": "tiny-text",
+    "name": "Tiny body text",
+    "description": "Body text below 12px is hard to read, especially on high-DPI screens. Use at least 14px for body content, 16px is ideal.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "/Users/mowen/code/src/github.com/iamlovingit/cm-github/ClawManager/docs/reports/2026-11-18-database-functional-test-report.html",
+    "line": 0,
+    "snippet": "11px body text"
+  },
+  {
+    "antipattern": "tiny-text",
+    "name": "Tiny body text",
+    "description": "Body text below 12px is hard to read, especially on high-DPI screens. Use at least 14px for body content, 16px is ideal.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "/Users/mowen/code/src/github.com/iamlovingit/cm-github/ClawManager/docs/reports/2026-11-18-database-functional-test-report.html",
+    "line": 0,
+    "snippet": "11px body text"
+  },
+  {
+    "antipattern": "tiny-text",
+    "name": "Tiny body text",
+    "description": "Body text below 12px is hard to read, especially on high-DPI screens. Use at least 14px for body content, 16px is ideal.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "/Users/mowen/code/src/github.com/iamlovingit/cm-github/ClawManager/docs/reports/2026-11-18-database-functional-test-report.html",
+    "line": 0,
+    "snippet": "11px body text"
+  },
+  {
+    "antipattern": "tiny-text",
+    "name": "Tiny body text",
+    "description": "Body text below 12px is hard to read, especially on high-DPI screens. Use at least 14px for body content, 16px is ideal.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "/Users/mowen/code/src/github.com/iamlovingit/cm-github/ClawManager/docs/reports/2026-11-18-database-functional-test-report.html",
+    "line": 0,
+    "snippet": "11px body text"
+  },
+  {
+    "antipattern": "tiny-text",
+    "name": "Tiny body text",
+    "description": "Body text below 12px is hard to read, especially on high-DPI screens. Use at least 14px for body content, 16px is ideal.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "/Users/mowen/code/src/github.com/iamlovingit/cm-github/ClawManager/docs/reports/2026-11-18-database-functional-test-report.html",
+    "line": 0,
+    "snippet": "11px body text"
+  },
+  {
+    "antipattern": "tiny-text",
+    "name": "Tiny body text",
+    "description": "Body text below 12px is hard to read, especially on high-DPI screens. Use at least 14px for body content, 16px is ideal.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "/Users/mowen/code/src/github.com/iamlovingit/cm-github/ClawManager/docs/reports/2026-11-18-database-functional-test-report.html",
+    "line": 0,
+    "snippet": "11px body text"
+  },
+  {
+    "antipattern": "tiny-text",
+    "name": "Tiny body text",
+    "description": "Body text below 12px is hard to read, especially on high-DPI screens. Use at least 14px for body content, 16px is ideal.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "/Users/mowen/code/src/github.com/iamlovingit/cm-github/ClawManager/docs/reports/2026-11-18-database-functional-test-report.html",
+    "line": 0,
+    "snippet": "11px body text"
+  },
+  {
+    "antipattern": "tiny-text",
+    "name": "Tiny body text",
+    "description": "Body text below 12px is hard to read, especially on high-DPI screens. Use at least 14px for body content, 16px is ideal.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "/Users/mowen/code/src/github.com/iamlovingit/cm-github/ClawManager/docs/reports/2026-11-18-database-functional-test-report.html",
+    "line": 0,
+    "snippet": "11px body text"
+  },
+  {
+    "antipattern": "tiny-text",
+    "name": "Tiny body text",
+    "description": "Body text below 12px is hard to read, especially on high-DPI screens. Use at least 14px for body content, 16px is ideal.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "/Users/mowen/code/src/github.com/iamlovingit/cm-github/ClawManager/docs/reports/2026-11-18-database-functional-test-report.html",
+    "line": 0,
+    "snippet": "11px body text"
+  },
+  {
+    "antipattern": "cramped-padding",
+    "name": "Cramped padding",
+    "description": "Text is too close to the edge of its container. Two shapes: (1) an element with its own text where the space between the rendered text and the border box is too small for the font size, and (2) a wrapper whose children's text lands flush against a visible boundary (border, outline, or non-transparent background) with nothing to inset it. Add at least 8px (ideally 12–16px) of space inside bordered, outlined, or colored containers.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "/Users/mowen/code/src/github.com/iamlovingit/cm-github/ClawManager/docs/reports/2026-11-18-database-functional-test-report.html",
+    "line": 0,
+    "snippet": "<div> \"table-wrap\": children flush against border on all sides (no inset)"
+  },
+  {
+    "antipattern": "tiny-text",
+    "name": "Tiny body text",
+    "description": "Body text below 12px is hard to read, especially on high-DPI screens. Use at least 14px for body content, 16px is ideal.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "/Users/mowen/code/src/github.com/iamlovingit/cm-github/ClawManager/docs/reports/2026-11-18-database-functional-test-report.html",
+    "line": 0,
+    "snippet": "11px body text"
+  },
+  {
+    "antipattern": "tiny-text",
+    "name": "Tiny body text",
+    "description": "Body text below 12px is hard to read, especially on high-DPI screens. Use at least 14px for body content, 16px is ideal.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "/Users/mowen/code/src/github.com/iamlovingit/cm-github/ClawManager/docs/reports/2026-11-18-database-functional-test-report.html",
+    "line": 0,
+    "snippet": "11px body text"
+  },
+  {
+    "antipattern": "cramped-padding",
+    "name": "Cramped padding",
+    "description": "Text is too close to the edge of its container. Two shapes: (1) an element with its own text where the space between the rendered text and the border box is too small for the font size, and (2) a wrapper whose children's text lands flush against a visible boundary (border, outline, or non-transparent background) with nothing to inset it. Add at least 8px (ideally 12–16px) of space inside bordered, outlined, or colored containers.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "/Users/mowen/code/src/github.com/iamlovingit/cm-github/ClawManager/docs/reports/2026-11-18-database-functional-test-report.html",
+    "line": 0,
+    "snippet": "<div> \"table-wrap\": children flush against border on all sides (no inset)"
+  },
+  {
+    "antipattern": "tiny-text",
+    "name": "Tiny body text",
+    "description": "Body text below 12px is hard to read, especially on high-DPI screens. Use at least 14px for body content, 16px is ideal.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "/Users/mowen/code/src/github.com/iamlovingit/cm-github/ClawManager/docs/reports/2026-11-18-database-functional-test-report.html",
+    "line": 0,
+    "snippet": "11px body text"
+  },
+  {
+    "antipattern": "tiny-text",
+    "name": "Tiny body text",
+    "description": "Body text below 12px is hard to read, especially on high-DPI screens. Use at least 14px for body content, 16px is ideal.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "/Users/mowen/code/src/github.com/iamlovingit/cm-github/ClawManager/docs/reports/2026-11-18-database-functional-test-report.html",
+    "line": 0,
+    "snippet": "11px body text"
+  },
+  {
+    "antipattern": "tiny-text",
+    "name": "Tiny body text",
+    "description": "Body text below 12px is hard to read, especially on high-DPI screens. Use at least 14px for body content, 16px is ideal.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "/Users/mowen/code/src/github.com/iamlovingit/cm-github/ClawManager/docs/reports/2026-11-18-database-functional-test-report.html",
+    "line": 0,
+    "snippet": "11px body text"
+  },
+  {
+    "antipattern": "tiny-text",
+    "name": "Tiny body text",
+    "description": "Body text below 12px is hard to read, especially on high-DPI screens. Use at least 14px for body content, 16px is ideal.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "/Users/mowen/code/src/github.com/iamlovingit/cm-github/ClawManager/docs/reports/2026-11-18-database-functional-test-report.html",
+    "line": 0,
+    "snippet": "11px body text"
+  },
+  {
+    "antipattern": "tiny-text",
+    "name": "Tiny body text",
+    "description": "Body text below 12px is hard to read, especially on high-DPI screens. Use at least 14px for body content, 16px is ideal.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "/Users/mowen/code/src/github.com/iamlovingit/cm-github/ClawManager/docs/reports/2026-11-18-database-functional-test-report.html",
+    "line": 0,
+    "snippet": "11px body text"
+  },
+  {
+    "antipattern": "tiny-text",
+    "name": "Tiny body text",
+    "description": "Body text below 12px is hard to read, especially on high-DPI screens. Use at least 14px for body content, 16px is ideal.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "/Users/mowen/code/src/github.com/iamlovingit/cm-github/ClawManager/docs/reports/2026-11-18-database-functional-test-report.html",
+    "line": 0,
+    "snippet": "11px body text"
+  },
+  {
+    "antipattern": "tiny-text",
+    "name": "Tiny body text",
+    "description": "Body text below 12px is hard to read, especially on high-DPI screens. Use at least 14px for body content, 16px is ideal.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "/Users/mowen/code/src/github.com/iamlovingit/cm-github/ClawManager/docs/reports/2026-11-18-database-functional-test-report.html",
+    "line": 0,
+    "snippet": "11px body text"
+  },
+  {
+    "antipattern": "tiny-text",
+    "name": "Tiny body text",
+    "description": "Body text below 12px is hard to read, especially on high-DPI screens. Use at least 14px for body content, 16px is ideal.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "/Users/mowen/code/src/github.com/iamlovingit/cm-github/ClawManager/docs/reports/2026-11-18-database-functional-test-report.html",
+    "line": 0,
+    "snippet": "11px body text"
+  },
+  {
+    "antipattern": "tiny-text",
+    "name": "Tiny body text",
+    "description": "Body text below 12px is hard to read, especially on high-DPI screens. Use at least 14px for body content, 16px is ideal.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "/Users/mowen/code/src/github.com/iamlovingit/cm-github/ClawManager/docs/reports/2026-11-18-database-functional-test-report.html",
+    "line": 0,
+    "snippet": "11px body text"
+  },
+  {
+    "antipattern": "tiny-text",
+    "name": "Tiny body text",
+    "description": "Body text below 12px is hard to read, especially on high-DPI screens. Use at least 14px for body content, 16px is ideal.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "/Users/mowen/code/src/github.com/iamlovingit/cm-github/ClawManager/docs/reports/2026-11-18-database-functional-test-report.html",
+    "line": 0,
+    "snippet": "11px body text"
+  },
+  {
+    "antipattern": "tiny-text",
+    "name": "Tiny body text",
+    "description": "Body text below 12px is hard to read, especially on high-DPI screens. Use at least 14px for body content, 16px is ideal.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "/Users/mowen/code/src/github.com/iamlovingit/cm-github/ClawManager/docs/reports/2026-11-18-database-functional-test-report.html",
+    "line": 0,
+    "snippet": "11px body text"
+  },
+  {
+    "antipattern": "tiny-text",
+    "name": "Tiny body text",
+    "description": "Body text below 12px is hard to read, especially on high-DPI screens. Use at least 14px for body content, 16px is ideal.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "/Users/mowen/code/src/github.com/iamlovingit/cm-github/ClawManager/docs/reports/2026-11-18-database-functional-test-report.html",
+    "line": 0,
+    "snippet": "11px body text"
+  },
+  {
+    "antipattern": "tiny-text",
+    "name": "Tiny body text",
+    "description": "Body text below 12px is hard to read, especially on high-DPI screens. Use at least 14px for body content, 16px is ideal.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "/Users/mowen/code/src/github.com/iamlovingit/cm-github/ClawManager/docs/reports/2026-11-18-database-functional-test-report.html",
+    "line": 0,
+    "snippet": "11px body text"
+  },
+  {
+    "antipattern": "tiny-text",
+    "name": "Tiny body text",
+    "description": "Body text below 12px is hard to read, especially on high-DPI screens. Use at least 14px for body content, 16px is ideal.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "/Users/mowen/code/src/github.com/iamlovingit/cm-github/ClawManager/docs/reports/2026-11-18-database-functional-test-report.html",
+    "line": 0,
+    "snippet": "11px body text"
+  },
+  {
+    "antipattern": "tiny-text",
+    "name": "Tiny body text",
+    "description": "Body text below 12px is hard to read, especially on high-DPI screens. Use at least 14px for body content, 16px is ideal.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "/Users/mowen/code/src/github.com/iamlovingit/cm-github/ClawManager/docs/reports/2026-11-18-database-functional-test-report.html",
+    "line": 0,
+    "snippet": "11px body text"
+  },
+  {
+    "antipattern": "tiny-text",
+    "name": "Tiny body text",
+    "description": "Body text below 12px is hard to read, especially on high-DPI screens. Use at least 14px for body content, 16px is ideal.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "/Users/mowen/code/src/github.com/iamlovingit/cm-github/ClawManager/docs/reports/2026-11-18-database-functional-test-report.html",
+    "line": 0,
+    "snippet": "11px body text"
+  },
+  {
+    "antipattern": "tiny-text",
+    "name": "Tiny body text",
+    "description": "Body text below 12px is hard to read, especially on high-DPI screens. Use at least 14px for body content, 16px is ideal.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "/Users/mowen/code/src/github.com/iamlovingit/cm-github/ClawManager/docs/reports/2026-11-18-database-functional-test-report.html",
+    "line": 0,
+    "snippet": "11px body text"
+  },
+  {
+    "antipattern": "tiny-text",
+    "name": "Tiny body text",
+    "description": "Body text below 12px is hard to read, especially on high-DPI screens. Use at least 14px for body content, 16px is ideal.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "/Users/mowen/code/src/github.com/iamlovingit/cm-github/ClawManager/docs/reports/2026-11-18-database-functional-test-report.html",
+    "line": 0,
+    "snippet": "11px body text"
+  },
+  {
+    "antipattern": "tiny-text",
+    "name": "Tiny body text",
+    "description": "Body text below 12px is hard to read, especially on high-DPI screens. Use at least 14px for body content, 16px is ideal.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "/Users/mowen/code/src/github.com/iamlovingit/cm-github/ClawManager/docs/reports/2026-11-18-database-functional-test-report.html",
+    "line": 0,
+    "snippet": "11px body text"
+  },
+  {
+    "antipattern": "tiny-text",
+    "name": "Tiny body text",
+    "description": "Body text below 12px is hard to read, especially on high-DPI screens. Use at least 14px for body content, 16px is ideal.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "/Users/mowen/code/src/github.com/iamlovingit/cm-github/ClawManager/docs/reports/2026-11-18-database-functional-test-report.html",
+    "line": 0,
+    "snippet": "11px body text"
+  },
+  {
+    "antipattern": "tiny-text",
+    "name": "Tiny body text",
+    "description": "Body text below 12px is hard to read, especially on high-DPI screens. Use at least 14px for body content, 16px is ideal.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "/Users/mowen/code/src/github.com/iamlovingit/cm-github/ClawManager/docs/reports/2026-11-18-database-functional-test-report.html",
+    "line": 0,
+    "snippet": "11px body text"
+  },
+  {
+    "antipattern": "tiny-text",
+    "name": "Tiny body text",
+    "description": "Body text below 12px is hard to read, especially on high-DPI screens. Use at least 14px for body content, 16px is ideal.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "/Users/mowen/code/src/github.com/iamlovingit/cm-github/ClawManager/docs/reports/2026-11-18-database-functional-test-report.html",
+    "line": 0,
+    "snippet": "11px body text"
+  },
+  {
+    "antipattern": "tiny-text",
+    "name": "Tiny body text",
+    "description": "Body text below 12px is hard to read, especially on high-DPI screens. Use at least 14px for body content, 16px is ideal.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "/Users/mowen/code/src/github.com/iamlovingit/cm-github/ClawManager/docs/reports/2026-11-18-database-functional-test-report.html",
+    "line": 0,
+    "snippet": "11px body text"
+  },
+  {
+    "antipattern": "tiny-text",
+    "name": "Tiny body text",
+    "description": "Body text below 12px is hard to read, especially on high-DPI screens. Use at least 14px for body content, 16px is ideal.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "/Users/mowen/code/src/github.com/iamlovingit/cm-github/ClawManager/docs/reports/2026-11-18-database-functional-test-report.html",
+    "line": 0,
+    "snippet": "11px body text"
+  },
+  {
+    "antipattern": "tiny-text",
+    "name": "Tiny body text",
+    "description": "Body text below 12px is hard to read, especially on high-DPI screens. Use at least 14px for body content, 16px is ideal.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "/Users/mowen/code/src/github.com/iamlovingit/cm-github/ClawManager/docs/reports/2026-11-18-database-functional-test-report.html",
+    "line": 0,
+    "snippet": "11px body text"
+  },
+  {
+    "antipattern": "tiny-text",
+    "name": "Tiny body text",
+    "description": "Body text below 12px is hard to read, especially on high-DPI screens. Use at least 14px for body content, 16px is ideal.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "/Users/mowen/code/src/github.com/iamlovingit/cm-github/ClawManager/docs/reports/2026-11-18-database-functional-test-report.html",
+    "line": 0,
+    "snippet": "11px body text"
+  },
+  {
+    "antipattern": "tiny-text",
+    "name": "Tiny body text",
+    "description": "Body text below 12px is hard to read, especially on high-DPI screens. Use at least 14px for body content, 16px is ideal.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "/Users/mowen/code/src/github.com/iamlovingit/cm-github/ClawManager/docs/reports/2026-11-18-database-functional-test-report.html",
+    "line": 0,
+    "snippet": "11px body text"
+  },
+  {
+    "antipattern": "tiny-text",
+    "name": "Tiny body text",
+    "description": "Body text below 12px is hard to read, especially on high-DPI screens. Use at least 14px for body content, 16px is ideal.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "/Users/mowen/code/src/github.com/iamlovingit/cm-github/ClawManager/docs/reports/2026-11-18-database-functional-test-report.html",
+    "line": 0,
+    "snippet": "11px body text"
+  },
+  {
+    "antipattern": "tiny-text",
+    "name": "Tiny body text",
+    "description": "Body text below 12px is hard to read, especially on high-DPI screens. Use at least 14px for body content, 16px is ideal.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "/Users/mowen/code/src/github.com/iamlovingit/cm-github/ClawManager/docs/reports/2026-11-18-database-functional-test-report.html",
+    "line": 0,
+    "snippet": "11px body text"
+  },
+  {
+    "antipattern": "tiny-text",
+    "name": "Tiny body text",
+    "description": "Body text below 12px is hard to read, especially on high-DPI screens. Use at least 14px for body content, 16px is ideal.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "/Users/mowen/code/src/github.com/iamlovingit/cm-github/ClawManager/docs/reports/2026-11-18-database-functional-test-report.html",
+    "line": 0,
+    "snippet": "11px body text"
+  },
+  {
+    "antipattern": "tiny-text",
+    "name": "Tiny body text",
+    "description": "Body text below 12px is hard to read, especially on high-DPI screens. Use at least 14px for body content, 16px is ideal.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "/Users/mowen/code/src/github.com/iamlovingit/cm-github/ClawManager/docs/reports/2026-11-18-database-functional-test-report.html",
+    "line": 0,
+    "snippet": "11px body text"
+  },
+  {
+    "antipattern": "tiny-text",
+    "name": "Tiny body text",
+    "description": "Body text below 12px is hard to read, especially on high-DPI screens. Use at least 14px for body content, 16px is ideal.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "/Users/mowen/code/src/github.com/iamlovingit/cm-github/ClawManager/docs/reports/2026-11-18-database-functional-test-report.html",
+    "line": 0,
+    "snippet": "11px body text"
+  },
+  {
+    "antipattern": "tiny-text",
+    "name": "Tiny body text",
+    "description": "Body text below 12px is hard to read, especially on high-DPI screens. Use at least 14px for body content, 16px is ideal.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "/Users/mowen/code/src/github.com/iamlovingit/cm-github/ClawManager/docs/reports/2026-11-18-database-functional-test-report.html",
+    "line": 0,
+    "snippet": "11px body text"
+  },
+  {
+    "antipattern": "tiny-text",
+    "name": "Tiny body text",
+    "description": "Body text below 12px is hard to read, especially on high-DPI screens. Use at least 14px for body content, 16px is ideal.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "/Users/mowen/code/src/github.com/iamlovingit/cm-github/ClawManager/docs/reports/2026-11-18-database-functional-test-report.html",
+    "line": 0,
+    "snippet": "11px body text"
+  },
+  {
+    "antipattern": "tiny-text",
+    "name": "Tiny body text",
+    "description": "Body text below 12px is hard to read, especially on high-DPI screens. Use at least 14px for body content, 16px is ideal.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "/Users/mowen/code/src/github.com/iamlovingit/cm-github/ClawManager/docs/reports/2026-11-18-database-functional-test-report.html",
+    "line": 0,
+    "snippet": "11px body text"
+  },
+  {
+    "antipattern": "tiny-text",
+    "name": "Tiny body text",
+    "description": "Body text below 12px is hard to read, especially on high-DPI screens. Use at least 14px for body content, 16px is ideal.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "/Users/mowen/code/src/github.com/iamlovingit/cm-github/ClawManager/docs/reports/2026-11-18-database-functional-test-report.html",
+    "line": 0,
+    "snippet": "11px body text"
+  },
+  {
+    "antipattern": "tiny-text",
+    "name": "Tiny body text",
+    "description": "Body text below 12px is hard to read, especially on high-DPI screens. Use at least 14px for body content, 16px is ideal.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "/Users/mowen/code/src/github.com/iamlovingit/cm-github/ClawManager/docs/reports/2026-11-18-database-functional-test-report.html",
+    "line": 0,
+    "snippet": "11px body text"
+  },
+  {
+    "antipattern": "tiny-text",
+    "name": "Tiny body text",
+    "description": "Body text below 12px is hard to read, especially on high-DPI screens. Use at least 14px for body content, 16px is ideal.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "/Users/mowen/code/src/github.com/iamlovingit/cm-github/ClawManager/docs/reports/2026-11-18-database-functional-test-report.html",
+    "line": 0,
+    "snippet": "11px body text"
+  },
+  {
+    "antipattern": "tiny-text",
+    "name": "Tiny body text",
+    "description": "Body text below 12px is hard to read, especially on high-DPI screens. Use at least 14px for body content, 16px is ideal.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "/Users/mowen/code/src/github.com/iamlovingit/cm-github/ClawManager/docs/reports/2026-11-18-database-functional-test-report.html",
+    "line": 0,
+    "snippet": "11px body text"
+  },
+  {
+    "antipattern": "tiny-text",
+    "name": "Tiny body text",
+    "description": "Body text below 12px is hard to read, especially on high-DPI screens. Use at least 14px for body content, 16px is ideal.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "/Users/mowen/code/src/github.com/iamlovingit/cm-github/ClawManager/docs/reports/2026-11-18-database-functional-test-report.html",
+    "line": 0,
+    "snippet": "11px body text"
+  },
+  {
+    "antipattern": "tiny-text",
+    "name": "Tiny body text",
+    "description": "Body text below 12px is hard to read, especially on high-DPI screens. Use at least 14px for body content, 16px is ideal.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "/Users/mowen/code/src/github.com/iamlovingit/cm-github/ClawManager/docs/reports/2026-11-18-database-functional-test-report.html",
+    "line": 0,
+    "snippet": "11px body text"
+  },
+  {
+    "antipattern": "tiny-text",
+    "name": "Tiny body text",
+    "description": "Body text below 12px is hard to read, especially on high-DPI screens. Use at least 14px for body content, 16px is ideal.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "/Users/mowen/code/src/github.com/iamlovingit/cm-github/ClawManager/docs/reports/2026-11-18-database-functional-test-report.html",
+    "line": 0,
+    "snippet": "11px body text"
+  },
+  {
+    "antipattern": "tiny-text",
+    "name": "Tiny body text",
+    "description": "Body text below 12px is hard to read, especially on high-DPI screens. Use at least 14px for body content, 16px is ideal.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "/Users/mowen/code/src/github.com/iamlovingit/cm-github/ClawManager/docs/reports/2026-11-18-database-functional-test-report.html",
+    "line": 0,
+    "snippet": "11px body text"
+  },
+  {
+    "antipattern": "tiny-text",
+    "name": "Tiny body text",
+    "description": "Body text below 12px is hard to read, especially on high-DPI screens. Use at least 14px for body content, 16px is ideal.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "/Users/mowen/code/src/github.com/iamlovingit/cm-github/ClawManager/docs/reports/2026-11-18-database-functional-test-report.html",
+    "line": 0,
+    "snippet": "11px body text"
+  },
+  {
+    "antipattern": "cramped-padding",
+    "name": "Cramped padding",
+    "description": "Text is too close to the edge of its container. Two shapes: (1) an element with its own text where the space between the rendered text and the border box is too small for the font size, and (2) a wrapper whose children's text lands flush against a visible boundary (border, outline, or non-transparent background) with nothing to inset it. Add at least 8px (ideally 12–16px) of space inside bordered, outlined, or colored containers.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "/Users/mowen/code/src/github.com/iamlovingit/cm-github/ClawManager/docs/reports/2026-11-18-database-functional-test-report.html",
+    "line": 0,
+    "snippet": "<div> \"table-wrap\": children flush against border on all sides (no inset)"
+  },
+  {
+    "antipattern": "design-system-font",
+    "name": "Font outside DESIGN.md",
+    "description": "A font is used that is not declared in DESIGN.md typography. Use the documented type system or update DESIGN.md if this is an intentional brand addition.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "/Users/mowen/code/src/github.com/iamlovingit/cm-github/ClawManager/docs/reports/2026-11-18-database-functional-test-report.html",
+    "line": 0,
+    "snippet": "h1 \"数据库与 Redis 整改完整功能测试报告\" uses ui\",-apple-system,\"pingfang sc\",\"microsoft yahei\",sans-serif; not declared in DESIGN.md typography",
+    "ignoreValue": "ui\",-apple-system,\"pingfang sc\",\"microsoft yahei\",sans-serif"
+  },
+  {
+    "antipattern": "design-system-font",
+    "name": "Font outside DESIGN.md",
+    "description": "A font is used that is not declared in DESIGN.md typography. Use the documented type system or update DESIGN.md if this is an intentional brand addition.",
+    "severity": "warning",
+    "category": "quality",
+    "file": "/Users/mowen/code/src/github.com/iamlovingit/cm-github/ClawManager/docs/reports/2026-11-18-database-functional-test-report.html",
+    "line": 0,
+    "snippet": "pre \"{ \"host\": \"10.130.81.54\", \"namespace\": \"\" uses sfmono-regular; not declared in DESIGN.md typography",
+    "ignoreValue": "sfmono-regular"
+  },
+  {
+    "antipattern": "design-system-color",
+    "name": "Color outside DESIGN.md",
+    "description": "A literal color is outside the DESIGN.md palette and sidecar tonal ramps. This may be legitimate, but it should be an intentional design-system addition rather than drift.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "/Users/mowen/code/src/github.com/iamlovingit/cm-github/ClawManager/docs/reports/2026-11-18-database-functional-test-report.html",
+    "line": 2,
+    "snippet": "Undocumented color #835b00 is outside DESIGN.md colors",
+    "advisory": true,
+    "ignoreValue": "#835b00"
+  },
+  {
+    "antipattern": "design-system-font-size",
+    "name": "Font size outside DESIGN.md",
+    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "/Users/mowen/code/src/github.com/iamlovingit/cm-github/ClawManager/docs/reports/2026-11-18-database-functional-test-report.html",
+    "line": 2,
+    "snippet": "font-size: 28px is off the DESIGN.md type ramp",
+    "advisory": true,
+    "ignoreValue": "28px"
+  },
+  {
+    "antipattern": "design-system-font-size",
+    "name": "Font size outside DESIGN.md",
+    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "/Users/mowen/code/src/github.com/iamlovingit/cm-github/ClawManager/docs/reports/2026-11-18-database-functional-test-report.html",
+    "line": 2,
+    "snippet": "font-size: 21px is off the DESIGN.md type ramp",
+    "advisory": true,
+    "ignoreValue": "21px"
+  },
+  {
+    "antipattern": "design-system-font-size",
+    "name": "Font size outside DESIGN.md",
+    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "/Users/mowen/code/src/github.com/iamlovingit/cm-github/ClawManager/docs/reports/2026-11-18-database-functional-test-report.html",
+    "line": 2,
+    "snippet": "font-size: 18px is off the DESIGN.md type ramp",
+    "advisory": true,
+    "ignoreValue": "18px"
+  },
+  {
+    "antipattern": "design-system-font-size",
+    "name": "Font size outside DESIGN.md",
+    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "/Users/mowen/code/src/github.com/iamlovingit/cm-github/ClawManager/docs/reports/2026-11-18-database-functional-test-report.html",
+    "line": 2,
+    "snippet": "font-size: 30px is off the DESIGN.md type ramp",
+    "advisory": true,
+    "ignoreValue": "30px"
+  },
+  {
+    "antipattern": "design-system-font-size",
+    "name": "Font size outside DESIGN.md",
+    "description": "A literal font-size is off the type ramp documented in DESIGN.md typography. Use a documented size step or update the design system if the new step is intentional.",
+    "severity": "advisory",
+    "category": "quality",
+    "file": "/Users/mowen/code/src/github.com/iamlovingit/cm-github/ClawManager/docs/reports/2026-11-18-database-functional-test-report.html",
+    "line": 2,
+    "snippet": "font-size: 11px is off the DESIGN.md type ramp",
+    "advisory": true,
+    "ignoreValue": "11px"
+  }
+]

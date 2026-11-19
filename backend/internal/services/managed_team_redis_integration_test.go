@@ -233,6 +233,56 @@ func TestManagedRedisReal7(t *testing.T) {
 			t.Fatal("same-Team connection failed", v, e)
 		}
 	})
+	t.Run("policy errors keep ordered pipeline", func(t *testing.T) {
+		_, c, r, _ := open(t)
+		type request struct {
+			args   []string
+			want   string
+			denied bool
+		}
+		key := prefix + "ordered-policy"
+		other := "claw:team:other:secret"
+		meta := teamCapacityPrefix(teamID) + "usage"
+		var commands []request
+		for i := 0; i < 8; i++ {
+			value := fmt.Sprintf("value-%d", i)
+			commands = append(commands,
+				request{[]string{"SET", key, value}, "OK", false},
+				request{[]string{"HGET", meta, "ready"}, "", true},
+				request{[]string{"GET", key}, value, false},
+				request{[]string{"GET", other}, "", true},
+				request{[]string{"DEL", key, other}, "", true},
+				request{[]string{"GET", key}, value, false},
+				request{[]string{"HGETALL", meta}, "", true},
+				request{[]string{"PING"}, "PONG", false})
+		}
+		sent := make(chan error, 1)
+		go func() {
+			for _, command := range commands {
+				if err := writeRedisCommand(c, command.args...); err != nil {
+					sent <- err
+					return
+				}
+			}
+			sent <- nil
+		}()
+		for i, command := range commands {
+			value, err := readRedisReply(r)
+			if command.denied {
+				if err == nil || err.Error() != errRedisServerReply.Error()+": NOPERM managed Team key access denied" {
+					t.Fatalf("reply%d %s must deny without exposing metadata or partially deleting: %v %v", i, command.args[0], value, err)
+				}
+			} else if err != nil || value != command.want {
+				t.Fatalf("reply%d %s lost/reordered: got=%v err=%v want=%s", i, command.args[0], value, err, command.want)
+			}
+		}
+		if err := <-sent; err != nil {
+			t.Fatal(err)
+		}
+		if value := do(admin, "HGET", meta, "ready"); value != "1" {
+			t.Fatal("actual capacity metadata missing or changed", value)
+		}
+	})
 	t.Run("known Lua atomicity", func(t *testing.T) {
 		_, c, r, _ := open(t)
 		args := []string{"EVAL", managedCompletionScript, "2", prefix + "completion", prefix + "events", "payload", "{}"}
@@ -278,21 +328,21 @@ func TestManagedRedisReal7(t *testing.T) {
 	})
 	t.Run("BLOCK and wakeup", func(t *testing.T) {
 		_, c, r, _ := open(t)
-		if _, e := command(t, c, r, "XGROUP", "CREATE", prefix+"blocking", "g", "0", "MKSTREAM"); e != nil {
+		if _, e := command(t, c, r, "XGROUP", "CREATE", prefix+"inbox:blocking", "g", "0", "MKSTREAM"); e != nil {
 			t.Fatal(e)
 		}
-		if e := writeRedisCommand(c, "XREADGROUP", "GROUP", "g", "c", "BLOCK", "0", "STREAMS", prefix+"blocking", ">"); e != nil {
+		if e := writeRedisCommand(c, "XREADGROUP", "GROUP", "g", "c", "BLOCK", "0", "STREAMS", prefix+"inbox:blocking", ">"); e != nil {
 			t.Fatal(e)
 		}
 		_, producer, pr, _ := open(t)
-		if _, e := command(t, producer, pr, "XADD", prefix+"blocking", "*", "payload", "wake"); e != nil {
+		if _, e := command(t, producer, pr, "XADD", prefix+"inbox:blocking", "*", "payload", "wake"); e != nil {
 			t.Fatal(e)
 		}
 		if v, e := readRedisReply(r); e != nil || v == nil {
 			t.Fatal("blocked read not woken", v, e)
 		}
 	})
-	for _, args := range [][]string{{"AUTH", "default", ""}, {"RESET"}, {"HELLO", "2", "AUTH", "default", ""}, {"SELECT", "0"}, {"CLIENT", "REPLY", "OFF"}, {"EVAL", "return 1", "0"}, {"SCRIPT", "LOAD", "return 1"}, {"MULTI"}, {"SUBSCRIBE", "x"}} {
+	for _, args := range [][]string{{"AUTH", "default", ""}, {"RESET"}, {"HELLO", "2", "AUTH", "default", ""}, {"SELECT", "0"}, {"CLIENT", "REPLY", "OFF"}, {"EVAL", "return 1", "0"}, {"EVAL", "return redis.error_reply('NOPERM managed Team key access denied')", "0"}, {"SCRIPT", "LOAD", "return 1"}, {"MULTI"}, {"SUBSCRIBE", "x"}} {
 		t.Run("guard "+args[0], func(t *testing.T) {
 			_, c, r, _ := open(t)
 			if e := writeRedisCommand(c, args...); e != nil {
@@ -323,6 +373,30 @@ func TestManagedRedisReal7(t *testing.T) {
 			t.Fatal("active older generation killed", v, e)
 		}
 		active.conn.Close()
+		// Closing a loopback port-forward returns before Redis necessarily sees
+		// the FIN. The reaper must retain users that still have a server-side
+		// connection, so observe disconnection before asserting orphan cleanup.
+		disconnectedBy := time.Now().Add(2 * time.Second)
+		for {
+			clients, ok := do(admin, "CLIENT", "LIST").(string)
+			if !ok {
+				t.Fatal("unexpected CLIENT LIST response")
+			}
+			connected := false
+			for _, field := range strings.Fields(clients) {
+				if field == "user="+old {
+					connected = true
+					break
+				}
+			}
+			if !connected {
+				break
+			}
+			if time.Now().After(disconnectedBy) {
+				t.Fatal("closed fixture connection is still visible to Redis")
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
 		if e = reapManagedRedisUsers(ctx, admin); e != nil {
 			t.Fatal(e)
 		}

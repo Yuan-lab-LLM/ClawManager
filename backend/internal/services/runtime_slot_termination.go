@@ -30,7 +30,8 @@ var errContainerTerminationPending = errors.New("matching old slot container ter
 
 type runtimeSlotTerminationMessage struct {
 	runtimeSlotStopIntent
-	CleanupConfirmed bool `json:"cleanup_confirmed"`
+	CleanupConfirmed     bool `json:"cleanup_confirmed"`
+	AuxiliaryExitPending bool `json:"auxiliary_exit_pending,omitempty"`
 }
 
 type runtimeSlotContainerProof struct {
@@ -71,10 +72,9 @@ func runtimeSlotTerminationProof(pod *corev1.Pod, intent runtimeSlotStopIntent) 
 		return nil, fmt.Errorf("container stop Pod or execution identity changed")
 	}
 	var found *runtimeSlotContainerProof
-	message := runtimeSlotTerminationMessage{runtimeSlotStopIntent: intent, CleanupConfirmed: true}
-	commitment, err := containerTerminationCommitment(message)
-	if err != nil {
-		return nil, err
+	messages := []runtimeSlotTerminationMessage{{runtimeSlotStopIntent: intent, CleanupConfirmed: true}}
+	if intent.Kind == "" || intent.Kind == "force-delete" {
+		messages = append(messages, runtimeSlotTerminationMessage{runtimeSlotStopIntent: intent, AuxiliaryExitPending: true})
 	}
 	for _, status := range pod.Status.ContainerStatuses {
 		if status.Name != intent.Slot {
@@ -84,14 +84,20 @@ func runtimeSlotTerminationProof(pod *corev1.Pod, intent runtimeSlotStopIntent) 
 			if terminated == nil || terminated.ContainerID == "" || terminated.FinishedAt.IsZero() {
 				continue
 			}
-			if terminated.Message != commitment {
-				continue
+			for _, message := range messages {
+				commitment, err := containerTerminationCommitment(message)
+				if err != nil {
+					return nil, err
+				}
+				if terminated.Message != commitment {
+					continue
+				}
+				proof := &runtimeSlotContainerProof{runtimeSlotTerminationMessage: message, ContainerID: terminated.ContainerID, FinishedAt: terminated.FinishedAt.Time}
+				if found != nil && *found != *proof {
+					return nil, fmt.Errorf("ambiguous slot termination proof")
+				}
+				found = proof
 			}
-			proof := &runtimeSlotContainerProof{runtimeSlotTerminationMessage: message, ContainerID: terminated.ContainerID, FinishedAt: terminated.FinishedAt.Time}
-			if found != nil && *found != *proof {
-				return nil, fmt.Errorf("ambiguous slot termination proof")
-			}
-			found = proof
 		}
 	}
 	if found == nil {
@@ -101,12 +107,26 @@ func runtimeSlotTerminationProof(pod *corev1.Pod, intent runtimeSlotStopIntent) 
 }
 
 func containerTerminationCommitment(message runtimeSlotTerminationMessage) (string, error) {
+	if !validContainerCleanup(message) {
+		return "", fmt.Errorf("invalid container cleanup continuation")
+	}
 	data, err := json.Marshal(message)
 	if err != nil {
 		return "", err
 	}
 	digest := sha256.Sum256(data)
-	return "C1:" + base64.RawURLEncoding.EncodeToString(digest[:]), nil
+	prefix := "C1:"
+	if message.AuxiliaryExitPending {
+		prefix = "C2:"
+	}
+	return prefix + base64.RawURLEncoding.EncodeToString(digest[:]), nil
+}
+
+func validContainerCleanup(m runtimeSlotTerminationMessage) bool {
+	if m.CleanupConfirmed {
+		return !m.AuxiliaryExitPending
+	}
+	return m.AuxiliaryExitPending && (m.Kind == "" || m.Kind == "force-delete" && !m.Graceful)
 }
 
 // Lookup for stop/recovery deliberately does not require PodReady: a single slot
@@ -266,7 +286,7 @@ func (c *slotRuntimeAgentClient) stopContainerGatewayPolicy(ctx context.Context,
 	}
 	var proof runtimeSlotContainerProof
 	if len(saved) != 0 {
-		if decodeContainerProof(saved, &proof) != nil || proof.runtimeSlotStopIntent != *intent || !validSlotProofSource(proof) || !proof.CleanupConfirmed || proof.ContainerID == "" || proof.FinishedAt.IsZero() {
+		if decodeContainerProof(saved, &proof) != nil || proof.runtimeSlotStopIntent != *intent || !validSlotProofSource(proof) || !validContainerCleanup(proof.runtimeSlotTerminationMessage) || proof.ContainerID == "" || proof.FinishedAt.IsZero() {
 			return fmt.Errorf("stored container termination proof is invalid")
 		}
 	} else {

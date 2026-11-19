@@ -92,11 +92,11 @@ func (s *RuntimeUpgradeService) coldDefaultSource(ctx context.Context) (*models.
 		}
 		ns = parts[0]
 	}
-	var finished []models.RuntimeRollout
-	if err = s.sess.Collection("runtime_rollouts").Find(db.Cond{"runtime_type": "openclaw", "status": "finished"}).OrderBy("id").All(&finished); err != nil {
+	finished, checkpoints, err := runtimeScaleDefaultRollouts(ctx, s.sess, RuntimeTypeOpenClaw)
+	if err != nil {
 		return nil, k8s.RuntimePodScaleTarget{}, err
 	}
-	targets, err := runtimeDefaultScaleTargets(ns, RuntimeTypeOpenClaw, finished)
+	targets, err := runtimeDefaultScaleTargets(ns, RuntimeTypeOpenClaw, finished, checkpoints)
 	if err != nil {
 		return nil, k8s.RuntimePodScaleTarget{}, err
 	}

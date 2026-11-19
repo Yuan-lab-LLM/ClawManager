@@ -142,7 +142,7 @@ func TestRuntimeRecoveryMySQLDesiredStopAfterAdvanceBlocksPublication(t *testing
 		`CREATE TABLE instance_desired_state (id INT AUTO_INCREMENT PRIMARY KEY,instance_id INT UNIQUE,desired_power_state VARCHAR(32),desired_config_revision_id INT NULL,desired_runtime_action VARCHAR(50) NULL,updated_by INT NULL,created_at DATETIME(6),updated_at DATETIME(6))`,
 		`CREATE TABLE runtime_pods (id BIGINT PRIMARY KEY,pod_uid VARCHAR(64),namespace VARCHAR(64),pod_name VARCHAR(64),deployment_name VARCHAR(64),runtime_type VARCHAR(32))`,
 		`INSERT INTO runtime_pods VALUES (9,'pod-uid','runtime','runtime-pod','pool','openclaw')`,
-		`CREATE TABLE instance_runtime_bindings (instance_id INT PRIMARY KEY,runtime_pod_id BIGINT,generation INT)`,
+		`CREATE TABLE instance_runtime_bindings (instance_id INT PRIMARY KEY,runtime_pod_id BIGINT,generation INT,gateway_port INT)`,
 		`CREATE TABLE runtime_management_admission_lock (id INT PRIMARY KEY,revision INT)`,
 		`INSERT INTO runtime_management_admission_lock VALUES (1,0)`,
 		`CREATE TABLE runtime_management_operations (kind VARCHAR(32),status VARCHAR(32),request_json JSON)`,
@@ -166,7 +166,7 @@ func TestRuntimeRecoveryMySQLDesiredStopAfterAdvanceBlocksPublication(t *testing
 	if err != nil || !advanced {
 		t.Fatalf("advance: %v %v", advanced, err)
 	}
-	if _, err := r.sess.SQL().Exec(`INSERT INTO instance_runtime_bindings VALUES (7,9,3)`); err != nil {
+	if _, err := r.sess.SQL().Exec(`INSERT INTO instance_runtime_bindings VALUES (7,9,3,20000)`); err != nil {
 		t.Fatal(err)
 	}
 	// The command path can commit desired stop without changing instances.status
@@ -186,7 +186,7 @@ func TestRuntimeRecoveryMySQLDesiredStopAfterAdvanceBlocksPublication(t *testing
 	}
 	uid := "pod-uid"
 	published := false
-	err = WithRuntimePodAssignmentAdmission(ctx, r.sess, models.RuntimePod{PodUID: &uid, Namespace: "runtime", PodName: "runtime-pod", DeploymentName: "pool", RuntimeType: "openclaw"}, 7, 3, func() error { published = true; return nil })
+	err = WithRuntimePodAssignmentAdmission(ctx, r.sess, models.RuntimePod{PodUID: &uid, Namespace: "runtime", PodName: "runtime-pod", DeploymentName: "pool", RuntimeType: "openclaw"}, 7, 3, 20000, func() error { published = true; return nil })
 	if published || !errors.Is(err, models.ErrInstanceStopping) {
 		t.Fatalf("committed desired stop admitted replacement: published=%v err=%v", published, err)
 	}

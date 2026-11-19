@@ -62,7 +62,11 @@ func (r *instanceRuntimeBindingRepository) ReserveUpgradeGateway(ctx context.Con
 		if err := tx.Collection("runtime_rollouts").Find("id", req.RolloutID).One(&rollout); err != nil {
 			return err
 		}
-		if rollout.RuntimeType != "openclaw" || rollout.Status != "running" || rollout.Phase != "gateway_restart" || rollout.PreflightID == nil || rollout.TargetImageDigest == nil {
+		var nativePlan struct {
+			Strategy string `json:"strategy"`
+		}
+		nativeOpenCode := rollout.RuntimeType == "opencode" && rollout.PreflightJSON != nil && json.Unmarshal([]byte(*rollout.PreflightJSON), &nativePlan) == nil && nativePlan.Strategy == "opencode_native_preserve_v1"
+		if (rollout.RuntimeType != "openclaw" && !nativeOpenCode) || rollout.Status != "running" || (rollout.Phase != "gateway_restart" && !(nativeOpenCode && rollout.Phase == "opencode_rollback_restart")) || rollout.PreflightID == nil || rollout.TargetImageDigest == nil {
 			return ErrUpgradeReservationDenied
 		}
 		var item models.RuntimeUpgradeItem
@@ -72,7 +76,26 @@ func (r *instanceRuntimeBindingRepository) ReserveUpgradeGateway(ctx context.Con
 		if err := tx.Collection("runtime_upgrade_items").Find(db.Cond{"rollout_id": req.RolloutID, "instance_id": req.InstanceID}).One(&item); err != nil {
 			return err
 		}
-		if item.State != "restart_ready" || item.SourceGeneration == nil || req.Generation != *item.SourceGeneration+1 || item.PostflightJSON == nil || item.SnapshotRef == nil {
+		rollbackOpenCode := nativeOpenCode && rollout.Phase == "opencode_rollback_restart"
+		expectedState := "restart_ready"
+		expectedGeneration := 0
+		expectedDigest := *rollout.TargetImageDigest
+		if item.SourceGeneration != nil {
+			expectedGeneration = *item.SourceGeneration + 1
+		}
+		if rollbackOpenCode {
+			scope, e := loadOpenCodeRollbackReservation(ctx, tx, rollout, req.InstanceID)
+			if e != nil {
+				return e
+			}
+			if scope.SourcePod.ID != req.Pod.ID || stringValueOC(scope.SourcePod.PodUID) != *identity || scope.SourcePod.DeploymentName != req.Pod.DeploymentName || scope.SourcePod.Namespace != req.Pod.Namespace {
+				return ErrUpgradeReservationDenied
+			}
+			expectedState = "rollback_ready"
+			expectedGeneration = scope.RollbackGeneration
+			expectedDigest = stringValueOC(scope.SourcePod.ImageDigest)
+		}
+		if item.State != expectedState || item.SourceGeneration == nil || req.Generation != expectedGeneration || item.PostflightJSON == nil || item.SnapshotRef == nil {
 			return ErrUpgradeReservationDenied
 		}
 		if item.IsolatedAt != nil || (item.RecoveryStatus != nil && *item.RecoveryStatus == "needs_attention") {
@@ -95,7 +118,7 @@ func (r *instanceRuntimeBindingRepository) ReserveUpgradeGateway(ctx context.Con
 		if err := tx.SQL().Select("status", "runtime_generation", "type", "instance_mode").From("instances").Where("id", req.InstanceID).One(&instance); err != nil {
 			return err
 		}
-		if instance.Generation != req.Generation || instance.Type != "openclaw" || instance.Mode != "lite" || (instance.Status != "creating" && instance.Status != "running") {
+		if instance.Generation != req.Generation || instance.Type != rollout.RuntimeType || instance.Mode != "lite" || (instance.Status != "creating" && instance.Status != "running") {
 			return ErrUpgradeReservationDenied
 		}
 		var pod models.RuntimePod
@@ -105,7 +128,7 @@ func (r *instanceRuntimeBindingRepository) ReserveUpgradeGateway(ctx context.Con
 		if err := tx.Collection("runtime_pods").Find("id", req.Pod.ID).One(&pod); err != nil {
 			return err
 		}
-		if (pod.PodUID != nil && *pod.PodUID != *identity) || (pod.PodUID == nil && req.Pod.KubernetesPodUID == nil) || pod.PodName != req.Pod.PodName || pod.Namespace != req.Pod.Namespace || pod.DeploymentName != req.Pod.DeploymentName || pod.RuntimeType != "openclaw" || pod.State != "ready" || pod.Draining || pod.ImageDigest == nil || *pod.ImageDigest != *rollout.TargetImageDigest || pod.AgentEndpoint == nil || req.Pod.AgentEndpoint == nil || *pod.AgentEndpoint != *req.Pod.AgentEndpoint {
+		if (pod.PodUID != nil && *pod.PodUID != *identity) || (pod.PodUID == nil && req.Pod.KubernetesPodUID == nil) || pod.PodName != req.Pod.PodName || pod.Namespace != req.Pod.Namespace || pod.DeploymentName != req.Pod.DeploymentName || pod.RuntimeType != rollout.RuntimeType || pod.State != "ready" || pod.Draining || pod.ImageDigest == nil || *pod.ImageDigest != expectedDigest || pod.AgentEndpoint == nil || req.Pod.AgentEndpoint == nil || *pod.AgentEndpoint != *req.Pod.AgentEndpoint {
 			return ErrUpgradeReservationDenied
 		}
 		var sources map[string]string
@@ -115,7 +138,7 @@ func (r *instanceRuntimeBindingRepository) ReserveUpgradeGateway(ctx context.Con
 		owned := false
 		for source := range sources {
 			parts := strings.SplitN(source, "/", 2)
-			if len(parts) == 2 && parts[0] == pod.Namespace && upgradeTargetDeploymentName(parts[1], rollout.ID) == pod.DeploymentName {
+			if len(parts) == 2 && parts[0] == pod.Namespace && ((!rollbackOpenCode && upgradeTargetDeploymentName(parts[1], rollout.ID) == pod.DeploymentName) || (rollbackOpenCode && parts[1] == pod.DeploymentName)) {
 				owned = true
 			}
 		}
@@ -125,7 +148,7 @@ func (r *instanceRuntimeBindingRepository) ReserveUpgradeGateway(ctx context.Con
 		// Only the oldest admitted OpenClaw operation may start a writer. Later
 		// queued/recovery records must not deadlock it; waiting is retryable.
 		var other int
-		row, err := tx.SQL().QueryRowContext(ctx, "SELECT COUNT(*) FROM runtime_rollouts WHERE runtime_type = 'openclaw' AND status IN ('pending','running') AND id < ?", rollout.ID)
+		row, err := tx.SQL().QueryRowContext(ctx, "SELECT COUNT(*) FROM runtime_rollouts WHERE runtime_type = ? AND status IN ('pending','running') AND id < ?", rollout.RuntimeType, rollout.ID)
 		if err != nil {
 			return err
 		}
@@ -141,13 +164,18 @@ func (r *instanceRuntimeBindingRepository) ReserveUpgradeGateway(ctx context.Con
 			if existing.RuntimePodID != pod.ID || existing.Generation != req.Generation || existing.WorkspacePath != req.WorkspacePath {
 				return ErrUpgradeReservationDenied
 			}
+			if blocked, err := slotResetBlocksBinding(ctx, tx, &existing, false); err != nil {
+				return err
+			} else if blocked {
+				return ErrUpgradeCapacityPending
+			}
 			binding = &existing // no second capacity claim or attempt
 			return nil
 		}
 		if err != db.ErrNoMoreRows {
 			return err
 		}
-		if item.RestartAttempts >= UpgradeRestartMaxAttempts {
+		if item.RestartAttempts >= UpgradeRestartMaxAttempts && !rollbackOpenCode || rollbackOpenCode && item.RestartAttempts >= 2*UpgradeRestartMaxAttempts {
 			return ErrUpgradeRecoveryHeld
 		}
 		if item.RestartNextRetryAt != nil && time.Now().UTC().Before(*item.RestartNextRetryAt) {
@@ -167,6 +195,7 @@ func (r *instanceRuntimeBindingRepository) ReserveUpgradeGateway(ctx context.Con
 		if used >= pod.Capacity {
 			return ErrUpgradeCapacityPending
 		}
+		candidate := models.InstanceRuntimeBinding{InstanceID: req.InstanceID, RuntimePodID: pod.ID, Generation: req.Generation, GatewayID: fmt.Sprintf("pending-%d-%d", req.InstanceID, req.Generation)}
 		port := 0
 		for p := req.PortStart; p+req.PortBlockSize-1 <= req.PortEnd; p += req.PortBlockSize {
 			free := true
@@ -177,6 +206,12 @@ func (r *instanceRuntimeBindingRepository) ReserveUpgradeGateway(ctx context.Con
 				}
 			}
 			if free {
+				candidate.GatewayPort = p
+				if blocked, err := slotResetBlocksBinding(ctx, tx, &candidate, false); err != nil {
+					return err
+				} else if blocked {
+					continue
+				}
 				port = p
 				break
 			}
@@ -185,7 +220,7 @@ func (r *instanceRuntimeBindingRepository) ReserveUpgradeGateway(ctx context.Con
 			return ErrUpgradeCapacityPending
 		}
 		now := time.Now().UTC()
-		binding = &models.InstanceRuntimeBinding{InstanceID: req.InstanceID, RuntimePodID: pod.ID, RuntimeType: "openclaw", GatewayID: fmt.Sprintf("pending-%d-%d", req.InstanceID, req.Generation), GatewayPort: port, WorkspacePath: req.WorkspacePath, State: "creating", Generation: req.Generation, CreatedAt: now, UpdatedAt: now}
+		binding = &models.InstanceRuntimeBinding{InstanceID: req.InstanceID, RuntimePodID: pod.ID, RuntimeType: rollout.RuntimeType, GatewayID: fmt.Sprintf("pending-%d-%d", req.InstanceID, req.Generation), GatewayPort: port, WorkspacePath: req.WorkspacePath, State: "creating", Generation: req.Generation, CreatedAt: now, UpdatedAt: now}
 		if _, err := tx.Collection("instance_runtime_bindings").Insert(binding); err != nil {
 			return err
 		}

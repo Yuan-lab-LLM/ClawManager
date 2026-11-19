@@ -1,10 +1,16 @@
 package repository
 
 import (
+	"context"
+	"errors"
 	"fmt"
+	"os"
+	"sort"
 	"time"
 
+	"clawreef/internal/backupgate"
 	"clawreef/internal/models"
+	"clawreef/internal/observability"
 
 	"github.com/upper/db/v4"
 )
@@ -29,18 +35,85 @@ func (r *chatMessageRepository) Create(message *models.ChatMessageRecord) error 
 	if message.CreatedAt.IsZero() {
 		message.CreatedAt = time.Now()
 	}
-	res, err := r.sess.Collection("chat_messages").Insert(message)
-	if err != nil {
-		return fmt.Errorf("failed to create chat message: %w", err)
+	if handled, err := persistObservation(context.Background(), r.sess, "chat_messages", message); handled {
+		return err
 	}
-	message.ID = int(res.ID().(int64))
+	return r.sess.Tx(func(tx db.Session) error {
+		res, err := tx.Collection("chat_messages").Insert(message)
+		if err != nil {
+			return fmt.Errorf("failed to create chat message: %w", err)
+		}
+		message.ID = int(res.ID().(int64))
+		return maintainObservationSummary(context.Background(), tx, "chat_messages", message)
+	})
+}
+
+// CreateBatch persists one request's transcript before projecting its messages.
+func (r *chatMessageRepository) CreateBatch(messages []*models.ChatMessageRecord) error {
+	runtime := installedObservability.Load()
+	if runtime != nil && len(messages) > 1 {
+		handled, err := r.persistBatch(runtime, messages)
+		if handled {
+			return err
+		}
+	}
+	for _, message := range messages {
+		if err := r.Create(message); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
-func (r *chatMessageRepository) ListByTraceID(traceID string) ([]models.ChatMessageRecord, error) {
-	var items []models.ChatMessageRecord
-	if err := r.sess.Collection("chat_messages").Find(db.Cond{"trace_id": traceID}).OrderBy("sequence_no", "id").All(&items); err != nil {
-		return nil, fmt.Errorf("failed to list chat messages by trace: %w", err)
+func (r *chatMessageRepository) persistBatch(runtime *observationRuntime, messages []*models.ChatMessageRecord) (bool, error) {
+	ctx := context.Background()
+	release, err := backupgate.HoldWorkUnit(ctx, "observability.persist")
+	if err != nil {
+		return true, err
 	}
-	return items, nil
+	defer release()
+
+	events := make([]observability.Event, 0, len(messages))
+	now := time.Now()
+	for _, message := range messages {
+		if message.CreatedAt.IsZero() {
+			message.CreatedAt = now
+		}
+		event, err := makeObservationEvent("chat_messages", message)
+		if err != nil {
+			return true, err
+		}
+		events = append(events, event)
+	}
+	first := events[0]
+	if err := runtime.journal.AppendBatch(ctx, events); errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	} else if err != nil {
+		runtime.failures.Store(first.Owner+"\x00"+first.RequestID, err)
+		return true, err
+	}
+
+	delivered := make([]observability.Event, 0, len(events))
+	for i, event := range events {
+		projectCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		projected, err := runtime.projectValue(projectCtx, r.sess, event)
+		cancel()
+		if err != nil {
+			break // The encrypted batch remains recoverable during storage outages.
+		}
+		messages[i].ID = projected.(*models.ChatMessageRecord).ID
+		delivered = append(delivered, event)
+	}
+	return true, runtime.journal.DeliveredBatch(ctx, delivered)
+}
+
+func (r *chatMessageRepository) ListByTraceID(traceID string) ([]models.ChatMessageRecord, error) {
+	items, err := routedLogDetails[models.ChatMessageRecord](r.sess, "chat_messages", traceID, "", 0, 200, false)
+	sort.SliceStable(items, func(i, j int) bool {
+		if items[i].SequenceNo != items[j].SequenceNo {
+			return items[i].SequenceNo < items[j].SequenceNo
+		}
+		return items[i].ID < items[j].ID
+	})
+	return items, err
 }

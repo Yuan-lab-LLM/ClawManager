@@ -77,7 +77,6 @@ func (h *AIGatewayHandler) ListModels(c *gin.Context) {
 
 // ChatCompletions proxies a governed chat completion request.
 func (h *AIGatewayHandler) ChatCompletions(c *gin.Context) {
-	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, aigateway.MaxVisionRequestBytes)
 	rawBody, err := io.ReadAll(c.Request.Body)
 	if err != nil {
 		utils.ValidationError(c, err)

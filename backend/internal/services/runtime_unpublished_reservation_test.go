@@ -88,7 +88,7 @@ func TestUnpublishedFirstReservationRetiresOnlyAbsentUnpublishedSource(t *testin
 							late.SourceStopped = true
 							publicationDone <- store.SaveRuntimeFailover(ctx, late)
 						default:
-							publicationDone <- repository.WithRuntimePodAssignmentAdmission(ctx, s.sess, *pod, 101, 1, func() error { published = true; return nil })
+							publicationDone <- repository.WithRuntimePodAssignmentAdmission(ctx, s.sess, *pod, 101, 1, 20000, func() error { published = true; return nil })
 						}
 					}()
 					<-started

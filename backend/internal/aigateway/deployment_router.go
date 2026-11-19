@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"clawreef/internal/models"
+	"clawreef/internal/repository"
 	"clawreef/internal/services"
 )
 
@@ -355,7 +356,8 @@ func (s *service) finishDeploymentAttempt(prepared *preparedChatRequest, candida
 	// Free scarce capacity first; metrics persistence must not keep a finished
 	// request counted as in-flight when Redis is slow.
 	_ = s.deploymentStore.Release(ctx, lease)
-	if !success && prepared.attemptDispatched {
+	// A downstream interruption can arrive after the completed attempt was settled.
+	if !success && !prepared.attemptSucceeded && prepared.attemptDispatched {
 		prepared.priorAttemptTokens += prepared.attemptPromptTokens + prepared.attemptCompletionTokens
 		prepared.priorAttemptCost += calculateEstimatedCost(candidate, prepared.attemptPromptTokens, prepared.attemptCompletionTokens)
 		s.recordFailedAttemptCost(prepared, candidate)
@@ -390,7 +392,9 @@ func (s *service) recordFailedAttemptCost(prepared *preparedChatRequest, candida
 		internalCost = estimatedCost
 	}
 	if err := s.costRecordService.RecordCost(&models.CostRecord{
-		TraceID: prepared.traceID, SessionID: prepared.sessionIDPtr, RequestID: prepared.requestIDPtr,
+		EventUID:           stringPtr(repository.ObservationAttemptUID("cost_records", prepared.userID, prepared.requestID, prepared.attemptNumber, candidate.ProviderType, candidate.ProviderModelName)),
+		InvocationEventUID: stringPtr(repository.ObservationAttemptUID("model_invocations", prepared.userID, prepared.requestID, prepared.attemptNumber, candidate.ProviderType, candidate.ProviderModelName)),
+		TraceID:            prepared.traceID, SessionID: prepared.sessionIDPtr, RequestID: prepared.requestIDPtr,
 		UserID: prepared.userIDPtr, InstanceID: prepared.req.InstanceID, GatewayKeyID: prepared.req.GatewayKeyID,
 		InstanceMode: runtimeAttributionString(prepared.req.InstanceMode), RuntimeType: runtimeAttributionString(prepared.req.RuntimeType),
 		GatewayID: runtimeAttributionString(prepared.req.GatewayID), RuntimePodID: runtimeAttributionInt64(prepared.req.RuntimePodID),
@@ -405,7 +409,7 @@ func (s *service) recordFailedAttemptCost(prepared *preparedChatRequest, candida
 }
 
 func (s *service) finalizeFailedAttemptAccounting(prepared *preparedChatRequest) {
-	if prepared == nil || prepared.priorAttemptTokens <= 0 {
+	if prepared == nil || prepared.attemptSucceeded || prepared.priorAttemptTokens <= 0 {
 		return
 	}
 	if prepared.req.UsageFinalizer != nil {

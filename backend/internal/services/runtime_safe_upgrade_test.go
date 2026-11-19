@@ -15,7 +15,7 @@ type guardedRolloutStore struct {
 }
 
 func (s *guardedRolloutStore) GetByID(context.Context, int64) (*models.RuntimeRollout, error) {
-	return &models.RuntimeRollout{ID: 1, RuntimeType: "opencode", TargetImageRef: "test/new"}, nil
+	return &models.RuntimeRollout{ID: 1, RuntimeType: "opencode", TargetImageRef: "test/new", Status: "pending"}, nil
 }
 func (s *guardedRolloutStore) UpdateStatus(_ context.Context, _ int64, status string, _ *time.Time, _ *time.Time, _ *string) error {
 	s.status = status

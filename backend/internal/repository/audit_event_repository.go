@@ -42,31 +42,30 @@ func (r *auditEventRepository) CreateContext(ctx context.Context, event *models.
 	if event.CreatedAt.IsZero() {
 		event.CreatedAt = time.Now()
 	}
-	res, err := r.sess.WithContext(ctx).Collection("audit_events").Insert(event)
-	if err != nil {
-		return fmt.Errorf("failed to create audit event: %w", err)
+	if handled, err := persistObservation(ctx, r.sess, "audit_events", event); handled {
+		return err
 	}
-	event.ID = int(res.ID().(int64))
-	return nil
+	return r.sess.WithContext(ctx).Tx(func(tx db.Session) error {
+		if event.TraceID != "" {
+			if err := lockAuditTraces(ctx, tx, []string{event.TraceID}); err != nil {
+				return err
+			}
+		}
+		res, err := tx.Collection("audit_events").Insert(event)
+		if err != nil {
+			return fmt.Errorf("failed to create audit event: %w", err)
+		}
+		event.ID = int(res.ID().(int64))
+		return maintainObservationSummary(ctx, tx, "audit_events", event)
+	})
 }
 
 func (r *auditEventRepository) ListByTraceID(traceID string) ([]models.AuditEvent, error) {
-	var items []models.AuditEvent
-	if err := r.sess.Collection("audit_events").Find(db.Cond{"trace_id": traceID}).OrderBy("id").All(&items); err != nil {
-		return nil, fmt.Errorf("failed to list audit events by trace: %w", err)
-	}
-	return items, nil
+	return routedLogDetails[models.AuditEvent](r.sess, "audit_events", traceID, "", 0, 200, false)
 }
 
 func (r *auditEventRepository) ListRecent(limit int) ([]models.AuditEvent, error) {
-	var items []models.AuditEvent
-	if limit <= 0 {
-		limit = 100
-	}
-	if err := r.sess.Collection("audit_events").Find().OrderBy("-created_at").Limit(limit).All(&items); err != nil {
-		return nil, fmt.Errorf("failed to list recent audit events: %w", err)
-	}
-	return items, nil
+	return routedRecentLogs[models.AuditEvent](r.sess, "audit_events", 0, limit)
 }
 
 func (r *auditEventRepository) CountRecentByInstanceAndEventType(instanceID int, eventType string, since time.Time) (int, error) {

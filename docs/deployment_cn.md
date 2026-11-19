@@ -6,12 +6,12 @@ ClawManager 是 Kubernetes 原生平台。先选择 Kubernetes 发行版，再�
 
 ## 部署入口
 
-| 环境 | 清单 | 存储要求 |
+| 环境 | 清单 | 安装说明 |
 |---|---|---|
-| k3s 单节点 | [`deployments/k3s/single-node/clawmanager.yaml`](../deployments/k3s/single-node/clawmanager.yaml) | 标记节点上的 HostPath |
-| k3s 集群 | [`deployments/k3s/cluster/clawmanager.yaml`](../deployments/k3s/cluster/clawmanager.yaml) | 控制面 RWO + 工作区 RWX 的 CSI |
-| Kubernetes 单节点 | [`deployments/k8s/single-node/clawmanager.yaml`](../deployments/k8s/single-node/clawmanager.yaml) | 标记节点上的 HostPath |
-| Kubernetes 集群 | [`deployments/k8s/cluster/clawmanager.yaml`](../deployments/k8s/cluster/clawmanager.yaml) | 控制面 RWO + 工作区 RWX 的 CSI |
+| k3s 单节点 | [clawmanager.yaml](../deployments/k3s/single-node/clawmanager.yaml) | [HostPath](./install/k3s/single-node.md) |
+| k3s 集群 | [clawmanager.yaml](../deployments/k3s/cluster/clawmanager.yaml) | [CSI](./install/k3s/cluster.md) |
+| Kubernetes 单节点 | [clawmanager.yaml](../deployments/k8s/single-node/clawmanager.yaml) | [HostPath](./install/k8s/single-node.md) |
+| Kubernetes 集群 | [clawmanager.yaml](../deployments/k8s/cluster/clawmanager.yaml) | [CSI](./install/k8s/cluster.md) |
 
 一次只使用一套完整 profile。Longhorn 的 StorageClass 名称只是示例，可以替换为访问模式等价的 CSI。不要混用清单，不要用临时 `/tmp` HostPath 修补多节点存储。
 
@@ -19,7 +19,7 @@ ClawManager 是 Kubernetes 原生平台。先选择 Kubernetes 发行版，再�
 
 清单包含 ClawManager、MySQL、MinIO、Skill Scanner、Team Redis、共享工作区服务，以及 OpenClaw、Hermes、OpenCode、DeepSeek Harness Lite Runtime 池。Lite 实例在共享 Runtime Pod 中运行，不会每个实例创建独立 Pod。
 
-1. 核对 Secret、镜像、StorageClass 和入口暴露方式。
+1. 核对镜像、StorageClass 和入口暴露方式，准备[审计与历史恢复凭据](#审计与历史恢复凭据)。
 2. 单节点先设置清单要求的存储节点标签；集群先确认 RWO/RWX StorageClass。
 3. 应用一套完整清单，等待核心 Pod Ready 和 PVC Bound。
 4. 打开前端，配置普通模型，验证安全防护与 AI Gateway。
@@ -27,9 +27,17 @@ ClawManager 是 Kubernetes 原生平台。先选择 Kubernetes 发行版，再�
 
 全新 MySQL 使用 `clawmanager-mysql-init` 自动初始化；已有数据卷不会重复执行首次初始化脚本。MySQL、Redis、MinIO、工作区和对象数据都应使用持久卷，不能用 `emptyDir` 作为长期存储。
 
+## 审计与历史恢复凭据
+
+四份清单各自包含业务资源、审计 PVC 和凭据引用。单节点的审计目录位于标记节点的 `/data/clawmanager/system/observability`，集群使用独立的 RWX 审计卷。
+
+1. 用[凭据准备脚本](../tools/k8s/observability/README.md)为新环境生成审计密钥和恢复账号。创建 `clawmanager-system` 命名空间后，应用生成的两个 Secret。
+2. 应用所选清单。内置 MySQL 就绪后，由数据库管理员执行恢复账号对应的私有 `bootstrap.sql`，再验证 `clawmanager-app` 就绪。
+3. 升级已有环境时，复用原来的审计密钥、审计卷和恢复账号。已绑定的审计卷按现场 StorageClass 保留。
+
 ## 可选北向接口
 
-基础部署 profile 默认不对外发布北向接口。需要启用时，先升级 ClawManager Core，再应用独立的 [北向接口 Kubernetes 附加包](../deployments/k8s/northbound/README.md)。只有北向 Gateway 可以作为外部 API 入口；Core 内部服务必须保持集群内可见，并保留文档要求的 mTLS、凭据隔离和网络策略边界。外部端口可以通过 NodePort、负载均衡器或 Ingress 映射，不属于 API 协议本身。
+基础部署 profile 默认不对外发布北向接口。需要启用时，先升级 ClawManager Core，再应用独立的 [北向接口 Kubernetes 附加包](../tools/k8s/northbound/README.md)。只有北向 Gateway 可以作为外部 API 入口；Core 内部服务必须保持集群内可见，并保留文档要求的 mTLS、凭据隔离和网络策略边界。外部端口可以通过 NodePort、负载均衡器或 Ingress 映射，不属于 API 协议本身。
 
 已有环境请先阅读[北向接口版本升级说明](./northbound-upgrade-guide.md)，调用方以[北向接口使用说明](./northbound-api-guide.md)和 [OpenAPI 3.1 规范](./northbound-openapi.yaml)为准。
 

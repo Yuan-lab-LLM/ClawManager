@@ -311,7 +311,7 @@ export const instanceService = {
 
   getInstanceSessionUsage: async (
     id: number,
-    params?: { page?: number; limit?: number; search?: string; since?: string; until?: string },
+    params?: { page?: number; limit?: number; search?: string; since?: string; until?: string; cursor?: string },
   ): Promise<InstanceSessionUsageResult> => {
     const response = await api.get(`/instances/${id}/session-usage`, { params });
     return response.data.data;

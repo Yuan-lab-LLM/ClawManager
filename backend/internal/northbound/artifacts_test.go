@@ -15,9 +15,9 @@ func TestNorthboundYAMLArtifactsParse(t *testing.T) {
 	root := filepath.Clean(filepath.Join("..", "..", ".."))
 	for _, relative := range []string{
 		filepath.Join("docs", "northbound-openapi.yaml"),
-		filepath.Join("deployments", "k8s", "northbound", "gateway.yaml"),
-		filepath.Join("deployments", "k8s", "northbound", "core-patch.yaml"),
-		filepath.Join("deployments", "k8s", "northbound", "secrets.example.yaml"),
+		filepath.Join("tools", "k8s", "northbound", "gateway.yaml"),
+		filepath.Join("tools", "k8s", "northbound", "core-patch.yaml"),
+		filepath.Join("tools", "k8s", "northbound", "secrets.example.yaml"),
 	} {
 		path := filepath.Join(root, relative)
 		raw, err := os.ReadFile(path)

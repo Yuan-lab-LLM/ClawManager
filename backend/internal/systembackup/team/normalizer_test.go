@@ -6,6 +6,16 @@ import (
 	"time"
 )
 
+func TestCancelledTeamWorkRemainsCancelledOnRestore(t *testing.T) {
+	for _, table := range []string{"team_tasks", "team_work_items", "team_workflow_phases", "team_event_outbox"} {
+		row := Row{"id": Value("7"), "status": Value("cancelled"), "payload_json": Value(`{"original":"retained"}`)}
+		change, err := Normalize(table, row, time.Now().UTC())
+		if err != nil || string(change.After["status"].Data) != "cancelled" || !reflect.DeepEqual(change.After["payload_json"], row["payload_json"]) {
+			t.Fatalf("cancelled fact changed for%s: %+v %v", table, change, err)
+		}
+	}
+}
+
 func TestBatchPendingOperationCannotRemainRunnable(t *testing.T) {
 	row := Row{"operation_id": Value("operation-1"), "status": Value("batch_pending"), "request_payload": Value(`{"instance_id":7}`), "idempotency_key": Value("original-key")}
 	change, err := Normalize("northbound_operations", row, time.Now().UTC())

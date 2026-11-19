@@ -25,11 +25,31 @@ func run() error {
 		return err
 	}
 	defer client.Close()
-	b, err := runWithRuntime(ctx, client, "/host-boot-id", os.Getenv("RECOVERY_SCOPE"), os.Getenv("RECOVERY_POD_SCOPE"))
+	var b []byte
+	if scope := os.Getenv("RECOVERY_SLOT_SCOPE"); scope != "" {
+		if os.Getenv("RECOVERY_SCOPE") != "" || os.Getenv("RECOVERY_POD_SCOPE") != "" {
+			return fmt.Errorf("exactly one fixed recovery scope is required")
+		}
+		b, err = runSlotWithRuntime(ctx, client, "/host-boot-id", scope)
+	} else {
+		b, err = runWithRuntime(ctx, client, "/host-boot-id", os.Getenv("RECOVERY_SCOPE"), os.Getenv("RECOVERY_POD_SCOPE"))
+	}
 	if err != nil {
 		return err
 	}
 	return os.WriteFile("/dev/termination-log", b, 0600)
+}
+
+func runSlotWithRuntime(ctx context.Context, client runtimeeviction.CRIRuntime, bootIDPath, scopeJSON string) ([]byte, error) {
+	var s runtimeeviction.SlotScope
+	if err := json.Unmarshal([]byte(scopeJSON), &s); err != nil {
+		return nil, err
+	}
+	r, err := runtimeeviction.RunSlot(ctx, s, client, bootIDPath)
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(r)
 }
 
 func runWithRuntime(ctx context.Context, client runtimeeviction.CRIRuntime, bootIDPath, scopeJSON, podScopeJSON string) ([]byte, error) {

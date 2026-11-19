@@ -2,12 +2,14 @@ package k8s
 
 import (
 	"context"
-	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"reflect"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 )
@@ -60,6 +62,8 @@ type RuntimePodScaleTarget struct {
 	RuntimeType, Namespace, DeploymentName, PodName, PodUID string
 	IdlePool                                                bool // Internal only: permit ordinary custom pools for idle scale-in.
 	UpgradeID, SourceDeployment, ImageRef                   string
+	ApprovalSource                                          string
+	RequireCurrentTemplate                                  bool
 }
 type RuntimePodScaleSnapshot struct {
 	// A newly prepared upgrade freezes the current configuration, while a
@@ -72,6 +76,12 @@ type RuntimePodScaleSnapshot struct {
 	WorkspaceStorageIdentity string
 	IdleSleepOperation       string
 	DeploymentGeneration     int64
+	ApprovalDigest           string                    `json:"-"`
+	ApprovalConfiguration    []byte                    `json:"-"`
+	ExpansionBaseline        *RuntimeExpansionBaseline `json:"-"`
+	ExpansionWriteID         string                    `json:"-"`
+	expansion                string
+	hasAnnotations           bool
 }
 type RuntimePodScaleDeploymentService interface {
 	InspectRuntimeScale(context.Context, RuntimePodScaleTarget) (*RuntimePodScaleSnapshot, error)
@@ -83,31 +93,50 @@ func (s *runtimeDeploymentService) InspectRuntimeScale(ctx context.Context, targ
 	if err != nil {
 		return nil, err
 	}
-	if (target.DeploymentUID != "" && string(d.UID) != target.DeploymentUID) || d.Name != target.DeploymentName || d.Labels["clawmanager.io/runtime-type"] != target.RuntimeType || d.UID == "" || d.ResourceVersion == "" || d.Spec.Replicas == nil || *d.Spec.Replicas <= 0 || d.Spec.Paused {
-		return nil, fmt.Errorf("current default Deployment identity and positive serving replicas required")
-	}
-	for _, labels := range []map[string]string{d.Labels, d.Spec.Template.Labels, p.Labels} {
-		if !target.IdlePool && (labels[runtimeManagedPoolLabel] == "true" || labels[upgradeLabPurposeLabel] == "runtime-managed-pool") {
-			return nil, fmt.Errorf("custom managed pools cannot be expanded as the default")
+	if target.RequireCurrentTemplate {
+		owner := metav1.GetControllerOf(p)
+		rs, err := s.client.AppsV1().ReplicaSets(p.Namespace).Get(ctx, owner.Name, metav1.GetOptions{})
+		if err != nil {
+			return nil, err
+		}
+		controller := metav1.GetControllerOf(rs)
+		if rs.UID != owner.UID || controller == nil || controller.Kind != "Deployment" || controller.Name != d.Name || controller.UID != d.UID || !runtimeScaleReplicaSetMatches(rs, d) {
+			return nil, fmt.Errorf("healthy source does not belong to the current Runtime Deployment template")
 		}
 	}
-	if target.UpgradeID != "" {
-		if d.Labels[runtimeUpgradeIDLabel] != target.UpgradeID || d.Labels[runtimeSourceLabel] != target.SourceDeployment || d.Labels[runtimePoolRoleLabel] != "upgrade-target" || d.Labels[runtimeSchedulingLabel] != "true" {
-			return nil, fmt.Errorf("current default upgrade target proof changed")
-		}
-	} else if d.Labels[runtimePoolRoleLabel] != "" || d.Labels[runtimeUpgradeIDLabel] != "" {
-		return nil, fmt.Errorf("default upgrade target requires committed rollout proof")
+	if !target.IdlePool && (p.Labels[runtimeManagedPoolLabel] == "true" || p.Labels[upgradeLabPurposeLabel] == "runtime-managed-pool") {
+		return nil, fmt.Errorf("custom managed pools cannot be expanded as the default")
 	}
-	spec := d.Spec.Template.Spec
+	spec := d.Spec.Template.Spec.DeepCopy()
+	actualSpec := p.Spec.DeepCopy()
+	if err := canonicalizeValidationAppArmor(spec, d.Spec.Template.Annotations); err != nil {
+		return nil, err
+	}
+	if err := canonicalizeValidationAppArmor(actualSpec, p.Annotations); err != nil {
+		return nil, err
+	}
 	if len(spec.Containers) != len(p.Spec.Containers) || len(spec.Containers) < 2 {
 		return nil, fmt.Errorf("serving Pod does not match current default slot configuration")
+	}
+	if !apiequality.Semantic.DeepEqual(spec.Resources, p.Spec.Resources) || !apiequality.Semantic.DeepEqual(spec.SecurityContext, p.Spec.SecurityContext) {
+		return nil, fmt.Errorf("default template Pod resources or security differ from serving Pod")
 	}
 	// Admission adds fields to actual Pods. Compare the native contract rather than
 	// copying their defaulted PodSpec back into the controller template.
 	for i, c := range spec.Containers {
-		actual := p.Spec.Containers[i]
+		actual := actualSpec.Containers[i]
 		if c.Name != actual.Name || runtimeImageDigest(c.Image) == "" || runtimeImageDigest(c.Image) != runtimeImageDigest(image) || !reflect.DeepEqual(c.Env, actual.Env) {
 			return nil, fmt.Errorf("default template native identity or image differs from serving Pod")
+		}
+		appArmorAnnotation := "container.apparmor.security.beta.kubernetes.io/" + c.Name
+		templateProfile, liveProfile := d.Spec.Template.Annotations[appArmorAnnotation], p.Annotations[appArmorAnnotation]
+		// The typed field alone has the same meaning as the deprecated
+		// unconfined annotation after canonicalization.
+		sameAnnotation := templateProfile == liveProfile ||
+			templateProfile == "unconfined" && liveProfile == "" ||
+			templateProfile == "" && liveProfile == "unconfined"
+		if !sameAnnotation || !apiequality.Semantic.DeepEqual(c.Resources, actual.Resources) || !apiequality.Semantic.DeepEqual(c.SecurityContext, actual.SecurityContext) {
+			return nil, fmt.Errorf("default template container resources or security differ from serving Pod")
 		}
 		for _, mount := range c.VolumeMounts {
 			found := false
@@ -136,6 +165,37 @@ func (s *runtimeDeploymentService) InspectRuntimeScale(ctx context.Context, targ
 		if !found {
 			return nil, fmt.Errorf("default template storage differs from serving Pod")
 		}
+	}
+	return s.runtimeScaleConfiguration(ctx, target, d)
+}
+
+func (s *runtimeDeploymentService) runtimeScaleConfiguration(ctx context.Context, target RuntimePodScaleTarget, d *appsv1.Deployment) (*RuntimePodScaleSnapshot, error) {
+	if (target.DeploymentUID != "" && string(d.UID) != target.DeploymentUID) || d.Name != target.DeploymentName || d.Labels["clawmanager.io/runtime-type"] != target.RuntimeType || d.UID == "" || d.ResourceVersion == "" || d.Spec.Replicas == nil || *d.Spec.Replicas <= 0 || d.Spec.Paused || !ordinaryRuntimeDeployment(*d) || d.Labels[runtimePoolRoleLabel] == "upgrade-standby" {
+		return nil, fmt.Errorf("current default Deployment identity and positive serving replicas required")
+	}
+	for _, labels := range []map[string]string{d.Labels, d.Spec.Template.Labels} {
+		if !target.IdlePool && (labels[runtimeManagedPoolLabel] == "true" || labels[upgradeLabPurposeLabel] == "runtime-managed-pool") {
+			return nil, fmt.Errorf("custom managed pools cannot be expanded as the default")
+		}
+	}
+	if target.UpgradeID != "" {
+		if d.Labels[runtimeUpgradeIDLabel] != target.UpgradeID || d.Labels[runtimeSourceLabel] != target.SourceDeployment || d.Labels[runtimePoolRoleLabel] != "upgrade-target" || d.Labels[runtimeSchedulingLabel] != "true" {
+			return nil, fmt.Errorf("current default upgrade target proof changed")
+		}
+	} else if d.Labels[runtimePoolRoleLabel] != "" || d.Labels[runtimeUpgradeIDLabel] != "" || d.Labels[runtimeSourceLabel] != "" {
+		return nil, fmt.Errorf("default upgrade target requires committed rollout proof")
+	}
+	spec := d.Spec.Template.Spec
+	if d.Spec.Template.Labels["clawmanager.io/runtime-protocol"] != "container-slots-v1" || len(spec.Containers) < 2 || spec.Containers[0].Name != "runtime" {
+		return nil, fmt.Errorf("current default requires the native slot protocol")
+	}
+	for _, c := range spec.Containers {
+		if runtimeImageDigest(c.Image) == "" || runtimeImageDigest(c.Image) != runtimeImageDigest(spec.Containers[0].Image) {
+			return nil, fmt.Errorf("current default requires consistent immutable Runtime images")
+		}
+	}
+	if target.ImageRef != "" && runtimeImageDigest(target.ImageRef) != runtimeImageDigest(spec.Containers[0].Image) {
+		return nil, fmt.Errorf("current template image differs from committed default rollout")
 	}
 	if err := validateRuntimeSlotTLSDeployment(d); err != nil {
 		return nil, err
@@ -171,14 +231,20 @@ func (s *runtimeDeploymentService) ExpandRuntimeScale(ctx context.Context, targe
 	if expected == nil {
 		return nil, fmt.Errorf("verified default Deployment snapshot required")
 	}
-	latest, err := s.InspectRuntimeScale(ctx, target)
+	var latest *RuntimePodScaleSnapshot
+	var err error
+	if expected.ApprovalDigest != "" {
+		latest, err = s.InspectRuntimeScaleConfiguration(ctx, target)
+	} else {
+		latest, err = s.InspectRuntimeScale(ctx, target)
+	}
 	if err != nil {
 		return nil, err
 	}
 	if latest.ScaleInOperation != "" {
 		return nil, fmt.Errorf("Runtime scale-in is active; replica changes are fenced")
 	}
-	if latest.Option.DeploymentUID != expected.Option.DeploymentUID || !reflect.DeepEqual(latest.Template, expected.Template) {
+	if latest.Option.DeploymentUID != expected.Option.DeploymentUID || latest.WorkspaceStorageIdentity != expected.WorkspaceStorageIdentity || latest.ApprovalDigest != expected.ApprovalDigest || !reflect.DeepEqual(latest.Template, expected.Template) {
 		return nil, fmt.Errorf("default Deployment UID or template changed; refresh before retrying")
 	}
 	before := latest.Option.Replicas
@@ -186,14 +252,20 @@ func (s *runtimeDeploymentService) ExpandRuntimeScale(ctx context.Context, targe
 		return nil, fmt.Errorf("replica count overflow")
 	}
 	after := before + int32(count)
-	patch, err := json.Marshal([]map[string]any{{"op": "test", "path": "/metadata/uid", "value": latest.Option.DeploymentUID}, {"op": "test", "path": "/metadata/resourceVersion", "value": latest.ResourceVersion}, {"op": "replace", "path": "/spec/replicas", "value": after}})
+	if latest.ApprovalDigest != "" {
+		if latest.ResourceVersion != expected.ResourceVersion {
+			return nil, ErrRuntimeScaleOutPending
+		}
+		latest.ExpansionWriteID = expected.ExpansionWriteID
+	}
+	patch, err := runtimeExpansionPatch(latest, after, 0)
 	if err != nil {
 		return nil, err
 	}
 	// A transport error can follow an accepted write. Never replay an increment:
 	// return the error and leave the live desired replica count observable.
 	if _, err = s.client.AppsV1().Deployments(target.Namespace).Patch(ctx, target.DeploymentName, types.JSONPatchType, patch, metav1.PatchOptions{}); err != nil {
-		return nil, fmt.Errorf("default Runtime expansion was not confirmed; inspect replicas before retrying: %w", err)
+		return nil, errors.Join(ErrRuntimeScaleWriteUnconfirmed, fmt.Errorf("default Runtime expansion was not confirmed; inspect replicas before retrying: %w", err))
 	}
 	return &RuntimePodScaleResult{RuntimeType: target.RuntimeType, Namespace: target.Namespace, DeploymentName: target.DeploymentName, DeploymentUID: latest.Option.DeploymentUID, AddedPods: count, PreviousReplicas: before, Replicas: after, SlotCount: latest.Option.SlotCount}, nil
 }

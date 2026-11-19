@@ -93,14 +93,14 @@ jobs:
           go-version-file: ClawManager/backend/go.mod
           cache: false
       - name: Test authenticated CDP and GUI relay
-        working-directory: ClawManager/deployments/browser-worker/cdp-proxy
+        working-directory: ClawManager/tools/images/browser-worker/cdp-proxy
         run: go test -race .
       - uses: docker/setup-buildx-action@v3
       - name: Build visible browser
         uses: docker/build-push-action@v6
         with:
-          context: ClawManager/deployments/browser-worker
-          file: ClawManager/deployments/browser-worker/Dockerfile
+          context: ClawManager/tools/images/browser-worker
+          file: ClawManager/tools/images/browser-worker/Dockerfile
           platforms: linux/amd64
           push: false
           tags: browser-worker:ci
@@ -108,7 +108,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: ClawManager/deployments/browser-worker/Dockerfile.cdp-proxy
+          file: ClawManager/tools/images/browser-worker/Dockerfile.cdp-proxy
           platforms: linux/amd64
           push: false
           tags: browser-worker-relay:ci
@@ -183,6 +183,10 @@ jobs:
               "image: ghcr.io/yuan-lab-llm/clawmanager:latest",
               "image: clawmanager:ci",
           )
+          text = text.replace(
+              "image: minio/minio:latest",
+              "image: ghcr.io/coollabsio/minio@sha256:69b55a1c1c5dc285ce04db96689f5b2102317fc77a50680a1874ca6efd1c87f9",
+          )
 
           text = re.sub(
               r"(kind: Deployment\s+metadata:\s+name: mysql\s+namespace: clawmanager-system\s+spec:\s+replicas: 1\s+selector:\s+matchLabels:\s+app: mysql\s+template:\s+metadata:\s+labels:\s+app: mysql\s+spec:\s+containers:\s+- name: mysql.*?volumeMounts:\s+- name: mysql-data\s+mountPath: /var/lib/mysql\s+- name: mysql-init\s+mountPath: /docker-entrypoint-initdb.d\s+readinessProbe:.*?periodSeconds: 10\s+)volumes:\s+- name: mysql-data\s+persistentVolumeClaim:\s+claimName: mysql-data\s+- name: mysql-init\s+configMap:\s+name: clawmanager-mysql-init",
@@ -231,14 +235,34 @@ jobs:
 
           kubectl apply -f /tmp/clawmanager-ci.yaml
 
-      - name: Wait for MySQL deployment
-        run: kubectl -n clawmanager-system rollout status deployment/mysql --timeout=300s
+      - name: Wait for MySQL and MinIO
+        run: |
+          kubectl -n clawmanager-system rollout status deployment/mysql --timeout=300s
+          kubectl -n clawmanager-system rollout status deployment/minio --timeout=300s
 
       - name: Start ClawManager after MySQL is ready
-        run: kubectl -n clawmanager-system scale deployment/clawmanager-app --replicas=1
+        shell: bash
+        run: |
+          private_dir=$(mktemp -d "${RUNNER_TEMP}/cm-audit.XXXXXX")
+          trap 'rm -rf -- "$private_dir"' EXIT
+          python3 tools/k8s/observability/prepare-observability-secret.py --initialize \
+            --key-file "$private_dir/master.key" --output "$private_dir/audit-secret.json"
+          python3 tools/k8s/observability/prepare-history-restore.py \
+            --output "$private_dir/restore" --tls skip-verify
+          kubectl apply -f "$private_dir/audit-secret.json" -f "$private_dir/restore/secret.json"
+          {
+            # Allow trigger migrations in the disposable kind database.
+            printf '%s\n' 'SET GLOBAL log_bin_trust_function_creators = ON;'
+            cat "$private_dir/restore/bootstrap.sql"
+          } | kubectl -n clawmanager-system exec -i deployment/mysql -- sh -c \
+            'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql --protocol=TCP --host=127.0.0.1 -uroot'
+          kubectl -n clawmanager-system scale deployment/clawmanager-app --replicas=1
 
       - name: Wait for ClawManager deployment
-        run: kubectl -n clawmanager-system rollout status deployment/clawmanager-app --timeout=300s
+        run: |
+          kubectl -n clawmanager-system rollout status deployment/clawmanager-app --timeout=300s
+          kubectl -n clawmanager-system exec deployment/mysql -- sh -c \
+            'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql --protocol=TCP --host=127.0.0.1 -uroot -e "SET GLOBAL log_bin_trust_function_creators = OFF"'
 
       - name: Start port-forward
         run: |

@@ -26,6 +26,7 @@ type RuntimePodScaleInIdentity struct {
 	PodName      string  `json:"pod_name"`
 	PodUID       string  `json:"pod_uid"`
 	DeletionCost *string `json:"deletion_cost,omitempty"`
+	Unscheduled  bool    `json:"unscheduled,omitempty"`
 }
 type RuntimePodScaleInProtection struct {
 	// Attached by the worker from its immutable journal; never duplicate it in JSON.
@@ -100,18 +101,24 @@ func (s *runtimeDeploymentService) InspectRuntimeScaleInPods(ctx context.Context
 	if err != nil {
 		return nil, err
 	}
-	if len(pods) != int(current.Option.Replicas) || d.Status.ObservedGeneration < d.Generation || d.Status.UpdatedReplicas != current.Option.Replicas || d.Status.ReadyReplicas != current.Option.Replicas || d.Status.Replicas != current.Option.Replicas {
+	if len(pods) != int(current.Option.Replicas) || d.Status.ObservedGeneration < d.Generation || d.Status.UpdatedReplicas != current.Option.Replicas || d.Status.Replicas != current.Option.Replicas || (!target.IdlePool && d.Status.ReadyReplicas != current.Option.Replicas) {
 		return nil, fmt.Errorf("default Runtime Deployment must be fully converged before scale-in")
 	}
 	result := make([]RuntimePodScaleInIdentity, 0, len(pods))
 	for _, p := range pods {
-		if p.UID == "" || p.DeletionTimestamp != nil || !runtimeScaleInPodReady(p) || p.Labels[RuntimeScaleInProtectedLabel] != "" {
+		unscheduled := target.IdlePool && runtimeScaleInUnscheduled(p)
+		if p.UID == "" || p.DeletionTimestamp != nil || (!unscheduled && !runtimeScaleInPodReady(p)) || p.Labels[RuntimeScaleInProtectedLabel] != "" {
 			return nil, fmt.Errorf("all Runtime siblings must be ready, stable and unprotected")
 		}
-		result = append(result, RuntimePodScaleInIdentity{PodName: p.Name, PodUID: string(p.UID), DeletionCost: runtimeScaleInDeletionCost(p)})
+		result = append(result, RuntimePodScaleInIdentity{PodName: p.Name, PodUID: string(p.UID), DeletionCost: runtimeScaleInDeletionCost(p), Unscheduled: unscheduled})
 	}
 	return result, nil
 }
+
+func runtimeScaleInUnscheduled(p corev1.Pod) bool {
+	return p.Status.Phase == corev1.PodPending && p.Spec.NodeName == "" && p.Status.PodIP == ""
+}
+
 func runtimeScaleInPodReady(p corev1.Pod) bool {
 	if p.Status.Phase != corev1.PodRunning {
 		return false
@@ -127,8 +134,20 @@ func validateRuntimeScaleInProof(p RuntimePodScaleInProtection) error {
 	if p.OperationID == "" || p.DeploymentUID == "" || p.Replicas < 0 || p.PreviousReplicas <= p.Replicas || len(p.SourcePods) != int(p.PreviousReplicas-p.Replicas) || len(p.RetainedPods) != int(p.Replicas) {
 		return fmt.Errorf("complete immutable scale-in proof required")
 	}
+	retainedUnscheduled := 0
+	for _, id := range p.RetainedPods {
+		if id.Unscheduled {
+			retainedUnscheduled++
+		}
+	}
+	if retainedUnscheduled > 0 && int(p.Replicas) == retainedUnscheduled {
+		return fmt.Errorf("scale-in must retain a serving Runtime Pod")
+	}
 	names, uids := map[string]bool{}, map[string]bool{}
 	for _, id := range append(append([]RuntimePodScaleInIdentity{}, p.SourcePods...), p.RetainedPods...) {
+		if id.Unscheduled && (!p.AutomaticIdle || p.Replicas < 1) {
+			return fmt.Errorf("unscheduled Runtime replicas require automatic idle scale-in with serving capacity retained")
+		}
 		if id.PodName == "" || id.PodUID == "" || names[id.PodName] || uids[id.PodUID] {
 			return fmt.Errorf("invalid Runtime Pod identities")
 		}
@@ -155,13 +174,28 @@ func (s *runtimeDeploymentService) validateRuntimeScaleInSet(ctx context.Context
 	if len(pods) != int(p.PreviousReplicas) {
 		return nil, nil, fmt.Errorf("Runtime sibling set changed")
 	}
-	expected := map[string]string{}
+	expected := map[string]RuntimePodScaleInIdentity{}
+	unscheduledSources := map[string]bool{}
+	for _, id := range p.SourcePods {
+		if id.Unscheduled {
+			unscheduledSources[id.PodUID] = true
+		}
+	}
 	for _, id := range append(append([]RuntimePodScaleInIdentity{}, p.SourcePods...), p.RetainedPods...) {
-		expected[id.PodName] = id.PodUID
+		expected[id.PodName] = id
 	}
 	for _, pod := range pods {
-		if expected[pod.Name] != string(pod.UID) || pod.DeletionTimestamp != nil || ((len(readiness) == 0 || readiness[0]) && !runtimeScaleInPodReady(pod)) {
+		id := expected[pod.Name]
+		if id.PodUID == "" || id.PodUID != string(pod.UID) || pod.DeletionTimestamp != nil {
 			return nil, nil, fmt.Errorf("Runtime Pod identity or readiness changed")
+		}
+		if len(readiness) == 0 || readiness[0] {
+			if unscheduledSources[id.PodUID] && !runtimeScaleInUnscheduled(pod) {
+				return nil, nil, fmt.Errorf("Runtime Pod %s was scheduled after idle scale-in preflight", pod.Name)
+			}
+			if !id.Unscheduled && !runtimeScaleInPodReady(pod) {
+				return nil, nil, fmt.Errorf("Runtime Pod identity or readiness changed")
+			}
 		}
 	}
 	return d, pods, nil
@@ -233,23 +267,36 @@ func (s *runtimeDeploymentService) ProtectRuntimeScaleIn(ctx context.Context, p 
 	return s.proveRuntimeScaleInPolicy(ctx, p)
 }
 func (s *runtimeDeploymentService) ResizeRuntimeScaleIn(ctx context.Context, target RuntimePodScaleTarget, expected *RuntimePodScaleSnapshot, p RuntimePodScaleInProtection) error {
-	d, _, err := s.validateRuntimeScaleInSet(ctx, p)
+	if err := validateRuntimeScaleInProof(p); err != nil {
+		return err
+	}
+	if err := s.proveRuntimeScaleInPolicy(ctx, p); err != nil {
+		return err
+	}
+	if err := s.ConfirmRuntimeScaleInAssignmentsEmpty(ctx, p.Namespace, p.SourcePods); err != nil {
+		return err
+	}
+	d, pods, err := s.validateRuntimeScaleInSet(ctx, p)
 	if err != nil {
 		return err
 	}
 	if d.Labels[RuntimeScaleInOperationLabel] != p.OperationID || expected == nil || p.DeploymentUID != expected.Option.DeploymentUID || !reflect.DeepEqual(d.Spec.Template, expected.Template) {
 		return fmt.Errorf("scale-in controller owner or template changed")
 	}
-	if err = s.proveRuntimeScaleInPolicy(ctx, p); err != nil {
-		return err
+	retained := map[string]bool{}
+	for _, id := range p.RetainedPods {
+		retained[id.PodUID] = true
 	}
-	if err = s.ConfirmRuntimeScaleInAssignmentsEmpty(ctx, p.Namespace, p.SourcePods); err != nil {
-		return err
+	for _, pod := range pods {
+		if retained[string(pod.UID)] && pod.Labels[RuntimeScaleInProtectedLabel] != p.OperationID {
+			return fmt.Errorf("retained Runtime Pod protection changed")
+		}
 	}
 	annotations := d.Annotations
 	if annotations == nil {
 		annotations = map[string]string{}
 	}
+	delete(annotations, runtimeExpansionAnnotation)
 	annotations[runtimeScaleInResizeOperationAnnotation] = p.OperationID
 	patches := []map[string]any{{"op": "test", "path": "/metadata/uid", "value": p.DeploymentUID}, {"op": "test", "path": "/metadata/resourceVersion", "value": d.ResourceVersion}, {"op": "replace", "path": "/spec/replicas", "value": p.Replicas}}
 	if p.AutomaticIdle && p.Replicas == 0 {
@@ -351,9 +398,13 @@ func (s *runtimeDeploymentService) observeRuntimeScaleIn(ctx context.Context, p 
 	for _, id := range p.SourcePods {
 		sources[id.PodUID] = id.PodName
 	}
-	retained := map[string]string{}
+	retained := map[string]RuntimePodScaleInIdentity{}
+	minReady := p.Replicas
 	for _, id := range p.RetainedPods {
-		retained[id.PodUID] = id.PodName
+		retained[id.PodUID] = id
+		if id.Unscheduled {
+			minReady--
+		}
 	}
 	waiting := false
 	for _, pod := range pods {
@@ -361,11 +412,15 @@ func (s *runtimeDeploymentService) observeRuntimeScaleIn(ctx context.Context, p 
 			waiting = true
 			continue
 		}
-		if retained[string(pod.UID)] != pod.Name || (requireProtection && pod.Labels[RuntimeScaleInProtectedLabel] != p.OperationID) || pod.DeletionTimestamp != nil {
+		id := retained[string(pod.UID)]
+		if id.PodName != pod.Name || (requireProtection && pod.Labels[RuntimeScaleInProtectedLabel] != p.OperationID) || pod.DeletionTimestamp != nil {
 			return false, fmt.Errorf("retained Runtime set changed during scale-in")
 		}
+		if minReady < p.Replicas && !id.Unscheduled && !runtimeScaleInPodReady(pod) {
+			waiting = true
+		}
 	}
-	return !waiting && len(pods) == int(p.Replicas) && d.Status.ObservedGeneration >= d.Generation && d.Status.Replicas == p.Replicas && d.Status.UpdatedReplicas == p.Replicas && d.Status.ReadyReplicas == p.Replicas, nil
+	return !waiting && len(pods) == int(p.Replicas) && d.Status.ObservedGeneration >= d.Generation && d.Status.Replicas == p.Replicas && d.Status.UpdatedReplicas == p.Replicas && d.Status.ReadyReplicas >= minReady, nil
 }
 
 // beforeResize permits rollback only while replicas and the complete sibling

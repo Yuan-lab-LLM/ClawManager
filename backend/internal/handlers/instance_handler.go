@@ -1323,6 +1323,7 @@ func (h *InstanceHandler) GetRuntimeDetails(c *gin.Context) {
 }
 
 type SessionUsageQueryRequest struct {
+	Cursor string `form:"cursor"`
 	Page   int    `form:"page,default=1"`
 	Limit  int    `form:"limit,default=20"`
 	Search string `form:"search"`
@@ -1361,12 +1362,14 @@ func (h *InstanceHandler) GetInstanceSessionUsage(c *gin.Context) {
 		utils.Error(c, http.StatusBadRequest, "Invalid until timestamp")
 		return
 	}
-	if err := validateSessionUsageTimeRange(since, until); err != nil {
+	since, until, err = normalizeSessionUsageTimeRange(since, until)
+	if err != nil {
 		utils.Error(c, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	result, err := h.aiObservabilityService.GetInstanceSessionUsage(id, services.InstanceSessionUsageQuery{
+		Cursor: req.Cursor,
 		Page:   req.Page,
 		Limit:  req.Limit,
 		Search: req.Search,
@@ -1374,7 +1377,7 @@ func (h *InstanceHandler) GetInstanceSessionUsage(c *gin.Context) {
 		Until:  until,
 	})
 	if err != nil {
-		utils.HandleError(c, err)
+		handleObservationQueryError(c, err)
 		return
 	}
 
@@ -1406,7 +1409,8 @@ func (h *InstanceHandler) GetInstanceSessionUsageDetail(c *gin.Context) {
 		utils.Error(c, http.StatusBadRequest, "Invalid until timestamp")
 		return
 	}
-	if err := validateSessionUsageTimeRange(since, until); err != nil {
+	since, until, err = normalizeSessionUsageTimeRange(since, until)
+	if err != nil {
 		utils.Error(c, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -1420,7 +1424,7 @@ func (h *InstanceHandler) GetInstanceSessionUsageDetail(c *gin.Context) {
 			utils.Error(c, http.StatusNotFound, "Session usage not found")
 			return
 		}
-		utils.HandleError(c, err)
+		handleObservationQueryError(c, err)
 		return
 	}
 

@@ -23,7 +23,6 @@ import (
 // Chat Completions request.  Keeping the translation at the edge means the
 // router, auditing and provider adapters remain shared by all runtimes.
 func (h *AIGatewayHandler) Responses(c *gin.Context) {
-	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, aigateway.MaxVisionRequestBytes)
 	var payload responsesRequest
 	if err := c.ShouldBindJSON(&payload); err != nil {
 		utils.ValidationError(c, err)
@@ -101,10 +100,6 @@ func (h *AIGatewayHandler) Responses(c *gin.Context) {
 	c.JSON(response.StatusCode, responseToResponses(traceID, payload.Model, response.Body))
 }
 
-const maxGatewayWorkspaceFileBytes = int64(2 * 1024 * 1024)
-const maxGatewayWorkspaceFiles = 5
-const maxGatewayWorkspaceInputBytes = int64(8 * 1024 * 1024)
-
 // resolveWorkspaceInputFiles accepts only workspace://relative/path references.
 // It deliberately never follows URLs or absolute paths from an agent request.
 func (h *AIGatewayHandler) resolveWorkspaceInputFiles(ctx context.Context, c *gin.Context, input interface{}) (interface{}, error) {
@@ -112,7 +107,6 @@ func (h *AIGatewayHandler) resolveWorkspaceInputFiles(ctx context.Context, c *gi
 	if !ok {
 		return input, nil
 	}
-	files, totalBytes := 0, int64(0)
 	for _, raw := range items {
 		message, ok := raw.(map[string]interface{})
 		if !ok {
@@ -127,10 +121,6 @@ func (h *AIGatewayHandler) resolveWorkspaceInputFiles(ctx context.Context, c *gi
 			if !ok || block["type"] != "input_file" {
 				continue
 			}
-			files++
-			if files > maxGatewayWorkspaceFiles {
-				return nil, fmt.Errorf("input_file count exceeds %d", maxGatewayWorkspaceFiles)
-			}
 			fileRef, _ := block["file_url"].(string)
 			if fileRef == "" {
 				fileRef, _ = block["file_id"].(string)
@@ -138,10 +128,6 @@ func (h *AIGatewayHandler) resolveWorkspaceInputFiles(ctx context.Context, c *gi
 			text, err := h.readWorkspaceInputFile(ctx, c, fileRef)
 			if err != nil {
 				return nil, err
-			}
-			totalBytes += int64(len(text))
-			if totalBytes > maxGatewayWorkspaceInputBytes {
-				return nil, fmt.Errorf("combined input_file content exceeds %d byte limit", maxGatewayWorkspaceInputBytes)
 			}
 			content[index] = map[string]interface{}{"type": "input_text", "text": text}
 		}
@@ -179,25 +165,19 @@ func (h *AIGatewayHandler) readWorkspaceInputFile(ctx context.Context, c *gin.Co
 	} else {
 		service = h.runtimeWorkspaceFileService
 	}
-	file, name, size, err := service.OpenDownload(ctx, scope, relative)
+	file, name, _, err := service.OpenDownload(ctx, scope, relative)
 	if err != nil {
 		return "", fmt.Errorf("open workspace input_file: %w", err)
 	}
 	defer file.Close()
-	if size > maxGatewayWorkspaceFileBytes {
-		return "", fmt.Errorf("input_file exceeds %d byte limit", maxGatewayWorkspaceFileBytes)
-	}
 	switch strings.ToLower(filepath.Ext(name)) {
 	case ".txt", ".md", ".markdown":
 	default:
 		return "", fmt.Errorf("input_file type %q is not supported yet", filepath.Ext(name))
 	}
-	data, err := io.ReadAll(io.LimitReader(file, maxGatewayWorkspaceFileBytes+1))
+	data, err := io.ReadAll(file)
 	if err != nil {
 		return "", fmt.Errorf("read workspace input_file: %w", err)
-	}
-	if int64(len(data)) > maxGatewayWorkspaceFileBytes {
-		return "", fmt.Errorf("input_file exceeds %d byte limit", maxGatewayWorkspaceFileBytes)
 	}
 	return fmt.Sprintf("[Workspace file: %s]\n%s", filepath.ToSlash(relative), string(data)), nil
 }
@@ -233,7 +213,6 @@ func workspaceInputFilePath(reference string, instanceID int) (string, error) {
 // AnthropicMessages translates Messages requests, including tool_use and
 // tool_result blocks, to the same internal tool-call representation.
 func (h *AIGatewayHandler) AnthropicMessages(c *gin.Context) {
-	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, aigateway.MaxVisionRequestBytes)
 	var payload anthropicRequest
 	if err := c.ShouldBindJSON(&payload); err != nil {
 		utils.ValidationError(c, err)

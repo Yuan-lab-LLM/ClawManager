@@ -1,6 +1,6 @@
 # NFS 多槽位实现与验收记录（2026-11-05）
 
-实现位于 ClawManager、AgentsRuntime 的 `mount` 分支，显式配置为 `nfs-rootless-v1`。默认配置和现有业务池未切换。部署条件、数据布局及外部迁移前提见 [NFS 部署说明](../deployments/k8s/lite-slots/nfs-rootless.md)；设计边界见 [规格](superpowers/specs/2026-11-05-nfs-multislot-isolation-design.md)。
+实现位于 ClawManager、AgentsRuntime 的 `mount` 分支，显式配置为 `nfs-rootless-v1`。默认配置和现有业务池未切换。部署条件、数据布局及外部迁移前提见 [NFS 部署说明](../tools/k8s/lite-slots/nfs-rootless.md)；设计边界见 [规格](superpowers/specs/2026-11-05-nfs-multislot-isolation-design.md)。
 
 所有编译、测试及 OCI 镜像构建都在测试节点 `10.130.81.54` 进行，本地 Mac 只编辑和传输代码。实际环境为单节点 Linux6.8、Kubernetes1.35、containerd2.4.2/runc1.5.2，测试命名空间 `clawmanager-nfs-lab`。专用 NFSv4.1 export 保持 `root_squash`；原业务命名空间及 NFS 导出策略未改。
 

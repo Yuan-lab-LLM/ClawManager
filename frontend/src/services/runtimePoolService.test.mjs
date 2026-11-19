@@ -409,3 +409,21 @@ test('prepare observers receive needs_attention before failure and abort never c
   assert.ok(states.includes('needs_attention'));
   assert.equal(calls.filter(call => call[0] === 'post').length, 1, 'held native proof is never cleared by abort cleanup');
 });
+
+test("slot reset forwards the exact source and never retries a lost submit", async () => {
+  const submitError = new AxiosError("Response lost", "ECONNABORTED");
+  const { service, calls } = setup([undefined, submitError]);
+  const identity = { source_pod_uid: "pod-a" };
+  const reset = {
+    ...identity,
+    source_container_id: "containerd://old",
+    scope_fingerprint: "checked",
+    request_id: "same-request",
+  };
+  await service.preflightSlotReset(58, "slot-0", identity);
+  await assert.rejects(service.resetSlot(58, "slot-0", reset), error => error === submitError);
+  assert.deepEqual(calls, [
+    { url: "/admin/runtime-pods/58/slots/slot-0/reset/preflight", body: identity },
+    { url: "/admin/runtime-pods/58/slots/slot-0/reset", body: reset },
+  ]);
+});

@@ -64,6 +64,7 @@ func runtimeManagementMySQLDB(t *testing.T) db.Session {
 		apply("079_add_runtime_management.sql")
 	}
 	apply("108_add_runtime_management_retry.sql")
+	apply("125_add_runtime_slot_reset_requests.sql")
 	return sess
 }
 

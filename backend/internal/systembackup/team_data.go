@@ -501,6 +501,10 @@ func (s *TeamDataService) captureSources(ctx context.Context, j TeamDataJob) (Ca
 		return CaptureSources{}, e
 	}
 	source := CaptureSources{MySQL: s.db, Redis: r, Objects: s.objects, ObjectBuckets: []string{s.cfg.SourceBucket}, Namespace: s.cfg.Namespace, NamespaceUID: s.cfg.NamespaceUID, DeploymentClient: s.kube, SecretClient: s.kube, TeamDataOnly: true, FileAliases: map[string]string{s.cfg.RuntimeRoot: s.cfg.SourceRoot}}
+	if e = freezeTeamHistoryKey(ctx, &source); e != nil {
+		r.Close()
+		return CaptureSources{}, e
+	}
 	// Shared Team task data is canonical here, including historical Teams.
 	shared := filepath.Join(s.cfg.SourceRoot, "teams")
 	if st, e := os.Stat(shared); e != nil || !st.IsDir() {

@@ -878,6 +878,35 @@ spec:
     type: DirectoryOrCreate
 ---
 apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: clawmanager-observability-pv
+  labels:
+    app: clawmanager
+    managed-by: clawmanager
+    clawmanager.io/storage-profile: single-node
+    clawmanager.io/storage-node: "true"
+spec:
+  capacity:
+    storage: 128Gi
+  volumeMode: Filesystem
+  accessModes:
+    - ReadWriteMany
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: manual
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: clawmanager.io/storage-node
+              operator: In
+              values:
+                - "true"
+  hostPath:
+    path: /data/clawmanager/system/observability
+    type: DirectoryOrCreate
+---
+apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: clawmanager-workspaces
@@ -890,6 +919,20 @@ spec:
       storage: 50Gi
   storageClassName: manual
   volumeName: clawmanager-workspaces-pv
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: clawmanager-observability
+  namespace: clawmanager-system
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 128Gi
+  storageClassName: manual
+  volumeName: clawmanager-observability-pv
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -912,8 +955,22 @@ spec:
           imagePullPolicy: IfNotPresent
           args:
             - "--innodb-use-native-aio=0"
+            - "--innodb-buffer-pool-size=4294967296"
+            - "--max-connections=800"
+            - "--sort-buffer-size=262144"
+            - "--join-buffer-size=262144"
+            - "--read-buffer-size=131072"
+            - "--read-rnd-buffer-size=262144"
+            - "--temptable-max-ram=268435456"
             - "--binlog-expire-logs-seconds=259200"
             - "--max-binlog-size=134217728"
+          resources:
+            requests:
+              cpu: "1"
+              memory: 4Gi
+            limits:
+              cpu: "4"
+              memory: 8Gi
           ports:
             - containerPort: 3306
           env:
@@ -1054,6 +1111,19 @@ spec:
             - redis-server
             - --appendonly
             - "yes"
+            - --maxmemory
+            - "1gb"
+            - --maxmemory-policy
+            - noeviction
+            - --auto-aof-rewrite-percentage
+            - "100"
+          resources:
+            requests:
+              cpu: "500m"
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 3Gi
           ports:
             - name: redis
               containerPort: 6379
@@ -1272,6 +1342,15 @@ spec:
             - name: proxy
               containerPort: 9001
           env:
+            - name: CLAWMANAGER_OBSERVABILITY_DIR
+              value: /var/lib/clawmanager-observability
+            - name: CLAWMANAGER_OBSERVABILITY_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: clawmanager-observability-key-v1
+                  key: master-key
+            - name: CLAWMANAGER_HISTORY_RESTORE_DSN_FILE
+              value: /var/run/secrets/clawmanager-history-restore/dsn
             - name: TZ
               value: "Asia/Shanghai"
             # Enable only with the matching upstream Hermes Lite runtime.
@@ -1480,6 +1559,11 @@ spec:
             - name: SKILL_SCANNER_DEPLOYMENT
               value: "skill-scanner"
           volumeMounts:
+            - name: observability
+              mountPath: /var/lib/clawmanager-observability
+            - name: history-restore-credential
+              mountPath: /var/run/secrets/clawmanager-history-restore
+              readOnly: true
             - name: tls-cert
               mountPath: /var/run/clawreef-tls
               readOnly: true
@@ -1500,6 +1584,13 @@ spec:
             initialDelaySeconds: 30
             periodSeconds: 20
       volumes:
+        - name: observability
+          persistentVolumeClaim:
+            claimName: clawmanager-observability
+        - name: history-restore-credential
+          secret:
+            secretName: clawmanager-history-restore-v1
+            defaultMode: 288
         - name: tls-cert
           secret:
             secretName: clawmanager-tls

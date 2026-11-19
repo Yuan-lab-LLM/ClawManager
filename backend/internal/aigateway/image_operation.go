@@ -7,7 +7,6 @@ package aigateway
 
 import (
 	"bytes"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -54,7 +53,6 @@ func (r *ImageOperationRequest) Count() int      { return r.count }
 func (r *ImageOperationRequest) Streaming() bool { return r.streaming }
 
 // ParseImageOperationRequest never fetches URLs or writes uploaded files to disk.
-// Limits are Gateway policy, not a claim about every provider's maximum limits.
 func ParseImageOperationRequest(op ImageOperation, contentType string, body io.Reader) (*ImageOperationRequest, error) {
 	fail := func(reason string) (*ImageOperationRequest, error) {
 		return nil, fmt.Errorf("%w: %s", ErrInvalidImageOperation, reason)
@@ -65,13 +63,6 @@ func ParseImageOperationRequest(op ImageOperation, contentType string, body io.R
 	if body == nil {
 		return fail("request body is required")
 	}
-	raw, err := io.ReadAll(io.LimitReader(body, MaxVisionRequestBytes+1))
-	if err != nil {
-		return fail("unable to read request")
-	}
-	if int64(len(raw)) > MaxVisionRequestBytes {
-		return fail("request exceeds 32 MiB")
-	}
 	media, params, err := mime.ParseMediaType(contentType)
 	if err != nil {
 		return fail("invalid content type")
@@ -79,6 +70,10 @@ func ParseImageOperationRequest(op ImageOperation, contentType string, body io.R
 	request := &ImageOperationRequest{operation: op, fields: map[string]json.RawMessage{}, count: 1}
 	switch media {
 	case "application/json":
+		raw, err := io.ReadAll(body)
+		if err != nil {
+			return fail("unable to read request")
+		}
 		if err := json.Unmarshal(raw, &request.fields); err != nil || request.fields == nil {
 			return fail("body must be a JSON object")
 		}
@@ -86,8 +81,7 @@ func ParseImageOperationRequest(op ImageOperation, contentType string, body io.R
 		if op != ImageEdit || params["boundary"] == "" {
 			return fail("multipart is supported only for image edits")
 		}
-		reader := multipart.NewReader(bytes.NewReader(raw), params["boundary"])
-		parts := 0
+		reader := multipart.NewReader(body, params["boundary"])
 		for {
 			part, err := reader.NextPart()
 			if err == io.EOF {
@@ -96,53 +90,49 @@ func ParseImageOperationRequest(op ImageOperation, contentType string, body io.R
 			if err != nil {
 				return fail("invalid multipart body")
 			}
-			parts++
-			if parts > 40 {
-				return fail("too many multipart parts")
-			}
 			name := part.FormName()
-			value, err := io.ReadAll(io.LimitReader(part, maxVisionImageBytes+1))
-			_ = part.Close()
-			if err != nil || len(value) > maxVisionImageBytes {
-				return fail("invalid or oversized multipart part")
-			}
 			if part.FileName() != "" {
 				if name != "image" && name != "image[]" && name != "mask" {
 					return fail("unsupported uploaded file field")
+				}
+				value, err := io.ReadAll(part)
+				if err != nil {
+					return fail("invalid multipart part")
 				}
 				config, format, err := image.DecodeConfig(bytes.NewReader(value))
 				if err != nil || (format != "png" && format != "jpeg" && format != "webp") {
 					return fail("edit uploads require PNG, JPEG or WebP")
 				}
-				if err := validateImageReference("data:image/" + format + ";base64," + base64.StdEncoding.EncodeToString(value)); err != nil {
+				if !validInputImageDimensions(config) {
 					return fail("invalid image upload")
 				}
 				if name == "mask" && format != "png" {
 					return fail("mask must be PNG")
 				}
 				request.uploads = append(request.uploads, imageUpload{field: name, format: format, data: value, width: config.Width, height: config.Height})
-			} else {
-				if _, exists := request.fields[name]; exists {
-					return fail("duplicate form field")
+				continue
+			}
+			if _, exists := request.fields[name]; exists {
+				return fail("duplicate form field")
+			}
+			value, err := io.ReadAll(part)
+			if err != nil {
+				return fail("invalid multipart part")
+			}
+			switch name {
+			case "n", "output_compression", "partial_images":
+				number, err := strconv.Atoi(string(value))
+				if err != nil {
+					return fail("numeric field must be an integer")
 				}
-				if len(value) > 128000 {
-					return fail("form field too large")
+				request.fields[name], _ = json.Marshal(number)
+			case "stream":
+				if string(value) != "true" && string(value) != "false" {
+					return fail("stream must be boolean")
 				}
-				switch name {
-				case "n", "output_compression", "partial_images":
-					number, err := strconv.Atoi(string(value))
-					if err != nil {
-						return fail("numeric field must be an integer")
-					}
-					request.fields[name], _ = json.Marshal(number)
-				case "stream":
-					if string(value) != "true" && string(value) != "false" {
-						return fail("stream must be boolean")
-					}
-					request.fields[name] = append([]byte(nil), value...)
-				default:
-					request.fields[name], _ = json.Marshal(string(value))
-				}
+				request.fields[name] = value
+			default:
+				request.fields[name], _ = json.Marshal(string(value))
 			}
 		}
 	default:
@@ -170,8 +160,8 @@ func (r *ImageOperationRequest) validate() error {
 	if err := json.Unmarshal(r.fields["model"], &r.model); err != nil || strings.TrimSpace(r.model) == "" || len(r.model) > 256 {
 		return fail("model is required")
 	}
-	if err := json.Unmarshal(r.fields["prompt"], &r.prompt); err != nil || strings.TrimSpace(r.prompt) == "" || utf8.RuneCountInString(r.prompt) > 32000 {
-		return fail("prompt must contain 1 to 32000 characters")
+	if err := json.Unmarshal(r.fields["prompt"], &r.prompt); err != nil || strings.TrimSpace(r.prompt) == "" {
+		return fail("prompt is required")
 	}
 	for _, field := range []struct {
 		name     string
@@ -256,8 +246,8 @@ func (r *ImageOperationRequest) validate() error {
 				}
 			}
 		}
-		if count < 1 || count > maxVisionImages {
-			return fail("edits require 1 to 16 images")
+		if count == 0 {
+			return fail("edits require at least one image")
 		}
 	}
 	return nil

@@ -10,7 +10,7 @@ NODE_PORT="${NODE_PORT:-30000}"
 TEST_HOST="${TEST_HOST:-127.0.0.1}"
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-MANIFEST_SOURCE="$SCRIPT_DIR/deployments/k8s/northbound/gateway.yaml"
+MANIFEST_SOURCE="$SCRIPT_DIR/tools/k8s/northbound/gateway.yaml"
 GATEWAY_MANIFEST=""
 CORE_PATCH_MANIFEST=""
 

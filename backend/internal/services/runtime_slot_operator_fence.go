@@ -26,7 +26,7 @@ func validSlotProofSource(p runtimeSlotContainerProof) bool {
 	if p.ProofSource == "" {
 		return p.FenceRequestUID == ""
 	}
-	return p.ProofSource == slotKernelFenceSource && p.FenceRequestUID != "" && len(p.FenceRequestUID) <= 128 && !p.Graceful && p.Kind == ""
+	return p.ProofSource == slotKernelFenceSource && p.FenceRequestUID != "" && len(p.FenceRequestUID) <= 128 && !p.Graceful && p.Kind == "" && !p.AuxiliaryExitPending && p.CleanupConfirmed
 }
 
 func closedSlotContainer(p *corev1.Pod, name, image string) bool {

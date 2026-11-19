@@ -92,13 +92,15 @@ func testImageArtifactStorage(t *testing.T, sess db.Session, storage *objectStor
 	}
 	instanceID, keyID, other := 8, 9, 10
 	owner := ImageArtifactOwner{UserID: 7, InstanceID: &instanceID, GatewayKeyID: &keyID}
-	plain := []byte("private generated image test bytes")
+	canary := []byte("private generated image test bytes")
+	plain := bytes.Repeat(canary, (16<<20)/len(canary)+1)
+	ciphertextSize := int64(len(plain) + imageArtifactEncryptionOverhead)
 	id, err := svc.Save(t.Context(), owner, 3, "request-test", "image/png", plain)
 	if err != nil {
 		t.Fatal(err)
 	}
-	stored, err := storage.GetObjectLimited(t.Context(), "gateway-images/"+id, maxStoredImageArtifactBytes)
-	if err != nil || bytes.Contains(stored, plain) {
+	stored, err := storage.GetObjectLimited(t.Context(), "gateway-images/"+id, ciphertextSize)
+	if err != nil || bytes.Contains(stored, canary) {
 		t.Fatal("image stored unencrypted", err)
 	}
 	for _, allowed := range []ImageArtifactOwner{owner, {UserID: 7}, {UserID: 7, InstanceID: &instanceID}, {UserID: 7, GatewayKeyID: &keyID}} {
@@ -141,7 +143,7 @@ func testImageArtifactStorage(t *testing.T, sess db.Session, storage *objectStor
 	if err = svc.PurgeExpired(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = storage.GetObjectLimited(t.Context(), "gateway-images/"+id, maxStoredImageArtifactBytes); err == nil {
+	if _, err = storage.GetObjectLimited(t.Context(), "gateway-images/"+id, ciphertextSize); err == nil {
 		t.Fatal("expired object not deleted")
 	}
 	if err = svc.PurgeExpired(t.Context()); err != nil {

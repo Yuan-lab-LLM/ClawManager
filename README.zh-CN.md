@@ -169,7 +169,7 @@ ClawManager 现在将 Kubernetes 发行版与存储 profile 拆开。先选择 `
 
 通过独立部署的北向 Gateway 将 ClawManager 接入外部系统。一次性 JWE 登录、权限 Scope、Owner 隔离、幂等异步操作、限流、审计，以及 Gateway 到 Core 的 mTLS，共同保证对外集成边界与管理控制台相互隔离。管理员还可配置 LDAP/LDAPS 或 StartTLS 企业认证，预览并导入目录用户，并将 LDAP Group 映射为平台角色。
 
-北向接口可管理 OpenClaw、Hermes、OpenCode 与 DeepSeek Harness 的 Lite / Pro 实例，覆盖创建、查询、重启、显式确认的数据重置和密码模式 Share Link。详见[北向接口使用说明](./docs/northbound-api-guide.md)与[部署附加包](./deployments/k8s/northbound/README.md)。
+北向接口可管理 OpenClaw、Hermes、OpenCode 与 DeepSeek Harness 的 Lite / Pro 实例，覆盖创建、查询、重启、显式确认的数据重置和密码模式 Share Link。详见[北向接口使用说明](./docs/northbound-api-guide.md)与[部署附加包](./tools/k8s/northbound/README.md)。
 
 <a id="ai-gateway"></a>
 ### AI Gateway
@@ -330,7 +330,7 @@ ClawManager 是一个 Kubernetes 原生平台，包含 React 前端、Go 后端�
 - [资源管理指南](./docs/resource-management_cn.md)
 - [Skill Hub 使用指南](./docs/skill-hub-guide.md)
 - [OpenCode 工作空间指南](./docs/opencode-lite-pro-agent-development.md)
-- [北向接口 Kubernetes 部署附加包](./deployments/k8s/northbound/README.md)
+- [北向接口 Kubernetes 部署附加包](./tools/k8s/northbound/README.md)
 - [北向接口使用说明](./docs/northbound-api-guide.md)
 - [北向接口版本升级说明](./docs/northbound-upgrade-guide.md)
 - [北向接口 OpenAPI 3.1 规范](./docs/northbound-openapi.yaml)

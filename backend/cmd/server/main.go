@@ -166,6 +166,10 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to initialize object storage: %v", err)
 	}
+	observationObjects, err := configureDatabaseMaintenance(database, objectStorageService)
+	if err != nil {
+		log.Fatalf("Failed to configure durable database maintenance: %v", err)
+	}
 	skillScannerClient := services.NewSkillScannerClient(cfg.SkillScanner)
 	aiObservabilityService := services.NewAIObservabilityService(modelInvocationRepo, auditEventRepo, costRecordRepo, riskHitRepo, chatMessageRepo, chatSessionRepo, llmModelRepo, instanceRepo, userRepo, instanceRuntimeStatusRepo)
 	clusterResourceService := services.NewClusterResourceService(instanceRepo)
@@ -302,6 +306,9 @@ func main() {
 	services.ConfigureRuntimeUpgradeNFSIO(runtimeUpgradeService, cfg.Runtime.SandboxProfile)
 	browserWorkerService := services.NewBrowserWorkerService(browserWorkerRepo, instanceRepo, k8s.GetClient())
 	if cfg.Runtime.ContainerSlots > 0 {
+		if err := services.ConfigureSlotResetExternalWriterCleanup(runtimeAgentClient, browserWorkerService.CleanupSlotResetExternalWriter); err != nil {
+			log.Fatal("Failed to configure slot reset external writer authority")
+		}
 		if err := services.ConfigureSlotExternalWriterAbsence(runtimeAgentClient, browserWorkerService.VerifyNoBrowserWriterHistory); err != nil {
 			log.Fatal("Failed to configure external Runtime writer absence authority")
 		}
@@ -720,7 +727,7 @@ func main() {
 			log.Printf("runtime scheduler disabled: k8s client is unavailable")
 		} else {
 			runtimeLeader := services.NewRuntimeLeaderService(k8sClient.Clientset, cfg.Runtime.Namespace, cfg.Runtime.BackendReplicaID)
-			runtimeDeployments := k8s.NewRuntimeDeploymentService(k8sClient.Clientset)
+			runtimeDeployments := k8s.NewRuntimeDeploymentService(k8sClient.Clientset, k8sClient.Config)
 			runtimeSchedulerOptions := []services.RuntimeSchedulerOption{
 				services.WithRuntimeSchedulerWorkspaceRoot(cfg.Runtime.WorkspaceRoot),
 				services.WithRuntimeSchedulerAutoStopRepository(autoStopRepo),
@@ -789,6 +796,7 @@ func main() {
 	runtimePoolHandler.SetUpgradeService(runtimeUpgradeService)
 	runtimeManagementService := services.NewRuntimeManagementService(database, runtimeScheduler, northboundRepo)
 	runtimeManagementHandler := handlers.NewRuntimeManagementHandler(runtimeManagementService)
+	runtimeSlotResetHandler := handlers.NewRuntimeSlotResetHandler(runtimeManagementService)
 	runtimePodMaintenanceHandler := handlers.NewRuntimePodMaintenanceHandler(services.NewRuntimePodMaintenanceService(database, runtimeScheduler))
 	workbuddyPrewarmController := k8s.NewWorkbuddyPrewarmController()
 
@@ -819,6 +827,9 @@ func main() {
 		}
 	}
 	defer leaderCancel()
+	if err := startDatabaseMaintenance(leaderCtx, database, observationObjects, cfg.Database); err != nil {
+		log.Fatalf("Failed to start database maintenance: %v", err)
+	}
 	workspaceStore := workspacedashboard.NewStore(database)
 	if runtimeScheduler != nil {
 		workspaceStore.SetCapacityReader(runtimeScheduler.WorkspaceCapacity)
@@ -1152,9 +1163,11 @@ func main() {
 			adminRuntime.GET("/runtime-pods/:id/events", runtimePoolHandler.GetPodEvents)
 			adminRuntime.POST("/runtime-pods/:id/scheduling", runtimeManagementHandler.Scheduling)
 			adminRuntime.POST("/runtime-pods/:id/evict", runtimeManagementHandler.Evict)
+			adminRuntime.POST("/runtime-pods/:id/slots/:slot/reset/preflight", runtimeSlotResetHandler.Preflight)
+			adminRuntime.POST("/runtime-pods/:id/slots/:slot/reset", runtimeSlotResetHandler.Submit)
 			adminRuntime.POST("/runtime-scheduling/preflight", runtimeManagementHandler.Preflight)
 			adminRuntime.POST("/runtime-scheduling", runtimeManagementHandler.Submit)
-			adminRuntime.GET("/runtime-scheduling", runtimeManagementHandler.History)
+			adminRuntime.GET("/runtime-scheduling", runtimeSlotResetHandler.History(runtimeManagementHandler.History))
 			adminRuntime.POST("/runtime-balance/plan", runtimeManagementHandler.BalancePlan)
 			adminRuntime.POST("/runtime-balance", runtimeManagementHandler.Balance)
 			adminRuntime.POST("/runtime-scheduling/:id/cancel", runtimeManagementHandler.Cancel)
@@ -1163,6 +1176,8 @@ func main() {
 			adminRuntime.POST("/runtime-rollouts/prepare", runtimeManagementHandler.PrepareRollout)
 			adminRuntime.POST("/runtime-rollouts", runtimePoolHandler.StartRollout)
 			adminRuntime.POST("/runtime-rollouts/preflight", runtimePoolHandler.PreflightOpenClawRollout)
+			adminRuntime.POST("/runtime-rollouts/:id/force-retry/preflight", runtimePoolHandler.PreflightOpenCodeForceRetry)
+			adminRuntime.POST("/runtime-rollouts/:id/force-retry", runtimePoolHandler.ConfirmOpenCodeForceRetry)
 			adminRuntime.GET("/runtime-rollouts/:id", runtimePoolHandler.GetRollout)
 			adminRuntime.GET("/runtime-rollouts", runtimePoolHandler.ListRollouts)
 		}
@@ -1414,6 +1429,25 @@ func main() {
 		{
 			adminAIAudit.GET("", aiObservabilityHandler.ListAuditItems)
 			adminAIAudit.GET("/:traceId", aiObservabilityHandler.GetTraceDetail)
+		}
+
+		historyArchive := handlers.NewHistoryArchiveHandler(databaseHistory, false)
+		historyRoutes := api.Group("/history")
+		historyRoutes.Use(middleware.Auth(), middleware.SetUserInfo(userRepo))
+		{
+			historyRoutes.GET("/:kind", historyArchive.List)
+			historyRoutes.GET("/:kind/export", historyArchive.Export)
+			historyRoutes.GET("/:kind/:id", historyArchive.Get)
+			historyRoutes.GET("/:kind/:id/body", historyArchive.Body)
+		}
+		adminHistoryArchive := handlers.NewHistoryArchiveHandler(databaseHistory, true)
+		adminHistoryRoutes := api.Group("/admin/history")
+		adminHistoryRoutes.Use(middleware.Auth(), middleware.SetUserInfo(userRepo), middleware.NewAdminAuth(userRepo))
+		{
+			adminHistoryRoutes.GET("/:kind", adminHistoryArchive.List)
+			adminHistoryRoutes.GET("/:kind/export", adminHistoryArchive.Export)
+			adminHistoryRoutes.GET("/:kind/:id", adminHistoryArchive.Get)
+			adminHistoryRoutes.GET("/:kind/:id/body", adminHistoryArchive.Body)
 		}
 
 		adminCosts := api.Group("/admin/costs")

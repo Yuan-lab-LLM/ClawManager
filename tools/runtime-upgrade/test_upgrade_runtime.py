@@ -1,0 +1,410 @@
+"""Isolated stdlib HTTP contract tests; run on the test cluster only."""
+import http.server
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+import threading
+import unittest
+import uuid
+
+SCRIPT = Path(__file__).with_name("upgrade-runtime.py")
+IMAGE = "registry.example/runtime@sha256:" + "a" * 64
+TOKEN = "fixture-secret-do-not-print"
+
+
+class DeliveryTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.state = Path(self.tmp.name) / "operation.json"
+        self.calls = []
+        self.statuses = ["finished"]
+        self.operation_id = 41
+        self.native_operation = None
+        self.strategy = "legacy_rolling"
+        self.passed = True
+        self.conflict = False
+        self.empty = False
+        self.drop_create = False
+        self.drop_preflight = False
+        self.drop_preparation = False
+        self.redirect = False
+        self.preparation_status = "completed"
+        self.force_attempt = None
+        self.force_allowed = True
+        self.drop_force = False
+        self.drop_force_preflight = False
+        self.force_visible = True
+        test = self
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+
+            def do_GET(self):
+                self.handle_request()
+
+            def do_POST(self):
+                self.handle_request()
+
+            def handle_request(self):
+                body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or "{}")
+                test.calls.append((self.command, self.path, body))
+                if self.headers.get("Authorization") != "Bearer " + TOKEN:
+                    self.send_error(401)
+                    return
+                rollout = {"id": test.operation_id, "runtime_type": test.runtime, "target_image_ref": IMAGE, "status": test.statuses[0], "phase": "verify"}
+                if len(test.statuses) > 1 and self.command == "GET":
+                    test.statuses.pop(0)
+                data = {"rollout": rollout}
+                if test.native_operation is not None:
+                    data["native_operation"] = test.native_operation
+                if test.force_attempt is not None and test.force_visible:
+                    data["native_operation"] = {"kind": "opencode-native-preserve", "rollout_id": test.operation_id, "stage": "force_zero", "blocked": False, "protection_held": True, "force_retry": test.force_attempt}
+                status = 200
+                preparation = {"id": "prep-31", "kind": "rollout_wake", "runtime_type": test.runtime, "status": test.preparation_status, "phase": "wake"}
+                if self.path.endswith("/prepare"):
+                    if test.drop_preparation:
+                        self.close_connection = True
+                        return
+                    data = {"operation": preparation}
+                elif self.path == "/api/v1/admin/runtime-scheduling":
+                    data = {"items": [preparation]}
+                elif self.path.endswith("/force-retry/preflight"):
+                    if test.drop_force_preflight:
+                        self.close_connection = True
+                        return
+                    status = 200 if test.force_allowed else 409
+                    data = {"rollout_id": test.operation_id, "allowed": test.force_allowed, "fingerprint": "b" * 64, "old_target_image_ref": "registry.example/runtime@sha256:" + "c" * 64, "target_image_ref": IMAGE, "stage": "preserve", "protection_held": True}
+                elif self.path.endswith("/force-retry"):
+                    test.force_attempt = {"request_id": body.get("request_id"), "target_image_ref": IMAGE, "stage": "force_zero", "confirmed": True, "actor_user_id": 1}
+                    if test.drop_force:
+                        self.close_connection = True
+                        return
+                    data["native_operation"] = {"kind": "opencode-native-preserve", "rollout_id": test.operation_id, "stage": "force_zero", "blocked": False, "protection_held": True, "force_retry": test.force_attempt}
+                    status = 202
+                elif self.path.endswith("/preflight"):
+                    if test.drop_preflight:
+                        self.close_connection = True
+                        return
+                    data = {"passed": test.passed, "blockers": [] if test.passed else [TOKEN], "strategy": test.strategy, "target_image_ref": IMAGE, "empty_pool_reset": test.empty}
+                    if test.strategy == "openclaw_8plus_data_safe":
+                        data["rollout"] = dict(rollout, status="preflight_passed", preflight_id="proof-41")
+                elif self.command == "POST":
+                    if test.drop_create:
+                        self.close_connection = True
+                        return
+                    status = 409 if test.conflict else 201
+                elif "?" in self.path:
+                    data = {"items": [rollout]}
+                if test.redirect:
+                    self.send_response(302)
+                    self.send_header("Location", "/stolen")
+                    self.end_headers()
+                    return
+                self.send_response(status)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps({"success": status < 400, "data": data, "error": TOKEN}).encode())
+
+        self.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+        self.api = "http://127.0.0.1:%d/api/v1" % self.server.server_port
+        self.runtime = "hermes"
+
+    def tearDown(self):
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join()
+        self.tmp.cleanup()
+
+    def run_cli(self, *extra):
+        result = subprocess.run([sys.executable, str(SCRIPT), "--api-url", self.api, "--runtime-type", self.runtime, "--target-image", IMAGE, "--state-file", str(self.state), "--poll-interval", "0.01", "--timeout", "2", *extra], env=dict(os.environ, CM_TOKEN=TOKEN), capture_output=True, text=True)
+        self.assertNotIn(TOKEN, result.stdout + result.stderr)
+        return result
+
+    def test_submit_once_and_resume_polls_same_operation(self):
+        self.statuses = ["running", "finished"]
+        self.assertEqual(self.run_cli().returncode, 0)
+        self.assertEqual(self.run_cli().returncode, 0)
+        self.assertEqual(sum(method == "POST" for method, _, _ in self.calls), 2)
+        self.assertEqual(json.loads(self.state.read_text())["operation_id"], 41)
+        self.assertEqual(self.state.stat().st_mode & 0o777, 0o600)
+        self.assertTrue(all(path.startswith("/api/v1/admin/runtime-rollouts") or path == "/api/v1/admin/runtime-scheduling" for _, path, _ in self.calls))
+
+    def test_terminal_failure_states_stop(self):
+        for state in ("blocked", "preflight_blocked", "error", "failed", "cancelled", "needs_attention", "unknown"):
+            with self.subTest(state=state):
+                self.statuses = [state]
+                result = self.run_cli("--operation-id", "41")
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("41", result.stdout)
+        self.assertTrue(all(method == "GET" for method, _, _ in self.calls))
+
+    def test_timeout_preserves_operation(self):
+        # The fixture keeps the known rollout running; leave enough setup
+        # budget for preparation, durable ID saves and polling under build load.
+        self.statuses = ["running"]
+        result = self.run_cli("--timeout", "0.5")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("timeout", result.stderr)
+        self.assertEqual(json.loads(self.state.read_text())["operation_id"], 41)
+
+    def test_conflict_never_reposts(self):
+        self.conflict = True
+        self.assertNotEqual(self.run_cli().returncode, 0)
+        self.assertNotEqual(self.run_cli().returncode, 0)
+        self.assertEqual(len(self.calls), 3)
+
+    def test_lost_create_response_requires_history_recovery(self):
+        self.drop_create = True
+        self.assertNotEqual(self.run_cli().returncode, 0)
+        self.assertNotEqual(self.run_cli().returncode, 0)
+        self.assertEqual(len(self.calls), 3)
+        self.assertEqual(self.run_cli("--history").returncode, 0)
+        self.assertEqual(self.run_cli("--operation-id", "41").returncode, 0)
+        self.assertEqual(sum(method == "POST" for method, _, _ in self.calls), 2)
+
+    def test_data_safe_preflight_confirmation(self):
+        self.runtime = "openclaw"
+        self.strategy = "openclaw_8plus_data_safe"
+        self.assertEqual(self.run_cli().returncode, 0)
+        self.assertEqual([path for method, path, _ in self.calls if method == "POST"], ["/api/v1/admin/runtime-rollouts/prepare", "/api/v1/admin/runtime-rollouts/preflight", "/api/v1/admin/runtime-rollouts"])
+        self.assertEqual(self.calls[3][2]["preflight_id"], "proof-41")
+        self.assertEqual(self.calls[3][2]["max_unavailable"], 0)
+        self.assertEqual(self.calls[2][2]["preparation_id"], "prep-31")
+        self.assertEqual(self.calls[3][2]["preparation_id"], "prep-31")
+
+    def test_blocked_preflight_does_not_submit(self):
+        self.runtime = "openclaw"
+        self.passed = False
+        self.assertNotEqual(self.run_cli().returncode, 0)
+        self.assertEqual(len(self.calls), 3)
+
+    def test_legacy_empty_reset_uses_handler_classification(self):
+        self.runtime = "openclaw"
+        self.empty = True
+        result = self.run_cli()
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("legacy_rolling", result.stdout)
+        self.assertIn("empty_pool_reset", result.stdout)
+        self.assertNotIn("preflight_id", self.calls[3][2])
+
+    def test_opencode_submits_only_native_preserve_strategy(self):
+        self.runtime = "opencode"
+        result = self.run_cli("--timeout", "2")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        bodies = [body for method, path, body in self.calls if method == "POST" and not path.endswith("/prepare")]
+        self.assertEqual(len(bodies), 1)
+        self.assertEqual(bodies[0]["strategy"], "opencode_native_preserve_v1")
+        self.assertTrue(bodies[0]["auto_rollback"])
+        self.assertEqual(bodies[0]["max_unavailable"], 0)
+
+    def test_opencode_lost_submission_never_reposts(self):
+        self.runtime = "opencode"
+        self.drop_create = True
+        self.assertNotEqual(self.run_cli().returncode, 0)
+        self.assertNotEqual(self.run_cli().returncode, 0)
+        self.assertEqual(sum(method == "POST" for method, _, _ in self.calls), 2)
+        self.assertEqual(json.loads(self.state.read_text())["stage"], "submitting")
+
+    def test_tag_rejected_before_network(self):
+        self.assertNotEqual(self.run_cli("--target-image", "registry.example/runtime:latest").returncode, 0)
+        self.assertEqual(self.calls, [])
+
+    def test_redirect_not_followed(self):
+        self.redirect = True
+        self.assertNotEqual(self.run_cli().returncode, 0)
+        self.assertEqual(len(self.calls), 1)
+
+    def test_state_identity_mismatch_does_not_poll(self):
+        self.assertEqual(self.run_cli().returncode, 0)
+        self.calls.clear()
+        self.assertNotEqual(self.run_cli("--target-image", "registry.example/runtime@sha256:" + "b" * 64).returncode, 0)
+        self.assertEqual(self.calls, [])
+
+    def test_failed_preparation_stops_before_upgrade(self):
+        self.preparation_status = "needs_attention"
+        self.assertNotEqual(self.run_cli().returncode, 0)
+        self.assertEqual([path for method, path, _ in self.calls if method == "POST"], ["/api/v1/admin/runtime-rollouts/prepare"])
+
+    def test_preparation_timeout_resume_does_not_prepare_twice(self):
+        self.preparation_status = "starting"
+        self.assertNotEqual(self.run_cli("--timeout", "0.5").returncode, 0)
+        self.preparation_status = "completed"
+        self.assertEqual(self.run_cli().returncode, 0)
+        self.assertEqual(sum(path.endswith("/prepare") for _, path, _ in self.calls), 1)
+
+    def test_unknown_status_is_not_echoed(self):
+        self.statuses = [TOKEN]
+        self.assertNotEqual(self.run_cli("--operation-id", "41").returncode, 0)
+
+    def test_processing_preparation_is_polled_until_timeout(self):
+        self.preparation_status = "processing"
+        result = self.run_cli("--timeout", "0.5")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("timeout", result.stderr)
+
+    def test_preparation_id_cannot_replay_unknown_rollout_submission(self):
+        self.drop_create = True
+        for runtime in ("hermes", "deepseek-harness"):
+            with self.subTest(runtime=runtime):
+                self.runtime = runtime
+                self.state = Path(self.tmp.name) / (runtime + ".json")
+                self.assertNotEqual(self.run_cli().returncode, 0)
+                original_calls = list(self.calls)
+                self.assertEqual(json.loads(self.state.read_text())["stage"], "submitting")
+                self.assertNotEqual(self.run_cli("--preparation-id", "prep-31").returncode, 0)
+                self.assertEqual(self.calls, original_calls)
+                self.assertEqual(json.loads(self.state.read_text())["stage"], "submitting")
+
+    def test_preparation_id_cannot_replay_unknown_preflight_submission(self):
+        self.runtime = "openclaw"
+        self.strategy = "openclaw_8plus_data_safe"
+        self.drop_preflight = True
+        self.assertNotEqual(self.run_cli().returncode, 0)
+        original_calls = list(self.calls)
+        self.assertEqual(json.loads(self.state.read_text())["stage"], "preflighting")
+        self.assertNotEqual(self.run_cli("--preparation-id", "prep-31").returncode, 0)
+        self.assertEqual(self.calls, original_calls)
+        self.assertEqual(json.loads(self.state.read_text())["stage"], "preflighting")
+
+    def test_preparation_id_recovers_only_unknown_initial_preparation(self):
+        self.drop_preparation = True
+        self.assertNotEqual(self.run_cli().returncode, 0)
+        self.assertEqual(json.loads(self.state.read_text())["stage"], "preparing")
+        self.drop_preparation = False
+        self.assertEqual(self.run_cli("--preparation-id", "prep-31").returncode, 0)
+        self.assertEqual(sum(path.endswith("/prepare") for _, path, _ in self.calls), 1)
+
+    def test_opencode_native_block_stops_and_keeps_original_operation_14(self):
+        self.runtime = "opencode"
+        self.operation_id = 14
+        self.statuses = ["running"]
+        self.native_operation = {"kind":"opencode-native-preserve", "rollout_id":14, "stage":"preserve", "blocked":True, "protection_held":True, "error_message":TOKEN, "instances":[{"instance_id":395,"state":"quiesced"},{"instance_id":396,"state":"quiesced"}]}
+        for index in range(2):
+            before = list(self.calls)
+            result = self.run_cli("--timeout","2")
+            self.assertNotEqual(result.returncode,0)
+            self.assertIn('"status": "blocked"',result.stdout)
+            self.assertIn('"operation_id": 14',result.stdout)
+            self.assertIn('"native_stage": "preserve"',result.stdout)
+            self.assertIn('"protection_held": true',result.stdout)
+            self.assertIn("protection remains held",result.stderr)
+            saved=json.loads(self.state.read_text())
+            self.assertEqual((saved["stage"],saved["operation_id"]),("observing",14))
+            if index:self.assertTrue(all(m=="GET" for m,_,_ in self.calls[len(before):]))
+        self.assertEqual(sum(m=="POST" for m,_,_ in self.calls),2)
+
+    def test_opencode_native_initial_empty_targets_can_finish(self):
+        self.runtime="opencode"
+        self.native_operation={"kind":"opencode-native-preserve","rollout_id":41,"stage":"standby","blocked":False,"protection_held":True,"targets":[]}
+        self.assertEqual(self.run_cli().returncode,0)
+
+    def test_opencode_known_id_native_block_never_submits(self):
+        self.runtime="opencode"
+        self.operation_id=14
+        self.statuses=["running"]
+        self.native_operation={"kind":"opencode-native-preserve","rollout_id":14,"stage":"preserve","blocked":True,"protection_held":True}
+        result=self.run_cli("--operation-id","14","--timeout","2")
+        self.assertNotEqual(result.returncode,0)
+        self.assertIn('"status": "blocked"',result.stdout)
+        self.assertTrue(self.calls and all(m=="GET" for m,_,_ in self.calls))
+        self.assertEqual(json.loads(self.state.read_text())["operation_id"],14)
+
+    def test_opencode_native_view_identity_mismatch_stops_read_only(self):
+        self.runtime="opencode"
+        self.operation_id=14
+        self.native_operation={"kind":"opencode-native-preserve","rollout_id":15,"stage":"preserve","blocked":True,"protection_held":True}
+        result=self.run_cli("--operation-id","14")
+        self.assertNotEqual(result.returncode,0)
+        self.assertIn("native operation identity mismatch",result.stderr)
+        self.assertTrue(all(m=="GET" for m,_,_ in self.calls))
+
+    def test_force_retry_confirms_once_and_resumes_original_id(self):
+        self.runtime = "opencode"
+        self.operation_id = 14
+        for _ in range(2):
+            result = self.run_cli("--force-retry-id", "14")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            observed = json.loads(result.stdout.splitlines()[-1])
+            self.assertEqual(observed["native_stage"], "force_zero")
+            self.assertEqual(observed["target_digest"], "sha256:" + "a" * 64)
+            self.assertEqual(observed["force_request_id"], self.force_attempt["request_id"])
+        posts = [(p, b) for m, p, b in self.calls if m == "POST"]
+        self.assertEqual([p for p, _ in posts], ["/api/v1/admin/runtime-rollouts/14/force-retry/preflight", "/api/v1/admin/runtime-rollouts/14/force-retry"])
+        self.assertTrue(posts[1][1]["force"])
+        self.assertEqual(posts[1][1]["fingerprint"], "b" * 64)
+        self.assertEqual(str(uuid.UUID(posts[1][1]["request_id"])), posts[1][1]["request_id"])
+        saved = json.loads(self.state.read_text())
+        self.assertEqual(saved["operation_id"], 14)
+        self.assertEqual(saved["force_request_id"], posts[1][1]["request_id"])
+        self.assertEqual(self.state.stat().st_mode & 0o777, 0o600)
+
+    def test_force_retry_lost_confirmation_observes_uuid_without_repost(self):
+        self.runtime = "opencode"
+        self.operation_id = 14
+        self.drop_force = True
+        self.assertNotEqual(self.run_cli("--force-retry-id", "14").returncode, 0)
+        self.assertEqual(json.loads(self.state.read_text())["stage"], "force_submitting")
+        self.assertEqual(self.run_cli("--force-retry-id", "14").returncode, 0)
+        self.assertEqual(sum(m == "POST" for m, _, _ in self.calls), 2)
+
+    def test_force_retry_unknown_confirmation_stays_unknown(self):
+        self.runtime = "opencode"
+        self.operation_id = 14
+        self.drop_force = True
+        self.force_visible = False
+        self.assertNotEqual(self.run_cli("--force-retry-id", "14").returncode, 0)
+        before = list(self.calls)
+        self.assertNotEqual(self.run_cli("--force-retry-id", "14").returncode, 0)
+        self.assertEqual(json.loads(self.state.read_text())["stage"], "force_submitting")
+        self.assertTrue(all(m == "GET" for m, _, _ in self.calls[len(before):]))
+
+    def test_force_retry_refuses_other_attempt_without_repost(self):
+        self.runtime = "opencode"
+        self.operation_id = 14
+        self.drop_force = True
+        self.assertNotEqual(self.run_cli("--force-retry-id", "14").returncode, 0)
+        self.force_attempt["request_id"] = str(uuid.uuid4())
+        before = list(self.calls)
+        result = self.run_cli("--force-retry-id", "14")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertTrue(all(m == "GET" for m, _, _ in self.calls[len(before):]))
+
+    def test_force_retry_preflight_refusal_never_confirms(self):
+        self.runtime = "opencode"
+        self.operation_id = 14
+        self.force_allowed = False
+        for _ in range(2):
+            self.assertNotEqual(self.run_cli("--force-retry-id", "14").returncode, 0)
+        self.assertEqual(sum(m == "POST" for m, _, _ in self.calls), 1)
+
+    def test_force_retry_lost_preflight_does_not_repost(self):
+        self.runtime = "opencode"
+        self.operation_id = 14
+        self.drop_force_preflight = True
+        for _ in range(2):
+            self.assertNotEqual(self.run_cli("--force-retry-id", "14").returncode, 0)
+        self.assertEqual(sum(m == "POST" for m, _, _ in self.calls), 1)
+
+    def test_force_retry_rejects_non_opencode_before_network(self):
+        self.assertNotEqual(self.run_cli("--force-retry-id", "14").returncode, 0)
+        self.assertEqual(self.calls, [])
+
+    def test_force_retry_cannot_reuse_normal_delivery_state(self):
+        self.runtime = "opencode"
+        self.operation_id = 14
+        self.assertEqual(self.run_cli().returncode, 0)
+        original = self.state.read_bytes()
+        self.calls.clear()
+        self.assertNotEqual(self.run_cli("--force-retry-id", "14").returncode, 0)
+        self.assertEqual(self.state.read_bytes(), original)
+        self.assertEqual(self.calls, [])
+
+
+if __name__ == "__main__":
+    unittest.main()

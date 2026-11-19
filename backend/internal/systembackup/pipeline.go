@@ -53,6 +53,9 @@ func CaptureFunctionalBundle(ctx context.Context, stage, origin, id string, sour
 	if e = validate(ctx, source.MySQL); e != nil {
 		return zero, e
 	}
+	if e := validateObservationCaptureSources(ctx, source, true); e != nil {
+		return zero, e
+	}
 	tables, e := snapshotBusinessTables(ctx, source.MySQL, source.TeamDataOnly)
 	if e != nil {
 		return zero, e
@@ -131,7 +134,7 @@ func captureAdapters(source CaptureSources, b CaptureBudget, tables []string) []
 		}},
 		{"object_storage", func(ctx context.Context, w io.Writer) error {
 			if source.TeamDataOnly {
-				return CaptureTeamDataObjects(ctx, source.Objects, w, source.ObjectBuckets, objectBudget)
+				return captureTeamDataHistoryObjects(ctx, w, source, objectBudget)
 			}
 			return CaptureObjects(ctx, source.Objects, w, source.ObjectBuckets, objectBudget)
 		}},

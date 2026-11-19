@@ -28,7 +28,7 @@ func (s *RuntimeScheduler) ConfirmedTeamStoppedSource(ctx context.Context, id, u
 		return models.InstanceIdleStopOperation{}, err
 	}
 	var proof runtimeSlotContainerProof
-	if state != "stopped" || intent == nil || !validContainerIntent(*intent) || decodeContainerProof(raw, &proof) != nil || proof.runtimeSlotStopIntent != *intent || !validSlotProofSource(proof) || !proof.CleanupConfirmed || proof.ContainerID == "" || proof.FinishedAt.IsZero() || proof.InstanceID != id || proof.UserID != user || proof.Generation != a.Generation || proof.PodUID != a.PodUID || proof.GatewayID != a.GatewayID {
+	if state != "stopped" || intent == nil || !validContainerIntent(*intent) || decodeContainerProof(raw, &proof) != nil || proof.runtimeSlotStopIntent != *intent || !validSlotProofSource(proof) || !validContainerCleanup(proof.runtimeSlotTerminationMessage) || proof.ContainerID == "" || proof.FinishedAt.IsZero() || proof.InstanceID != id || proof.UserID != user || proof.Generation != a.Generation || proof.PodUID != a.PodUID || proof.GatewayID != a.GatewayID {
 		return models.InstanceIdleStopOperation{}, fmt.Errorf("retained source termination proof changed")
 	}
 	pods, err := s.podRepo.List(ctx, RuntimeTypeOpenClaw)

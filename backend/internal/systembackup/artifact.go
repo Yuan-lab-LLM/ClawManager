@@ -139,7 +139,7 @@ func (m Manifest) Validate() error {
 	if m.Purpose == "team_data" && m.Consistency != "best_effort" {
 		return errors.New("online Team data must declare its capture consistency")
 	}
-	if m.Purpose == "team_data" && !slices.Equal(m.ExcludedSQLTables, teamDataExcludedTables()) {
+	if m.Purpose == "team_data" && !slices.Equal(m.ExcludedSQLTables, teamDataExcludedTables()) && !slices.Equal(m.ExcludedSQLTables, []string{"audit_events", "chat_messages", "chat_sessions", "cost_records", "model_invocations", "risk_hits"}) {
 		return errors.New("Team data scope declaration missing")
 	}
 	if len(m.Parts) != len(RequiredParts) {

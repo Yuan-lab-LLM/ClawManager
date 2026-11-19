@@ -167,7 +167,7 @@ OpenClaw、Hermes、OpenCode、DeepSeek Harness を Lite / Pro で作成し、�
 
 外部システムは、独立してデプロイする Northbound Gateway を介して ClawManager と連携します。ワンタイム JWE 認証、Scope、Owner 分離、冪等な非同期操作、Rate Limit、Audit、Gateway-to-Core mTLS により、公開連携境界を管理コンソールから分離します。管理者は LDAP/LDAPS または StartTLS を設定し、Directory User の Preview/Import と Group-to-Role Mapping も実行できます。
 
-Northbound API は OpenClaw、Hermes、OpenCode、DeepSeek Harness の Lite / Pro に対する作成、照会、再起動、明示確認付き Reset、Password 保護 Share Link を管理します。[Northbound API Guide](./docs/northbound-api-guide.md) と [Deployment Add-on](./deployments/k8s/northbound/README.md) を参照してください。
+Northbound API は OpenClaw、Hermes、OpenCode、DeepSeek Harness の Lite / Pro に対する作成、照会、再起動、明示確認付き Reset、Password 保護 Share Link を管理します。[Northbound API Guide](./docs/northbound-api-guide.md) と [Deployment Add-on](./tools/k8s/northbound/README.md) を参照してください。
 
 <a id="ai-gateway"></a>
 ### AI Gateway
@@ -327,7 +327,7 @@ Runtime と Protocol の技術資料は Contributor 向けに `docs/` に残し�
 - [Resource Management Guide](./docs/resource-management_ja.md)
 - [Skill Hub Guide](./docs/skill-hub-guide_ja.md)
 - [OpenCode Workspace Guide](./docs/opencode-lite-pro-agent-development_ja.md)
-- [Northbound API Deployment Add-on](./deployments/k8s/northbound/README.md)
+- [Northbound API Deployment Add-on](./tools/k8s/northbound/README.md)
 - [Northbound API Guide（中国語）](./docs/northbound-api-guide.md)
 - [Northbound API Upgrade Guide（中国語）](./docs/northbound-upgrade-guide.md)
 - [Northbound OpenAPI 3.1 Specification](./docs/northbound-openapi.yaml)

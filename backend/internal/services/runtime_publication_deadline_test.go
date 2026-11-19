@@ -20,6 +20,7 @@ import (
 
 type publicationDeadlineInstances struct {
 	securitySlotInstances
+	binding       *models.InstanceRuntimeBinding
 	reads, raceAt int
 }
 
@@ -41,13 +42,17 @@ func (s *publicationDeadlineInstances) MarkRuntimePublicationTimeout(ctx context
 	if s.instance.ID != id || s.instance.RuntimeGeneration != generation {
 		return false, errors.New("generation changed")
 	}
-	if s.instance.Status != "creating" || s.instance.CreatedAt != origin {
+	if s.instance.Status != "creating" || s.binding.CreatedAt != origin {
 		return false, nil
 	}
 	s.instance.Status = "error"
 	s.instance.RuntimeErrorCode = &code
 	s.instance.RuntimeErrorMessage = &message
 	return true, nil
+}
+
+func (s *publicationDeadlineInstances) RuntimePublicationOrigin(context.Context, int, int) (time.Time, error) {
+	return s.binding.CreatedAt, nil
 }
 
 type publicationDeadlineSchedulerRepo struct {
@@ -67,7 +72,7 @@ func (r *publicationDeadlineSchedulerRepo) MarkRuntimePublicationTimeout(ctx con
 }
 
 func TestDirectG1PublishedCreateExpiresWithoutManualStartOrNorthbound(t *testing.T) {
-	for _, reconciler := range []string{"scheduler", "assignment", "caught-up", "create-race"} {
+	for _, reconciler := range []string{"scheduler", "assignment", "caught-up", "create-race", "capacity-wait"} {
 		t.Run(reconciler, func(t *testing.T) {
 			f := newPendingSlotReplayFixture(t)
 			f.instance.RuntimeGeneration = 1
@@ -75,6 +80,10 @@ func TestDirectG1PublishedCreateExpiresWithoutManualStartOrNorthbound(t *testing
 			f.binding.GatewayID = "pending-7-1"
 			f.instance.CreatedAt = time.Now().Add(-6 * time.Minute)
 			original := f.instance.CreatedAt
+			f.binding.CreatedAt = original
+			if reconciler == "capacity-wait" {
+				f.binding.CreatedAt = time.Now()
+			}
 			renewed := time.Now()
 			f.instance.StartedAt = &renewed
 			f.instance.UpdatedAt = renewed
@@ -96,7 +105,7 @@ func TestDirectG1PublishedCreateExpiresWithoutManualStartOrNorthbound(t *testing
 			})
 			// Model direct API G1 SQL + published protected assignment, with no
 			// model-activity/start_deadline row or Northbound operation.
-			source := &publicationDeadlineInstances{securitySlotInstances: securitySlotInstances{securityInstances: securityInstances{instance: &f.instance}}}
+			source := &publicationDeadlineInstances{securitySlotInstances: securitySlotInstances{securityInstances: securityInstances{instance: &f.instance}}, binding: f.binding}
 			a, err := NewRuntimeSecurityAuthority(f.kube, "runtime", source, []byte(strings.Repeat("k", 32)))
 			if err != nil {
 				t.Fatal(err)
@@ -114,7 +123,7 @@ func TestDirectG1PublishedCreateExpiresWithoutManualStartOrNorthbound(t *testing
 			if err != nil {
 				t.Fatal(err)
 			}
-			ready := reconciler == "caught-up"
+			ready := reconciler == "caught-up" || reconciler == "capacity-wait"
 			reads := 0
 			a.assignments = securityAssignmentFunc(func(ctx context.Context, _ int) (*corev1.ConfigMap, []corev1.Pod, error) {
 				reads++
@@ -129,6 +138,18 @@ func TestDirectG1PublishedCreateExpiresWithoutManualStartOrNorthbound(t *testing
 			secretBefore, err := f.kube.CoreV1().Secrets("runtime").Get(context.Background(), "lite-instance-7-g1", metav1.GetOptions{})
 			if err != nil {
 				t.Fatal(err)
+			}
+			if reconciler == "capacity-wait" {
+				if err := f.client.ReconcileAssignments(context.Background()); err != nil {
+					t.Fatalf("first reservation after capacity wait could not start: %v", err)
+				}
+				if f.instance.Status != "creating" || len(f.requests) != 1 || f.bindings.bindings[7] != f.binding {
+					t.Fatal("capacity wait prevented the published reservation from reaching its agent")
+				}
+				if _, err := a.CurrentIdentity(context.Background(), f.instance.ID); err != nil {
+					t.Fatalf("capacity wait prevented the agent from obtaining its current identity: %v", err)
+				}
+				return
 			}
 			if reconciler == "create-race" {
 				source.raceAt = 3
@@ -207,7 +228,7 @@ func TestPublicationDeadlineExemptsTimelyRunningAndLaterStarts(t *testing.T) {
 			case "not-published":
 				instance.RuntimeSecurityProfile = ""
 			}
-			if err := runtimePublicationCreateTimeout(&instance); err != nil {
+			if err := runtimePublicationCreateTimeout(&instance, instance.CreatedAt); err != nil {
 				t.Fatalf("valid startup expired: %v", err)
 			}
 		})
@@ -216,7 +237,7 @@ func TestPublicationDeadlineExemptsTimelyRunningAndLaterStarts(t *testing.T) {
 
 func TestPublicationTimeoutPreservesOwnershipAcrossCreateCallers(t *testing.T) {
 	instance := models.Instance{Status: "creating", RuntimeGeneration: 1, RuntimeSecurityProfile: RuntimeSecurityProfile, CreatedAt: time.Now().Add(-time.Hour)}
-	timeout := runtimePublicationCreateTimeout(&instance)
+	timeout := runtimePublicationCreateTimeout(&instance, instance.CreatedAt)
 	if timeout == nil || runtimeFailureCode(timeout) != "RUNTIME_PUBLICATION_TIMEOUT" || !runtimeGatewayCreateOutcomeUncertain(timeout) {
 		t.Fatalf("timeout could reach terminal create cleanup: %v", timeout)
 	}
@@ -229,6 +250,7 @@ func TestPublicationSchedulerTimeoutCASDoesNotOverwriteRunning(t *testing.T) {
 	f.instance.RuntimeSecurityProfile = RuntimeSecurityProfile
 	f.binding.Generation = 1
 	f.binding.GatewayID = "pending-7-1"
+	f.binding.CreatedAt = f.instance.CreatedAt
 	f.client.security = &RuntimeSecurityAuthority{assignments: securityAssignmentFunc(func(context.Context, int) (*corev1.ConfigMap, []corev1.Pod, error) {
 		t.Fatal("expiry read inventory")
 		return nil, nil, nil

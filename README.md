@@ -45,6 +45,15 @@
   </a>
 </p>
 
+<p align="center">
+  <a href="https://trendshift.io/repositories/24427#achievements">
+    <img src="https://trendshift.io/api/badge/trendshift/repositories/24427/daily" alt="ClawManager's Repository of the Day achievement on Trendshift" width="250" height="55" />
+  </a>
+  <a href="https://trendshift.io/repositories/24427#achievements">
+    <img src="https://trendshift.io/api/badge/trendshift/repositories/24427/monthly?language=Go" alt="ClawManager's Go Repository of the Month achievement on Trendshift" width="250" height="55" />
+  </a>
+</p>
+
 <h2 align="center">See ClawManager in 60 Seconds</h2>
 
 <p align="center">
@@ -168,7 +177,7 @@ Create OpenClaw, Hermes, OpenCode, or DeepSeek Harness workspaces in Lite or Pro
 
 Integrate ClawManager with external systems through a separately deployed Northbound gateway. One-time JWE authentication, scoped tokens, owner isolation, idempotent asynchronous operations, rate limits, audit records, and gateway-to-Core mTLS keep the public integration boundary separate from the management console. Administrators can also configure LDAP/LDAPS or StartTLS authentication, preview and import directory users, and map groups to platform roles.
 
-The Northbound API manages supported OpenClaw, Hermes, OpenCode, and DeepSeek Harness Lite/Pro instances, including create, query, restart, confirmed reset, and password-protected Share Links. See the [Northbound API Guide](./docs/northbound-api-guide.md) and [deployment add-on](./deployments/k8s/northbound/README.md).
+The Northbound API manages supported OpenClaw, Hermes, OpenCode, and DeepSeek Harness Lite/Pro instances, including create, query, restart, confirmed reset, and password-protected Share Links. See the [Northbound API Guide](./docs/northbound-api-guide.md) and [deployment add-on](./tools/k8s/northbound/README.md).
 
 ### AI Gateway
 
@@ -327,7 +336,7 @@ Runtime and protocol implementation references remain under `docs/` for contribu
 - [OpenCode Workspace Guide](./docs/opencode-lite-pro-agent-development_en.md)
 - [Hermes Runtime Guide](./docs/hermes-runtime-agent-development.md)
 - [Generic Runtime Agent Integration Guide](./docs/runtime-agent-integration-guide.md)
-- [Northbound API Deployment Add-on](./deployments/k8s/northbound/README.md)
+- [Northbound API Deployment Add-on](./tools/k8s/northbound/README.md)
 - [Northbound API Guide (Chinese)](./docs/northbound-api-guide.md)
 - [Northbound API Upgrade Guide (Chinese)](./docs/northbound-upgrade-guide.md)
 - [Northbound OpenAPI 3.1 Specification](./docs/northbound-openapi.yaml)

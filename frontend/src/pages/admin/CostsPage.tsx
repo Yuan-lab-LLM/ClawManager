@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import AdminLayout from '../../components/AdminLayout';
 import { adminService, type CostOverview } from '../../services/adminService';
@@ -15,44 +15,59 @@ const CostsPage: React.FC = () => {
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(20);
+  const [days, setDays] = useState(30);
+  const initialWindow = useMemo(() => {
+    const until = new Date();
+    return { since: new Date(until.getTime() - 30 * 86400000).toISOString().slice(0, 16), until: until.toISOString().slice(0, 16) };
+  }, []);
+  const [since, setSince] = useState(initialWindow.since);
+  const [until, setUntil] = useState(initialWindow.until);
+  const [applied, setApplied] = useState({ search: '', ...initialWindow });
+  const cursors = useRef<Record<number, string>>({ 1: '' });
+  const requestSequence = useRef(0);
 
   useEffect(() => {
     void loadOverview();
-  }, [page, limit]);
+  }, [page, limit, applied]);
 
   const loadOverview = async () => {
+    const request = ++requestSequence.current;
     try {
       setLoading(true);
       setError(null);
       const data = await adminService.getCostOverview({
         page,
         limit,
-        search: search.trim() || undefined,
+        search: applied.search || undefined,
+        since: `${applied.since}:00Z`,
+        until: `${applied.until}:00Z`,
+        cursor: cursors.current[page] || undefined,
       });
+      if (request !== requestSequence.current) return;
+      if (data.next_cursor) cursors.current[page + 1] = data.next_cursor;
       setOverview(data);
     } catch (err: any) {
-        setError(err.response?.data?.error || t('costsPage.loadFailed'));
+      if (request === requestSequence.current) setError(err.response?.data?.error || t('costsPage.loadFailed'));
     } finally {
-      setLoading(false);
+      if (request === requestSequence.current) setLoading(false);
     }
   };
 
-  const applyFilters = async () => {
-    setPage(1);
-    try {
-      setLoading(true);
-      setError(null);
-      const data = await adminService.getCostOverview({
-        page: 1,
-        limit,
-        search: search.trim() || undefined,
-      });
-      setOverview(data);
-    } catch (err: any) {
-      setError(err.response?.data?.error || t('costsPage.loadFailed'));
-    } finally {
-      setLoading(false);
+  const applyFilters = () => {
+    const duration = Date.parse(`${until}:00Z`) - Date.parse(`${since}:00Z`);
+    if (!Number.isFinite(duration) || duration <= 0 || duration > 90 * 86400000) {
+      setError(t('aiAuditPage.archiveWindow'));
+      return;
     }
+    cursors.current = { 1: '' };
+    setOverview(null);
+    setPage(1);
+    setApplied({ search: search.trim(), since, until });
+  };
+
+  const goToPage = (next: number) => {
+    if (next === page) void loadOverview();
+    else setPage(next);
   };
 
   const totalPages = Math.max(1, Math.ceil((overview?.total_recent_records || 0) / (overview?.limit || limit || 1)));
@@ -60,6 +75,18 @@ const CostsPage: React.FC = () => {
   return (
     <AdminLayout title={t('nav.costs')}>
       <div className="space-y-5">
+        <div className="flex flex-wrap items-end gap-3 text-sm">
+          <label>{t('aiAuditPage.metadataWindow')}<select className="app-input mt-1" value={days} onChange={event => {
+            const value = Number(event.target.value);
+            const end = new Date();
+            setDays(value);
+            setSince(new Date(end.getTime() - value * 86400000).toISOString().slice(0, 16));
+            setUntil(end.toISOString().slice(0, 16));
+          }}><option value={30}>30 days</option><option value={90}>90 days</option></select></label>
+          <label>{t('aiAuditPage.archiveFrom')}<input type="datetime-local" className="app-input mt-1" value={since} onChange={event => setSince(event.target.value)} /></label>
+          <label>{t('aiAuditPage.archiveUntil')}<input type="datetime-local" className="app-input mt-1" value={until} onChange={event => setUntil(event.target.value)} /></label>
+          <button onClick={applyFilters} className="app-button-secondary">{t('costsPage.apply')}</button>
+        </div>
         {error && (
           <section className="app-panel px-5 py-4">
             <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-red-700">
@@ -70,7 +97,8 @@ const CostsPage: React.FC = () => {
 
         {loading || !overview ? (
           <section className="app-panel px-6 py-12 text-sm text-[var(--cm-muted)]">
-            {t('costsPage.loading')}
+            {loading ? t('costsPage.loading') : t('costsPage.loadFailed')}
+            {!loading && <button onClick={() => void loadOverview()} className="app-button-secondary ml-3">{t('common.refresh')}</button>}
           </section>
         ) : (
           <>
@@ -81,7 +109,7 @@ const CostsPage: React.FC = () => {
               <MetricCard label={t('costsPage.internalCost')} value={`${overview.total_internal_cost.toFixed(8)} ${overview.currency}`} note={t('costsPage.internalCostNote')} />
             </section>
 
-            <TrendCard points={overview.daily_trend} currency={overview.currency} />
+            <TrendCard points={overview.daily_trend} currency={overview.currency} since={applied.since} until={applied.until} />
 
             <section className="grid gap-5 xl:grid-cols-2">
               <AggregateTableCard
@@ -118,7 +146,7 @@ const CostsPage: React.FC = () => {
                     />
                     <select
                       value={limit}
-                      onChange={(event) => setLimit(Number(event.target.value))}
+                      onChange={(event) => { cursors.current = { 1: '' }; setOverview(null); setPage(1); setLimit(Number(event.target.value)); }}
                       className="app-input"
                     >
                       <option value={10}>{t('costsPage.pageSize10')}</option>
@@ -207,19 +235,19 @@ const CostsPage: React.FC = () => {
                 <div className="flex items-center gap-3">
                   <button
                     type="button"
-                    onClick={() => setPage((current) => Math.max(1, current - 1))}
-                    disabled={page <= 1}
+                    onClick={() => goToPage(Math.max(1, overview.page - 1))}
+                    disabled={loading || overview.page <= 1}
                     className="app-button-secondary disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {t('admin.prev')}
                   </button>
                   <span>
-                    {t('admin.pageSummary', { page, total: totalPages })}
+                    {t('admin.pageSummary', { page: overview.page, total: totalPages })}
                   </span>
                   <button
                     type="button"
-                    onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
-                    disabled={page >= totalPages}
+                    onClick={() => goToPage(Math.min(totalPages, overview.page + 1))}
+                    disabled={loading || !overview?.next_cursor}
                     className="app-button-secondary disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {t('admin.nextPage')}
@@ -300,7 +328,9 @@ const MetricCard: React.FC<{
 const TrendCard: React.FC<{
   points: TrendPoint[];
   currency: string;
-}> = ({ points, currency }) => {
+  since: string;
+  until: string;
+}> = ({ points, currency, since, until }) => {
   const { t } = useI18n();
   const safePoints = points ?? [];
   const values = safePoints.map((point) => point.estimated_cost);
@@ -328,11 +358,11 @@ const TrendCard: React.FC<{
       <div className="flex items-start justify-between gap-4">
         <div>
           <div className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--cm-muted)]">{t('costsPage.dailyTrend')}</div>
-          <h3 className="mt-2 text-xl font-semibold text-[var(--cm-ink)]">{t('costsPage.lastSevenDays')}</h3>
+          <h3 className="mt-2 text-xl font-semibold text-[var(--cm-ink)]">{since.slice(0, 10)} – {until.slice(0, 10)}</h3>
           <p className="mt-1 text-sm text-[var(--cm-muted)]">{t('costsPage.dailyTrendSubtitle')}</p>
         </div>
         <div className="rounded-full border border-[var(--cm-border)] bg-[var(--cm-subtle)] px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-[var(--cm-muted)]">
-          {t('costsPage.sevenDayView')}
+          UTC
         </div>
       </div>
 

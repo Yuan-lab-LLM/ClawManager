@@ -1,6 +1,7 @@
 import { instanceCreateTranslations } from "./instanceCreateI18n";
 import { teamTranslations } from "./teamI18n";
 import { workbenchTranslations } from "./workbenchI18n";
+import { runtimeSlotResetTranslations } from "./runtimeSlotResetI18n";
 export type Locale = "en" | "zh" | "ja" | "ko" | "de";
 
 import { hermesDesktopTranslations } from "./hermesDesktopI18n";
@@ -2074,6 +2075,32 @@ export const translations: Record<Locale, TranslationTree> = {
         "Tune regex-based sensitive detection rules, severities, actions, and execution order.",
     },
     aiAuditPage: {
+      metadataWindow: "Reporting window (UTC)",
+      queryWindow: "{since} – {until} · {count} traces. Default 30 days; maximum 90 days. Paging order stays fixed when late events arrive.",
+      applyFilters: "Apply filters",
+      errorPreview: "Error preview",
+      pageSize: "Rows per page",
+      archiveHistory: "Older history and archive export",
+      archiveDescription: "Online reports default to 30 days and support up to 90 days. Choose any historical window up to 90 days to download archived metadata in pages of 200 records.",
+      archiveFrom: "From (UTC)",
+      archiveUntil: "Until, exclusive (UTC)",
+      archiveWindow: "Choose an ordered date range of at most 90 days.",
+      archiveFailed: "Archive export failed. Your page is preserved; retry the download.",
+      archiveNext: "Download next 200 records",
+      archiveDownload: "Download first page",
+      archiveComplete: "All records in this archive window have been downloaded.",
+      metadataPage: "Trace metadata page",
+      loadBody: "View original",
+      hideBody: "Hide original",
+      bodyLoadFailed: "Couldn't load the original content.",
+      bodyExpired: "Original content has expired.",
+      bodyPartlyExpired: "Some original content has expired.",
+      bodyEmpty: "No original content was recorded.",
+      flowLoading: "Loading steps…",
+      flowLoadFailed: "Couldn't load the execution steps.",
+      flowLoadMore: "Load more steps",
+      flowIncomplete: "Some steps could not be recovered from the retained content.",
+      flowPreviewTruncated: "Preview shortened. The original is available in the corresponding model call.",
       title: "Recent AI Traces",
       subtitle:
         "Review governed model calls, trace IDs, token usage, status, and provider routing outcomes.",
@@ -3406,6 +3433,8 @@ export const translations: Record<Locale, TranslationTree> = {
         timeRange7d: "Last 7 days",
         timeRange30d: "Last 30 days",
         autoRefresh: "Auto refresh (15s)",
+        refreshPaused: "Auto refresh is paused on older pages. Refresh to return to the latest results.",
+        cursorStale: "Usage changed during pagination. Refresh to restart from the latest results. Export was not completed.",
         refresh: "Refresh",
         exportCsv: "Export CSV",
         exportCsvLoading: "Exporting...",
@@ -4253,6 +4282,25 @@ export const translations: Record<Locale, TranslationTree> = {
       riskRulesDescription: "调整正则敏感规则、严重级别、动作和执行顺序。",
     },
     aiAuditPage: {
+      metadataPage: "Trace metadata page",
+      loadBody: "查看原文",
+      hideBody: "收起原文",
+      bodyLoadFailed: "原文加载失败。",
+      bodyExpired: "原文已过期。",
+      bodyPartlyExpired: "部分原文已过期。",
+      bodyEmpty: "未记录原文。",
+      flowLoading: "正在加载流程…",
+      flowLoadFailed: "执行流程加载失败。",
+      flowLoadMore: "加载更多步骤",
+      flowIncomplete: "部分步骤无法从已保留的正文恢复。",
+      flowPreviewTruncated: "预览已缩短，原文可在对应的模型调用中查看。",
+      queryWindow: "{since} 至 {until} · 共 {count} 条 Trace。默认 30 天，最长 90 天；迟到事件不会改变翻页顺序。",
+      applyFilters: "应用筛选",
+      errorPreview: "错误预览",
+      pageSize: "每页条数",
+      archiveFrom: "起始时间（UTC）",
+      archiveUntil: "结束时间，不含（UTC）",
+      archiveWindow: "请选择起止有序且不超过 90 天的时间范围。",
       title: "最近 AI Trace",
       subtitle: "查看受管模型调用、Trace、Token 用量、状态和实际路由结果。",
       loadFailed: "加载 AI 审计记录失败",
@@ -5531,6 +5579,8 @@ export const translations: Record<Locale, TranslationTree> = {
         timeRange7d: "最近 7 天",
         timeRange30d: "最近 30 天",
         autoRefresh: "自动刷新（15 秒）",
+        refreshPaused: "浏览较早页面时已暂停自动刷新。点击刷新返回最新结果。",
+        cursorStale: "分页期间用量发生变化。请点击刷新，从最新结果重新开始；本次导出未完成。",
         refresh: "刷新",
         exportCsv: "导出 CSV",
         exportCsvLoading: "导出中...",
@@ -6355,6 +6405,21 @@ export const translations: Record<Locale, TranslationTree> = {
         "正規表現ベースの機密検知ルール、重大度、動作、実行順序を調整します。",
     },
     aiAuditPage: {
+      metadataPage: "Trace metadata page",
+      loadBody: "原文を表示",
+      hideBody: "原文を閉じる",
+      bodyLoadFailed: "原文を読み込めませんでした。",
+      bodyExpired: "原文の保存期限が切れました。",
+      bodyPartlyExpired: "一部の原文の保存期限が切れました。",
+      bodyEmpty: "原文は記録されていません。",
+      flowLoading: "手順を読み込み中…",
+      flowLoadFailed: "実行手順を読み込めませんでした。",
+      flowLoadMore: "さらに手順を読み込む",
+      flowIncomplete: "保存済みの内容から復元できない手順があります。",
+      flowPreviewTruncated: "プレビューを短縮しました。原文は対応するモデル呼び出しで確認できます。",
+      queryWindow: "{since} ～ {until} · {count} トレース。既定 30 日、最大 90 日。遅延イベントによるページ順序の変更はありません。",
+      applyFilters: "フィルターを適用",
+      pageSize: "ページあたりの行数",
       title: "最近の AI トレース",
       subtitle:
         "ガバナンス対象のモデル呼び出し、Trace、Token 使用量、状態、実際のルーティング結果を確認します。",
@@ -8012,6 +8077,21 @@ export const translations: Record<Locale, TranslationTree> = {
         "정규식 기반 민감 규칙, 심각도, 동작, 실행 순서를 조정합니다.",
     },
     aiAuditPage: {
+      metadataPage: "Trace metadata page",
+      loadBody: "원문 보기",
+      hideBody: "원문 닫기",
+      bodyLoadFailed: "원문을 불러오지 못했습니다.",
+      bodyExpired: "원문의 보존 기간이 만료되었습니다.",
+      bodyPartlyExpired: "일부 원문의 보존 기간이 만료되었습니다.",
+      bodyEmpty: "기록된 원문이 없습니다.",
+      flowLoading: "단계를 불러오는 중…",
+      flowLoadFailed: "실행 단계를 불러오지 못했습니다.",
+      flowLoadMore: "단계 더 불러오기",
+      flowIncomplete: "보존된 내용에서 복원할 수 없는 단계가 있습니다.",
+      flowPreviewTruncated: "미리보기가 축소되었습니다. 해당 모델 호출에서 원문을 확인할 수 있습니다.",
+      queryWindow: "{since} – {until} · 트레이스 {count}개. 기본 30일, 최대 90일. 지연 이벤트에도 페이지 순서는 유지됩니다.",
+      applyFilters: "필터 적용",
+      pageSize: "페이지당 행 수",
       title: "최근 AI Trace",
       subtitle:
         "통제된 모델 호출, Trace, Token 사용량, 상태, 실제 라우팅 결과를 확인합니다.",
@@ -9648,6 +9728,21 @@ export const translations: Record<Locale, TranslationTree> = {
         "Passen Sie regex-basierte Erkennungsregeln, Schweregrade, Aktionen und Ausführungsreihenfolge an.",
     },
     aiAuditPage: {
+      metadataPage: "Trace metadata page",
+      loadBody: "Original anzeigen",
+      hideBody: "Original ausblenden",
+      bodyLoadFailed: "Der Originalinhalt konnte nicht geladen werden.",
+      bodyExpired: "Der Originalinhalt ist abgelaufen.",
+      bodyPartlyExpired: "Ein Teil des Originalinhalts ist abgelaufen.",
+      bodyEmpty: "Es wurde kein Originalinhalt aufgezeichnet.",
+      flowLoading: "Schritte werden geladen…",
+      flowLoadFailed: "Die Ausführungsschritte konnten nicht geladen werden.",
+      flowLoadMore: "Weitere Schritte laden",
+      flowIncomplete: "Einige Schritte konnten aus den gespeicherten Inhalten nicht wiederhergestellt werden.",
+      flowPreviewTruncated: "Vorschau gekürzt. Das Original steht im zugehörigen Modellaufruf.",
+      queryWindow: "{since} – {until} · {count} Traces. Standard: 30 Tage, maximal 90 Tage. Verspätete Ereignisse ändern die Seitenreihenfolge nicht.",
+      applyFilters: "Filter anwenden",
+      pageSize: "Zeilen pro Seite",
       title: "Letzte AI-Traces",
       subtitle:
         "Prüfen Sie überwachte Modellaufrufe, Traces, Token-Nutzung, Status und tatsächliche Routing-Ergebnisse.",
@@ -11283,6 +11378,7 @@ for (const locale of Object.keys(teamTranslations) as Locale[]) {
 }
 
 for (const locale of Object.keys(instanceCreateTranslations) as Locale[]) translations[locale].instanceCreate = instanceCreateTranslations[locale];
+for (const locale of Object.keys(runtimeSlotResetTranslations) as Locale[]) translations[locale].slotReset = runtimeSlotResetTranslations[locale];
 
 export function translate(locale: Locale, key: string): string | undefined {
   const segments = key.split(".");

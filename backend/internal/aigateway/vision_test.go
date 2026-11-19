@@ -99,12 +99,44 @@ func TestVisionInvalidInputFailsClosed(t *testing.T) {
 			t.Fatal("provider file reference must not be dropped or forwarded")
 		}
 	}
-	items := make([]interface{}, maxVisionImages+1)
+}
+
+func TestVisionAcceptsMoreThanSixteenImages(t *testing.T) {
+	items := make([]interface{}, 17)
 	for i := range items {
 		items[i] = visionTestBlock("https://example.com/a.png")
 	}
-	if _, err := NormalizeVisionContent(items); err == nil {
-		t.Fatal("image count not bounded")
+	req := ChatCompletionRequest{Messages: []ChatMessage{{Role: "user", Content: items}}}
+	if err := NormalizeVisionRequest(&req); err != nil {
+		t.Fatal(err)
+	}
+	if got := imageCount(req.Messages[0].Content); got != len(items) {
+		t.Fatalf("got %d images, want %d", got, len(items))
+	}
+}
+
+func visionTestLargePNG(t *testing.T, side int) []byte {
+	t.Helper()
+	var b bytes.Buffer
+	encoder := png.Encoder{CompressionLevel: png.NoCompression}
+	if err := encoder.Encode(&b, image.NewNRGBA(image.Rect(0, 0, side, side))); err != nil {
+		t.Fatal(err)
+	}
+	return b.Bytes()
+}
+
+func TestVisionAcceptsInlineImageBeyondFiveMiB(t *testing.T) {
+	pixels := visionTestLargePNG(t, 1280)
+	if len(pixels) <= 5<<20 {
+		t.Fatalf("fixture is only %d bytes", len(pixels))
+	}
+	ref := "data:image/png;base64," + base64.StdEncoding.EncodeToString(pixels)
+	normalized, err := NormalizeVisionContent(visionTestBlock(ref))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if normalized.(map[string]interface{})["image_url"].(map[string]interface{})["url"] != ref {
+		t.Fatal("inline image changed during normalization")
 	}
 }
 

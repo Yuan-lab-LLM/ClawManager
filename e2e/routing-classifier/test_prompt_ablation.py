@@ -7,7 +7,7 @@ import prompt_ablation as experiment
 
 class PromptAblationTests(unittest.TestCase):
     def setUp(self):
-        self.client = experiment.load_baseline(Path(__file__).resolve().parents[2] / 'deployments/laya/call_laya.py')
+        self.client = experiment.load_baseline(Path(__file__).resolve().parents[2] / 'tools/images/laya/call_laya.py')
 
     def test_single_factor_variants(self):
         baseline, short, concrete, plain, combined = experiment.variants(self.client.QUESTIONS['tier'])

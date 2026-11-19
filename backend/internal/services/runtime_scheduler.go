@@ -25,20 +25,21 @@ import (
 )
 
 type RuntimeScheduler struct {
-	autoStopRepo *repository.InstanceAutoStopRepository
-	management   *RuntimeManagementService
-	instanceRepo repository.InstanceRepository
-	podRepo      repository.RuntimePodRepository
-	bindingRepo  repository.InstanceRuntimeBindingRepository
-	rolloutRepo  repository.RuntimeRolloutRepository
-	agentClient  RuntimeAgentClient
-	events       RuntimeEventService
-	leader       RuntimeLeaderService
-	deployments  k8s.RuntimeDeploymentService
-	envBuilder   RuntimeGatewayEnvBuilder
-	upgrade      *RuntimeUpgradeService
-	proxyPolicy  *RuntimeProxyPolicyCoordinator
-	tick         time.Duration
+	ocForceInspect func(context.Context, string, map[string]string) (openCodeNativeContract, error)
+	autoStopRepo   *repository.InstanceAutoStopRepository
+	management     *RuntimeManagementService
+	instanceRepo   repository.InstanceRepository
+	podRepo        repository.RuntimePodRepository
+	bindingRepo    repository.InstanceRuntimeBindingRepository
+	rolloutRepo    repository.RuntimeRolloutRepository
+	agentClient    RuntimeAgentClient
+	events         RuntimeEventService
+	leader         RuntimeLeaderService
+	deployments    k8s.RuntimeDeploymentService
+	envBuilder     RuntimeGatewayEnvBuilder
+	upgrade        *RuntimeUpgradeService
+	proxyPolicy    *RuntimeProxyPolicyCoordinator
+	tick           time.Duration
 
 	workspaceRoot             string
 	runtimeNamespace          string
@@ -48,15 +49,18 @@ type RuntimeScheduler struct {
 	maxGatewaysPerPod         int
 	gatewayStartInFlightLimit int
 
-	gatewayCreateLocksMu sync.Mutex
-	gatewayCreateLocks   map[int64]*sync.Mutex
-	lastPoolCleanupAt    time.Time
-	configurationRetryMu sync.Mutex
-	configurationRetryAt map[string]time.Time
-	creatingScan         runtimeSchedulerScan
-	desiredScan          runtimeSchedulerScan
-	slotAudit            runtimeSlotAuditor
-	slotRecheck          runtimeSlotRechecker
+	gatewayCreateLocksMu       sync.Mutex
+	gatewayCreateLocks         map[int64]*sync.Mutex
+	lastPoolCleanupAt          time.Time
+	lastScaleApprovalRefreshAt time.Time
+	scaleSourceCursorMu        sync.Mutex
+	scaleSourceCursor          map[string]string
+	configurationRetryMu       sync.Mutex
+	configurationRetryAt       map[string]time.Time
+	creatingScan               runtimeSchedulerScan
+	desiredScan                runtimeSchedulerScan
+	slotAudit                  runtimeSlotAuditor
+	slotRecheck                runtimeSlotRechecker
 }
 
 var (
@@ -196,6 +200,7 @@ func (s *RuntimeScheduler) Start(ctx context.Context) {
 		go s.runProxyPolicyRenewal(ctx)
 	}
 	go s.runRuntimeOperations(ctx)
+	go s.runIdleRuntimePools(ctx)
 	go func() {
 		ticker := time.NewTicker(s.tick)
 		defer ticker.Stop()
@@ -284,12 +289,11 @@ func (s *RuntimeScheduler) StartRollout(ctx context.Context, rolloutID int64) er
 	}
 	// The legacy rollout changes a shared Deployment before migrating its
 	// instances. It is not a data-preserving OpenCode upgrade path.
-	if rollout.RuntimeType == "opencode" {
-		message := models.ErrOpenCodeSafeUpgradeRequired.Error()
-		if err := s.rolloutRepo.UpdateStatus(ctx, rollout.ID, "error", nil, nil, &message); err != nil {
-			return err
+	if rollout.RuntimeType == RuntimeTypeOpenCode {
+		if isOpenCodeNativeRollout(rollout) {
+			return s.advanceOpenCodeUpgrade(ctx, rollout)
 		}
-		return models.ErrOpenCodeSafeUpgradeRequired
+		return s.rejectLegacyOpenCodeRollout(ctx, *rollout)
 	}
 	if rollout.Status != "pending" {
 		return nil
@@ -1039,7 +1043,53 @@ func runtimeDeploymentFallbackState(k8sState string) string {
 	}
 }
 
+// Only an identifiable legacy request can leave the active queue on refusal.
+// Corrupt or future strategy metadata may own native maintenance protections;
+// reject those requests without changing their status or recovery evidence.
+func (s *RuntimeScheduler) rejectLegacyOpenCodeRollout(ctx context.Context, rollout models.RuntimeRollout) error {
+	refusal := models.ErrOpenCodeSafeUpgradeRequired
+	if (rollout.Status != "pending" && rollout.Status != "running") || rollout.PreflightID != nil || rollout.PlanFingerprint != nil {
+		return refusal
+	}
+	switch rollout.Phase {
+	case "", "requested", "image_rollout":
+	default:
+		return refusal
+	}
+	if rollout.PreflightJSON != nil && strings.TrimSpace(*rollout.PreflightJSON) != "" {
+		var plan map[string]json.RawMessage
+		if json.Unmarshal([]byte(*rollout.PreflightJSON), &plan) != nil || plan == nil {
+			return refusal
+		}
+		for key, raw := range plan {
+			switch strings.ToLower(key) {
+			case "kind", "operation":
+				return refusal
+			case "strategy":
+				var strategy string
+				if string(raw) == "null" || json.Unmarshal(raw, &strategy) != nil || strategy != "" {
+					return refusal
+				}
+			}
+		}
+	}
+	if s == nil || s.rolloutRepo == nil {
+		return refusal
+	}
+	now, message := time.Now().UTC(), refusal.Error()
+	if err := s.rolloutRepo.UpdateStatus(ctx, rollout.ID, "error", rollout.StartedAt, &now, &message); err != nil {
+		return errors.Join(refusal, err)
+	}
+	return refusal
+}
+
 func (s *RuntimeScheduler) finishRolloutIfReady(ctx context.Context, rollout models.RuntimeRollout) error {
+	if rollout.RuntimeType == RuntimeTypeOpenCode {
+		if !isOpenCodeNativeRollout(&rollout) {
+			return s.rejectLegacyOpenCodeRollout(ctx, rollout)
+		}
+		return s.advanceOpenCodeUpgrade(ctx, &rollout)
+	}
 	if s == nil || s.podRepo == nil || s.rolloutRepo == nil {
 		return nil
 	}
@@ -1545,20 +1595,10 @@ func runtimePodsAlreadyAtImage(pods []models.RuntimePod, runtimeType, targetImag
 func (s *RuntimeScheduler) reconcileIfLeader(ctx context.Context) {
 	release, gateErr := backupgate.HoldWorkUnit(ctx, "runtime.scheduler")
 	if gateErr != nil {
-		if s.management != nil {
-			s.management.idlePodSince = nil
-		}
 		return
 	}
 	defer release()
 	if s.leader != nil && !s.leader.IsLeader(ctx) {
-		// A renewal CAS conflict is not a leadership transfer. Preserve the
-		// observation only when the API still confirms our unexpired lease;
-		// no scheduling work runs without a successful renewal.
-		observer, ok := s.leader.(interface{ HoldsLease(context.Context) bool })
-		if s.management != nil && (!ok || !observer.HoldsLease(ctx)) {
-			s.management.idlePodSince = nil
-		}
 		return
 	}
 	if err := s.reconcile(ctx); err != nil {
@@ -1570,10 +1610,8 @@ func (s *RuntimeScheduler) reconcile(ctx context.Context) error {
 	if s == nil || s.instanceRepo == nil || s.bindingRepo == nil || s.podRepo == nil {
 		return fmt.Errorf("runtime scheduler dependencies are not configured")
 	}
+	s.refreshRuntimeScaleApprovals(ctx, time.Now().UTC())
 	var errs []error
-	if err := s.slotAudit.Reconcile(ctx, s); err != nil {
-		errs = append(errs, err)
-	}
 	creating, err := s.schedulerInstanceBatch(ctx, true)
 	if err != nil {
 		errs = append(errs, err)
@@ -1592,11 +1630,6 @@ func (s *RuntimeScheduler) reconcile(ctx context.Context) error {
 			errs = append(errs, s.reconcileDesiredInstance(ctx, instance)...)
 		}
 	}
-	if s.management != nil {
-		if err := s.management.reconcileIdleRuntimePools(ctx, time.Now().UTC()); err != nil {
-			errs = append(errs, err)
-		}
-	}
 	return errors.Join(errs...)
 }
 
@@ -1610,6 +1643,9 @@ func (s *RuntimeScheduler) reconcileCreatingInstances(ctx context.Context, insta
 	}
 	concurrency = minInt(concurrency, len(instances))
 
+	if s.hasApprovedExpansion() {
+		ctx = context.WithValue(ctx, runtimeExpansionBatchKey{}, &sync.Map{})
+	}
 	jobs := make(chan models.Instance)
 	var wg sync.WaitGroup
 	var errsMu sync.Mutex
@@ -1668,7 +1704,7 @@ func (s *RuntimeScheduler) reconcileCreatingInstanceLocked(ctx context.Context, 
 			binding.Generation == instance.RuntimeGeneration && binding.State == RuntimeGatewayBindingCreating &&
 			binding.GatewayID == fmt.Sprintf("pending-%d-%d", instance.ID, instance.RuntimeGeneration) {
 			if client.security != nil && client.security.assignments != nil {
-				if timeout := recordRuntimePublicationTimeout(ctx, s.instanceRepo, &instance); timeout != nil {
+				if timeout := recordRuntimePublicationTimeout(ctx, s.instanceRepo, &instance, binding.CreatedAt); timeout != nil {
 					return []error{timeout}
 				}
 			}
@@ -1692,6 +1728,9 @@ func (s *RuntimeScheduler) reconcileCreatingInstanceLocked(ctx context.Context, 
 	// A previous recovery may have fenced its source and deleted the binding,
 	// but not advanced the generation yet. Absence of a binding is not authority
 	// to restart that stopped generation; only explicit Recovery can resume it.
+	if handled, errs := s.resumeSlotResetRecoveryLocked(ctx, instance); handled {
+		return errs
+	}
 	if store, ok := s.instanceRepo.(repository.InstanceRuntimeRecoveryRepository); ok {
 		state, err := store.GetRuntimeRecovery(ctx, instance.ID)
 		if err != nil {
@@ -1989,6 +2028,9 @@ func (s *RuntimeScheduler) scaleOutIfBacklogExceedsCapacity(ctx context.Context,
 	if s == nil || s.deployments == nil || s.podRepo == nil || backlog <= 0 {
 		return false, nil
 	}
+	if s.hasApprovedExpansion() {
+		return s.scaleOutApprovedForDemand(ctx, runtimeType, backlog)
+	}
 	pods, err := s.podRepo.List(ctx, runtimeType)
 	if err != nil {
 		return false, fmt.Errorf("list %s runtime pods for backlog scale-out: %w", runtimeType, err)
@@ -2170,6 +2212,11 @@ func (s *RuntimeScheduler) assignInstance(ctx context.Context, instance models.I
 		if scaled {
 			return errRuntimeScaleOutPending
 		}
+		if s.hasApprovedExpansion() {
+			// The expansion check found sufficient capacity after the earlier
+			// schedulable-Pod read. Re-run placement with fresh observations.
+			return fmt.Errorf("%w: recheck available %s Runtime capacity", errRuntimeControlPlanePending, runtimeType)
+		}
 		// A retained Pod can be starting or awaiting its first registration.
 		// Waiting for that existing capacity is not an automatic error retry.
 		if s.deployments != nil {
@@ -2244,7 +2291,7 @@ func (s *RuntimeScheduler) assignInstance(ctx context.Context, instance models.I
 		return nil
 	}
 	if lastErr != nil {
-		if errors.Is(lastErr, errRuntimeScaleOutPending) {
+		if errors.Is(lastErr, errRuntimeScaleOutPending) || s.hasApprovedExpansion() && errors.Is(lastErr, errRuntimeSlotObservation) {
 			scaled, scaleErr := s.scaleOutIfBacklogExceedsCapacity(ctx, runtimeType, 1)
 			if scaleErr != nil {
 				if !errors.Is(scaleErr, k8s.ErrRuntimeScaleOutRejected) && runtimeUpgradeInfrastructureRetryable(scaleErr) {
@@ -2311,6 +2358,9 @@ func (s *RuntimeScheduler) scaleOutRuntimeDeployment(ctx context.Context, namesp
 func (s *RuntimeScheduler) scaleOutIfAtCapacity(ctx context.Context, runtimeType string) (bool, error) {
 	if s == nil || s.deployments == nil || s.podRepo == nil {
 		return false, nil
+	}
+	if s.hasApprovedExpansion() {
+		return s.scaleOutApprovedForDemand(ctx, runtimeType, 1)
 	}
 	pods, err := s.podRepo.List(ctx, runtimeType)
 	if err != nil {
@@ -2405,7 +2455,7 @@ type runtimeGatewayStart struct {
 // rollouts use this path, so a standby target never needs to be exposed to the
 // ordinary scheduler before postflight has committed the rollout.
 func (s *RuntimeScheduler) EnsureUpgradeGateway(ctx context.Context, rollout *models.RuntimeRollout, instanceID int, targetPods []models.RuntimePod) error {
-	if s == nil || rollout == nil || rollout.RuntimeType != RuntimeTypeOpenClaw || rollout.PreflightID == nil {
+	if s == nil || rollout == nil || (rollout.RuntimeType != RuntimeTypeOpenClaw && !isOpenCodeNativeRollout(rollout)) || rollout.PreflightID == nil {
 		return fmt.Errorf("data-safe OpenClaw rollout is required")
 	}
 	if s.instanceRepo == nil || s.podRepo == nil || s.bindingRepo == nil || s.agentClient == nil {
@@ -2422,12 +2472,12 @@ func (s *RuntimeScheduler) EnsureUpgradeGateway(ctx context.Context, rollout *mo
 		return fmt.Errorf("upgrade instance %d not found", instanceID)
 	}
 	runtimeType, ok := schedulerRuntimeType(*instance)
-	if !ok || runtimeType != RuntimeTypeOpenClaw {
+	if !ok || runtimeType != rollout.RuntimeType {
 		return fmt.Errorf("upgrade instance %d is not OpenClaw Lite", instanceID)
 	}
 	targetByID := make(map[int64]models.RuntimePod, len(targetPods))
 	for _, pod := range targetPods {
-		if pod.RuntimeType == RuntimeTypeOpenClaw && pod.State == "ready" && !pod.Draining && runtimePodMatchesImage(pod, rollout.TargetImageRef) {
+		if pod.RuntimeType == rollout.RuntimeType && pod.State == "ready" && !pod.Draining && runtimePodMatchesImage(pod, rollout.TargetImageRef) {
 			targetByID[pod.ID] = pod
 		}
 	}
@@ -2440,6 +2490,12 @@ func (s *RuntimeScheduler) EnsureUpgradeGateway(ctx context.Context, rollout *mo
 		if targetPod, expected := targetByID[binding.RuntimePodID]; expected && binding.Generation == instance.RuntimeGeneration {
 			lifecycle := NormalizeRuntimeGatewayLifecycle(binding.State, binding.ErrorMessage)
 			if lifecycle.Running {
+				if runtimeType == RuntimeTypeOpenCode {
+					if s.upgrade == nil || s.upgrade.sess == nil {
+						return fmt.Errorf("OpenCode native acknowledgment unavailable")
+					}
+					return repository.CommitOpenCodeUpgradeGatewayStart(ctx, s.upgrade.sess, rollout.ID, instance.ID, instance.RuntimeGeneration, binding.WorkspacePath, "running", binding.GatewayID, binding.GatewayPID)
+				}
 				return nil
 			}
 			if lifecycle.BindingState != RuntimeGatewayBindingError && lifecycle.BindingState != RuntimeGatewayBindingStopped && lifecycle.BindingState != RuntimeGatewayBindingCreating {
@@ -2464,10 +2520,16 @@ func (s *RuntimeScheduler) EnsureUpgradeGateway(ctx context.Context, rollout *mo
 					return repository.ErrUpgradeReservationDenied
 				}
 				if state != nil && NormalizeRuntimeGatewayLifecycle(state.State, nil).Running {
+					if runtimeType == RuntimeTypeOpenCode {
+						return repository.CommitOpenCodeUpgradeGatewayStart(ctx, s.upgrade.sess, rollout.ID, instance.ID, instance.RuntimeGeneration, binding.WorkspacePath, "running", binding.GatewayID, binding.GatewayPID)
+					}
 					return s.bindingRepo.UpdateState(ctx, instanceID, instance.RuntimeGeneration, "running", nil)
 				}
 				if state != nil && NormalizeRuntimeGatewayLifecycle(state.State, nil).BindingState == RuntimeGatewayBindingCreating {
 					return errRuntimeGatewayStartPending
+				}
+				if runtimeType == RuntimeTypeOpenCode {
+					return errOpenCodeTargetExecutionFailed
 				}
 				if deleteErr := s.agentClient.DeleteGateway(ctx, endpoint, binding.GatewayID); deleteErr != nil && (requiresConfirmedGatewayStop(s.agentClient) || !errors.Is(deleteErr, ErrRuntimeAgentNotFound)) {
 					return fmt.Errorf("stop failed target gateway for instance %d: %w", instanceID, deleteErr)
@@ -2863,6 +2925,16 @@ func (s *RuntimeScheduler) reserveGatewayPortExcludingPorts(
 			return nil, err
 		}
 	}
+	resetPorts, resetErr := s.slotResetReservedPorts(ctx, pod)
+	if resetErr != nil {
+		return nil, fmt.Errorf("%w: %w: %v", errRuntimeControlPlanePending, errRuntimeSlotObservation, resetErr)
+	}
+	if len(resetPorts) > 0 {
+		for port := range excludedPorts {
+			resetPorts[port] = struct{}{}
+		}
+		excludedPorts = resetPorts
+	}
 	blockSize := RuntimeGatewayPortBlockSize(runtimeType)
 	if blockSize <= 0 {
 		blockSize = 1
@@ -2872,7 +2944,7 @@ func (s *RuntimeScheduler) reserveGatewayPortExcludingPorts(
 	}); ok {
 		ports, err := layout.physicalGatewayPorts(ctx, pod)
 		if err != nil {
-			return nil, fmt.Errorf("%w: physical slot layout unavailable: %w", errRuntimeControlPlanePending, err)
+			return nil, fmt.Errorf("%w: %w: physical slot layout unavailable: %w", errRuntimeControlPlanePending, errRuntimeSlotObservation, err)
 		}
 		count := 0
 		for port := s.gatewayPortStart; port+blockSize-1 <= s.gatewayPortEndForPod(pod, runtimeType); port += blockSize {
@@ -2890,7 +2962,7 @@ func (s *RuntimeScheduler) reserveGatewayPortExcludingPorts(
 	}); ok {
 		reserved, err := inventory.reservedGatewayPorts(ctx, pod)
 		if err != nil {
-			return nil, fmt.Errorf("%w: read persisted slot reservations: %w", errRuntimeControlPlanePending, err)
+			return nil, fmt.Errorf("%w: %w: read persisted slot reservations: %w", errRuntimeControlPlanePending, errRuntimeSlotObservation, err)
 		}
 		merged := make(map[int]struct{}, len(reserved)+len(excludedPorts))
 		for port := range reserved {
@@ -2944,6 +3016,9 @@ func (s *RuntimeScheduler) reserveGatewayPortExcludingPorts(
 			Generation:    instance.RuntimeGeneration,
 		}
 		if err := s.createRuntimeBindingWithStalePortRecovery(ctx, binding); err != nil {
+			if errors.Is(err, repository.ErrRuntimeSlotResetFenced) {
+				continue
+			}
 			return nil, fmt.Errorf("reserve gateway port %d on runtime pod %d: %w", port, pod.ID, err)
 		}
 		return binding, nil

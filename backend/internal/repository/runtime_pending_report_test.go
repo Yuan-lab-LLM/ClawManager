@@ -44,7 +44,7 @@ func TestPendingReportedBindingExactPredicate(t *testing.T) {
 func TestPendingReportedGatewayPersistence(t *testing.T) {
 	instances := runtimeSecurityMySQL(t)
 	sess := instances.sess
-	for _, q := range []string{"CREATE TABLE runtime_management_admission_lock(id INT PRIMARY KEY,revision BIGINT NOT NULL DEFAULT 0)", "INSERT INTO runtime_management_admission_lock(id) VALUES (1)", "CREATE TABLE runtime_management_operations(kind VARCHAR(24),status VARCHAR(24),request_json LONGTEXT)", "CREATE TABLE runtime_pods(id BIGINT PRIMARY KEY,namespace VARCHAR(128),deployment_name VARCHAR(255))", "INSERT INTO runtime_pods VALUES(5,'runtime','pool')"} {
+	for _, q := range []string{"CREATE TABLE runtime_management_admission_lock(id INT PRIMARY KEY,revision BIGINT NOT NULL DEFAULT 0)", "INSERT INTO runtime_management_admission_lock(id) VALUES (1)", "CREATE TABLE runtime_management_operations(kind VARCHAR(24),status VARCHAR(24),request_json LONGTEXT)", "CREATE TABLE runtime_pods(id BIGINT PRIMARY KEY,namespace VARCHAR(128),deployment_name VARCHAR(255),pod_uid VARCHAR(128))", "INSERT INTO runtime_pods VALUES(5,'runtime','pool','pod-current')"} {
 		if _, err := sess.SQL().Exec(q); err != nil {
 			t.Fatal(err)
 		}

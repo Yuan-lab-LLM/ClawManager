@@ -557,6 +557,12 @@ func (s *RuntimeManagementService) advanceScaleIn(ctx context.Context, op *Runti
 		return err
 	}
 	if err = s.withScaleInKubeMutation(ctx, op, journal, func(tx db.Session) error {
+		if err := s.checkIdlePoolServingPod(ctx, tx, journal); err != nil {
+			return fmt.Errorf("%w: %v", errRuntimeDeletionObservation, err)
+		}
+		if err := idleUnscheduledReplicaAdmission(ctx, tx, journal); err != nil {
+			return fmt.Errorf("%w: %v", errRuntimeDeletionObservation, err)
+		}
 		for _, source := range journal.Plan.SourcePods {
 			if err := repository.CheckRuntimePodEmptyObservation(ctx, tx, source.ID, source.PodUID); err != nil {
 				return fmt.Errorf("%w: %v", errRuntimeDeletionObservation, err)

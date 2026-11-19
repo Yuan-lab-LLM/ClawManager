@@ -74,7 +74,7 @@ func RequireNoInstanceTeamWorkspaceWriters(ctx context.Context, sess db.Session,
 
 func (r *teamRepository) withNFSTeamRows(ids []int, run func(*teamRepository) error) error {
 	sort.Ints(ids)
-	return r.sess.TxContext(context.Background(), func(sess db.Session) error {
+	return r.withTransaction(func(sess db.Session) error {
 		previous := 0
 		for _, id := range ids {
 			if id <= 0 || id == previous {
@@ -93,8 +93,8 @@ func (r *teamRepository) withNFSTeamRows(ids []int, run func(*teamRepository) er
 				return err
 			}
 		}
-		return run(&teamRepository{sess: sess})
-	}, nil)
+		return run(&teamRepository{sess: sess, inTransaction: true})
+	})
 }
 
 func teamStorageIdentityChanged(old, next *models.Team) bool {

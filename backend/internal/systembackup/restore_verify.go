@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"clawreef/internal/observability"
 	"clawreef/internal/systembackup/team"
 	"github.com/minio/minio-go/v7"
 )
@@ -30,16 +31,22 @@ type RestoredDataReader struct {
 	Directory     string
 }
 type RestoredDataVerification struct {
-	RunID                string              `json:"run_id"`
-	BackupID             string              `json:"backup_id"`
-	SQL                  SQLResult           `json:"sql"`
-	Team                 TeamRecoverySummary `json:"team"`
-	FileCount            int                 `json:"file_count"`
-	ObjectCount          int                 `json:"object_count"`
-	RedisCount           int                 `json:"redis_count"`
-	HistoryPartsVerified int                 `json:"history_parts_verified"`
-	IntegrityVerified    bool                `json:"integrity_verified"`
-	AcceptanceEligible   bool                `json:"acceptance_eligible"`
+	// Source-side completion accepts only the identities authenticated during
+	// this process. A JSON report carries no authority to release a body.
+	verifiedObjectOrigin  string
+	verifiedObjects       map[string]observability.BodyRef
+	verifiedArchiveEdges  map[string][]string
+	RunID                 string              `json:"run_id"`
+	BackupID              string              `json:"backup_id"`
+	SQL                   SQLResult           `json:"sql"`
+	Team                  TeamRecoverySummary `json:"team"`
+	FileCount             int                 `json:"file_count"`
+	ObjectCount           int                 `json:"object_count"`
+	RedisCount            int                 `json:"redis_count"`
+	HistoryPartsVerified  int                 `json:"history_parts_verified"`
+	HistoryBodiesVerified int                 `json:"history_bodies_verified"`
+	IntegrityVerified     bool                `json:"integrity_verified"`
+	AcceptanceEligible    bool                `json:"acceptance_eligible"`
 }
 
 // VerifyRestoredData is a separate, read-only verification pass. Its input has
@@ -148,6 +155,17 @@ func VerifyRestoredData(ctx context.Context, store ImmutableObjectStore, artifac
 		}
 		out.HistoryPartsVerified++
 	}
+	edges := map[string][]string{}
+	refs, err := verifyPublishedHistoryDependencies(ctx, store, artifact, wrapper, budget, &target, edges)
+	if err != nil {
+		return out, err
+	}
 	out.IntegrityVerified = true
+	out.HistoryBodiesVerified = len(refs)
+	if artifact.Manifest.Payload.Purpose != "team_data" {
+		out.verifiedObjectOrigin = artifact.Manifest.Payload.OriginInstallationID
+		out.verifiedObjects = refs
+		out.verifiedArchiveEdges = edges
+	}
 	return out, nil
 }

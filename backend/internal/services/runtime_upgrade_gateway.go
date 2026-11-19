@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -64,7 +65,7 @@ func upgradePodsWithLiveIdentity(reported, inventory []models.RuntimePod) []mode
 // cleanup/port-fallback path here: it can discard an ambiguous start.
 func (s *RuntimeScheduler) createUpgradeGateway(ctx context.Context, instance models.Instance, pod models.RuntimePod, start *runtimeGatewayStart) error {
 	resp, err := s.agentClient.CreateGateway(ctx, start.endpoint, RuntimeAgentCreateGatewayRequest{
-		InstanceID: instance.ID, UserID: instance.UserID, AgentType: RuntimeTypeOpenClaw,
+		InstanceID: instance.ID, UserID: instance.UserID, AgentType: pod.RuntimeType,
 		WorkspacePath: start.workspacePath, GatewayPort: start.reservedBinding.GatewayPort,
 		ProjectRelativePath: strings.TrimSpace(start.environment["CLAWMANAGER_DEFAULT_PROJECT_RELATIVE_PATH"]),
 		PortRange:           RuntimeAgentPortRange{Start: s.gatewayPortStart, End: s.gatewayPortEnd},
@@ -86,22 +87,40 @@ func (s *RuntimeScheduler) createUpgradeGateway(ctx context.Context, instance mo
 		now := time.Now().UTC()
 		healthy = &now
 	}
-	if err := s.bindingRepo.UpdateGatewayAssignment(ctx, instance.ID, instance.RuntimeGeneration, resp.GatewayID, resp.PID, lifecycle.BindingState, healthy); err != nil {
-		return err
+	if pod.RuntimeType != RuntimeTypeOpenCode {
+		if err := s.bindingRepo.UpdateGatewayAssignment(ctx, instance.ID, instance.RuntimeGeneration, resp.GatewayID, resp.PID, lifecycle.BindingState, healthy); err != nil {
+			return err
+		}
 	}
 	if !lifecycle.CreateAccepted() {
+		if pod.RuntimeType == RuntimeTypeOpenCode {
+			return errOpenCodeTargetExecutionFailed
+		}
 		return fmt.Errorf("upgrade Gateway returned %q", resp.Status)
 	}
-	if err := s.instanceRepo.SetWorkspacePath(ctx, instance.ID, start.workspacePath); err != nil {
-		return err
-	}
-	if err := s.instanceRepo.UpdateRuntimeState(ctx, instance.ID, lifecycle.InstanceState, instance.RuntimeGeneration, nil); err != nil {
-		return err
+	if pod.RuntimeType == RuntimeTypeOpenCode {
+		if s.upgrade == nil || s.upgrade.sess == nil {
+			return fmt.Errorf("OpenCode native upgrade acknowledgment unavailable")
+		}
+		rolloutID, parseErr := strconv.ParseInt(start.upgradeID, 10, 64)
+		if parseErr != nil {
+			return parseErr
+		}
+		if err := repository.CommitOpenCodeUpgradeGatewayStart(ctx, s.upgrade.sess, rolloutID, instance.ID, instance.RuntimeGeneration, start.workspacePath, lifecycle.InstanceState, resp.GatewayID, resp.PID); err != nil {
+			return err
+		}
+	} else {
+		if err := s.instanceRepo.SetWorkspacePath(ctx, instance.ID, start.workspacePath); err != nil {
+			return err
+		}
+		if err := s.instanceRepo.UpdateRuntimeState(ctx, instance.ID, lifecycle.InstanceState, instance.RuntimeGeneration, nil); err != nil {
+			return err
+		}
 	}
 	if s.events != nil {
 		// Preserve the normal instance lifecycle notification without making an
 		// event transport failure repeat the already accepted Gateway start.
-		_ = s.events.Publish(ctx, lifecycle.EventType, map[string]any{"instance_id": instance.ID, "runtime_type": RuntimeTypeOpenClaw, "runtime_pod_id": pod.ID, "gateway_id": resp.GatewayID, "gateway_port": resp.Port, "gateway_state": lifecycle.BindingState, "workspace_path": start.workspacePath, "generation": instance.RuntimeGeneration})
+		_ = s.events.Publish(ctx, lifecycle.EventType, map[string]any{"instance_id": instance.ID, "runtime_type": pod.RuntimeType, "runtime_pod_id": pod.ID, "gateway_id": resp.GatewayID, "gateway_port": resp.Port, "gateway_state": lifecycle.BindingState, "workspace_path": start.workspacePath, "generation": instance.RuntimeGeneration})
 	}
 	return nil
 }

@@ -1,4 +1,6 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import ArchiveHistoryExport from "../../components/ArchiveHistoryExport";
+import { isAxiosError } from "axios";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import AdminLayout from "../../components/AdminLayout";
 import { useI18n } from "../../contexts/I18nContext";
@@ -35,42 +37,68 @@ const SessionUsageOverviewPage: React.FC = () => {
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [page, setPage] = useState(1);
-  const [timeRange, setTimeRange] = useState<SessionUsageTimeRange>("all");
+  const [timeRange, setTimeRange] = useState<SessionUsageTimeRange>("30d");
   const [autoRefresh, setAutoRefresh] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [overview, setOverview] = useState<SessionUsageOverview | null>(null);
+  const [refreshVersion, setRefreshVersion] = useState(0);
+  const requestVersion = useRef(0);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setDebouncedSearch(search.trim()), 300);
     return () => window.clearTimeout(timer);
   }, [search]);
 
-  const since = useMemo(() => resolveSessionUsageSince(timeRange), [timeRange]);
+  const until = useMemo(() => new Date(Math.floor(Date.now() / 1000) * 1000).toISOString(), [timeRange, debouncedSearch, refreshVersion]);
+  const since = useMemo(() => resolveSessionUsageSince(timeRange, Date.parse(until)), [timeRange, until]);
+  const pageCursors = useRef<Record<number, string>>({ 1: "" });
+  const cursorScope = useRef("");
+  const refreshLatest = useCallback(() => {
+    requestVersion.current++;
+    pageCursors.current = { 1: "" };
+    setPage(1);
+    setRefreshVersion(value => value + 1);
+  }, []);
 
   const loadOverview = useCallback(async (options?: { silent?: boolean }) => {
     if (!options?.silent) {
       setLoading(true);
     }
+    const scope = JSON.stringify([debouncedSearch, since, until]);
+    const requestPage = cursorScope.current === scope ? page : 1;
+    if (cursorScope.current !== scope) { cursorScope.current = scope; pageCursors.current = { 1: "" }; setPage(1); }
+    const request = ++requestVersion.current;
     setError("");
     try {
+      if (requestPage > 1 && !pageCursors.current[requestPage]) {
+        setError(t("instances.sessionUsage.cursorStale"));
+        return;
+      }
       const data = await adminService.getSessionUsageOverview({
-        page,
+        page: requestPage,
         limit: PAGE_SIZE,
+        cursor: pageCursors.current[requestPage],
         search: debouncedSearch || undefined,
         since,
+        until,
       });
+      if (request !== requestVersion.current) return;
+      delete pageCursors.current[requestPage + 1];
+      if (data.next_cursor) pageCursors.current[requestPage + 1] = data.next_cursor;
       setOverview(data);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : t("sessionUsagePage.loadFailed"));
+      if (request !== requestVersion.current) return;
+      setError(isAxiosError(err) && err.response?.status === 409 ? t("instances.sessionUsage.cursorStale") : isAxiosError(err) && err.response?.data?.error || (err instanceof Error ? err.message : t("sessionUsagePage.loadFailed")));
     } finally {
-      if (!options?.silent) {
+      if (request === requestVersion.current && !options?.silent) {
         setLoading(false);
       }
     }
-  }, [debouncedSearch, page, since, t]);
+  }, [debouncedSearch, page, since, until, refreshVersion, t]);
 
   useEffect(() => {
     void loadOverview();
+    return () => { requestVersion.current++; };
   }, [loadOverview]);
 
   useEffect(() => {
@@ -78,14 +106,14 @@ const SessionUsageOverviewPage: React.FC = () => {
   }, [debouncedSearch, timeRange]);
 
   useEffect(() => {
-    if (!autoRefresh) {
+    if (!autoRefresh || page !== 1) {
       return;
     }
     const timer = window.setInterval(() => {
-      void loadOverview({ silent: true });
+      refreshLatest();
     }, AUTO_REFRESH_MS);
     return () => window.clearInterval(timer);
-  }, [autoRefresh, loadOverview]);
+  }, [autoRefresh, page, refreshLatest]);
 
   const totalPages = useMemo(() => {
     if (!overview) {
@@ -99,18 +127,20 @@ const SessionUsageOverviewPage: React.FC = () => {
     try {
       const rows: SessionUsageOverviewItem[] = [];
       let pageCursor = 1;
-      let total = 0;
+      let cursor: string | undefined;
       do {
         const batch = await adminService.getSessionUsageOverview({
           page: pageCursor,
+          cursor,
           limit: 100,
           search: debouncedSearch || undefined,
           since,
+        until,
         });
         rows.push(...batch.items);
-        total = batch.total;
+        cursor = batch.next_cursor;
         pageCursor += 1;
-      } while (rows.length < total);
+      } while (cursor);
 
       const header = [
         "instance_id",
@@ -143,7 +173,7 @@ const SessionUsageOverviewPage: React.FC = () => {
       );
       downloadSessionUsageCsv([header.join(","), ...csvRows].join("\n"), "session-usage-overview.csv");
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : t("sessionUsagePage.exportFailed"));
+      setError(isAxiosError(err) && err.response?.status === 409 ? t("instances.sessionUsage.cursorStale") : isAxiosError(err) && err.response?.data?.error || (err instanceof Error ? err.message : t("sessionUsagePage.exportFailed")));
     } finally {
       setExporting(false);
     }
@@ -152,6 +182,7 @@ const SessionUsageOverviewPage: React.FC = () => {
   return (
     <AdminLayout title={t("nav.sessionUsage")}>
       <div className="space-y-5">
+        <ArchiveHistoryExport admin />
         <section className="app-panel px-5 py-4">
           <p className="text-sm text-[var(--cm-text)]">{t("sessionUsagePage.subtitle")}</p>
           <div className="mt-4 flex flex-wrap items-center gap-3">
@@ -166,7 +197,7 @@ const SessionUsageOverviewPage: React.FC = () => {
               onChange={(event) => setTimeRange(event.target.value as SessionUsageTimeRange)}
               className="rounded-md border border-[var(--cm-border)] px-3 py-2 text-sm"
             >
-              <option value="all">{t("instances.sessionUsage.timeRangeAll")}</option>
+              <option value="90d">90 days</option>
               <option value="24h">{t("instances.sessionUsage.timeRange24h")}</option>
               <option value="7d">{t("instances.sessionUsage.timeRange7d")}</option>
               <option value="30d">{t("instances.sessionUsage.timeRange30d")}</option>
@@ -182,7 +213,7 @@ const SessionUsageOverviewPage: React.FC = () => {
             <button
               type="button"
               className="rounded-md border border-[var(--cm-border)] px-3 py-2 text-sm"
-              onClick={() => void loadOverview()}
+              onClick={refreshLatest}
             >
               {t("instances.sessionUsage.refresh")}
             </button>
@@ -195,6 +226,7 @@ const SessionUsageOverviewPage: React.FC = () => {
               {exporting ? t("instances.sessionUsage.exportCsvLoading") : t("instances.sessionUsage.exportCsv")}
             </button>
           </div>
+          {autoRefresh && page > 1 && <p className="mt-2 text-sm text-[var(--cm-muted)]">{t("instances.sessionUsage.refreshPaused")}</p>}
         </section>
 
         {error && (
@@ -278,17 +310,17 @@ const SessionUsageOverviewPage: React.FC = () => {
                 <div className="flex gap-2">
                   <button
                     type="button"
-                    disabled={page <= 1}
+                    disabled={loading || page <= 1 || (page > 2 && !pageCursors.current[page - 1])}
                     className="rounded border border-[var(--cm-border)] px-2 py-1 disabled:opacity-40"
-                    onClick={() => setPage((current) => Math.max(1, current - 1))}
+                    onClick={() => { if (!loading) setPage((current) => current <= 2 || pageCursors.current[current - 1] ? Math.max(1, current - 1) : current); }}
                   >
                     {t("instances.sessionUsage.prev")}
                   </button>
                   <button
                     type="button"
-                    disabled={page >= totalPages}
+                    disabled={loading || page >= totalPages || !pageCursors.current[page + 1]}
                     className="rounded border border-[var(--cm-border)] px-2 py-1 disabled:opacity-40"
-                    onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
+                    onClick={() => { if (!loading) setPage((current) => pageCursors.current[current + 1] ? Math.min(totalPages, current + 1) : current); }}
                   >
                     {t("instances.sessionUsage.next")}
                   </button>

@@ -39,7 +39,7 @@ func NewRuntimePodMaintenanceService(sess db.Session, scheduler *RuntimeSchedule
 				})
 			}
 			client.admissionMu.Lock()
-			client.assignmentAdmission = func(ctx context.Context, podUID, runtimeType string, instanceID, generation int, publish func() error) error {
+			client.assignmentAdmission = func(ctx context.Context, podUID, runtimeType string, instanceID, generation, port int, publish func() error) error {
 				actual, err := resolver.ResolveRuntimePodController(ctx, scheduler.runtimeNamespace, "", podUID)
 				if err != nil {
 					return err
@@ -48,7 +48,7 @@ func NewRuntimePodMaintenanceService(sess db.Session, scheduler *RuntimeSchedule
 					return fmt.Errorf("Runtime assignment type differs from its Kubernetes controller")
 				}
 				identity := models.RuntimePod{Namespace: actual.Namespace, PodName: actual.PodName, PodUID: &actual.PodUID, DeploymentName: actual.DeploymentName, RuntimeType: actual.RuntimeType}
-				return repository.WithRuntimePodAssignmentAdmission(ctx, sess, identity, instanceID, generation, publish)
+				return repository.WithRuntimePodAssignmentAdmission(ctx, sess, identity, instanceID, generation, port, publish)
 			}
 			client.admissionMu.Unlock()
 		}

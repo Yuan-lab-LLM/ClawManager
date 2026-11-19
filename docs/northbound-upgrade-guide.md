@@ -9,7 +9,7 @@ OpenCode、DeepSeek Harness 的 Lite/Pro 实例、owner 隔离和智慧协作平
 
 > 不要把新版 `deployments/k8s/*/clawmanager.yaml` 直接覆盖应用到已运行的定制集群。
 > 完整清单包含默认 Secret、存储和基础组件，可能覆盖现场配置。升级时只更新应用镜像，
-> 再应用 `deployments/k8s/northbound/` 下的北向增量资源。
+> 再应用 `tools/k8s/northbound/` 下的北向增量资源。
 
 ## 1. 升级内容
 
@@ -211,12 +211,12 @@ kubectl create secret generic clawmanager-northbound-secrets -n $Namespace --fro
 ```
 
 导入后应安全移除临时文件。不要应用
-`deployments/k8s/northbound/secrets.example.yaml` 中的占位值。
+`tools/k8s/northbound/secrets.example.yaml` 中的占位值。
 
 启用智慧协作平台页面时，还需要创建 `clawmanager-iei-sso` Secret。其字段名与仓库模板
 一致：`aes-key` 是双方约定的 16 字节 AES 密钥，`aes-iv` 是双方约定的 16 字节系统
 标识，`session-secret` 是至少 32 字节的独立随机值。生产值应由 Secret 管理系统注入，
-不得写入仓库；字段和环境变量映射见 `deployments/k8s/northbound/secrets.example.yaml`
+不得写入仓库；字段和环境变量映射见 `tools/k8s/northbound/secrets.example.yaml`
 及 `core-patch.yaml`。
 
 ### 6.2 证书和 JWE 密钥
@@ -268,7 +268,7 @@ kubectl create secret generic clawmanager-northbound-jwe -n $Namespace --from-fi
 应用增量 Patch，使 Core 在 `9002` 上启动 mTLS 服务：
 
 ```powershell
-kubectl patch deployment clawmanager-app -n $Namespace --type strategic --patch-file deployments/k8s/northbound/core-patch.yaml
+kubectl patch deployment clawmanager-app -n $Namespace --type strategic --patch-file tools/k8s/northbound/core-patch.yaml
 kubectl rollout status deployment/clawmanager-app -n $Namespace --timeout=10m
 kubectl logs -n $Namespace deployment/clawmanager-app --since=10m | Select-String "Northbound Core"
 ```
@@ -277,7 +277,7 @@ kubectl logs -n $Namespace deployment/clawmanager-app --since=10m | Select-Strin
 
 ## 8. 部署北向 Gateway
 
-`deployments/k8s/northbound/gateway.yaml` 默认镜像是示例 `latest`。应用前必须生成现场副本，
+`tools/k8s/northbound/gateway.yaml` 默认镜像是示例 `latest`。应用前必须生成现场副本，
 将其中 Gateway Deployment 的 `image` 替换为第 3 节的 `$Image`，不要把现场镜像地址或
 Secret 写回公共模板。
 

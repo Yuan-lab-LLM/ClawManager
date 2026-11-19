@@ -71,10 +71,11 @@ type PendingTeamDeletionRepository interface {
 type teamRepository struct {
 	sess            db.Session
 	nfsWriterFences bool
+	inTransaction   bool
 }
 
 func NewTeamRepository(sess db.Session) TeamRepository {
-	return &teamRepository{sess: sess}
+	return &teamRepository{sess: sess, inTransaction: true}
 }
 
 func (r *teamRepository) CreateTeam(team *models.Team) error {
@@ -320,8 +321,24 @@ func (r *teamRepository) ListMembersByTeamID(teamID int) ([]models.TeamMember, e
 }
 
 func (r *teamRepository) CreateTask(task *models.TeamTask) error {
-	return r.sess.Tx(func(sess db.Session) error {
+	return r.withTransaction(func(sess db.Session) error {
+		if task == nil {
+			return fmt.Errorf("Team task required")
+		}
+		if err := lockTeamProjectionRow(sess, task.TeamID); err != nil {
+			return err
+		}
+		if id, found, err := archivedTeamIdentity(sess, "team_tasks", task.TeamID, map[string]string{"message_id": task.MessageID, "accepted_completion_id": identityString(task.AcceptedCompletionID)}, task.PayloadJSON); err != nil {
+			return err
+		} else if found {
+			task.ID = id
+			return ErrArchivedTeamTask
+		}
+
 		if err := RequireTeamRunning(context.Background(), sess, task.TeamID); err != nil {
+			return err
+		}
+		if err := (&teamRepository{sess: sess, inTransaction: true}).admitTeamTask(task); err != nil {
 			return err
 		}
 		ensureTimestamps(&task.CreatedAt, &task.UpdatedAt)
@@ -413,6 +430,22 @@ func (r *teamRepository) ListStaleCandidateTasks(cutoff time.Time, limit int) ([
 }
 
 func (r *teamRepository) CreateEvent(event *models.TeamEvent) error {
+	if event == nil {
+		return fmt.Errorf("Team event required")
+	}
+	if !r.inTransaction {
+		return r.withTeamTransaction(event.TeamID, func(tx *teamRepository) error { return tx.CreateEvent(event) })
+	}
+	if err := lockTeamProjectionRow(r.sess, event.TeamID); err != nil {
+		return err
+	}
+	if id, found, err := archivedTeamIdentity(r.sess, "team_events", event.TeamID, map[string]string{"event_id": identityString(event.EventID), "completion_id": identityString(event.CompletionID), "redis_stream_id": identityString(event.RedisStreamID)}, identityString(event.PayloadJSON)); err != nil {
+		return err
+	} else if found {
+		event.ID = id
+		return ErrDuplicateTeamEvent
+	}
+
 	if event.CreatedAt.IsZero() {
 		event.CreatedAt = time.Now().UTC()
 	}
@@ -441,38 +474,18 @@ func (r *teamRepository) ConfirmWorkItemResult(item *models.TeamWorkItem, event 
 	if item == nil || event == nil || outbox == nil {
 		return fmt.Errorf("work item, confirmation event and outbox are required")
 	}
-	return r.sess.Tx(func(sess db.Session) error {
-		txRepo := &teamRepository{sess: sess}
+	return r.withTransaction(func(sess db.Session) error {
+		if err := lockTeamProjectionRow(sess, item.TeamID); err != nil {
+			return err
+		}
+		txRepo := &teamRepository{sess: sess, inTransaction: true}
 		if err := txRepo.UpsertWorkItem(item); err != nil {
 			return err
 		}
 		if err := txRepo.CreateEvent(event); err != nil && !errors.Is(err, ErrDuplicateTeamEvent) {
 			return err
 		}
-		if outbox.Status == "" {
-			outbox.Status = "pending"
-		}
-		now := time.Now().UTC()
-		if outbox.AvailableAt.IsZero() {
-			outbox.AvailableAt = now
-		}
-		if outbox.CreatedAt.IsZero() {
-			outbox.CreatedAt = now
-		}
-		if outbox.UpdatedAt.IsZero() {
-			outbox.UpdatedAt = now
-		}
-		res, err := sess.Collection("team_event_outbox").Insert(outbox)
-		if err != nil {
-			if strings.Contains(err.Error(), "uk_team_event_outbox_message") {
-				return nil
-			}
-			return fmt.Errorf("failed to create team event outbox: %w", err)
-		}
-		if id, ok := res.ID().(int64); ok {
-			outbox.ID = int(id)
-		}
-		return nil
+		return txRepo.CreateEventOutbox(outbox)
 	})
 }
 
@@ -480,8 +493,11 @@ func (r *teamRepository) CreateEventWithOutbox(event *models.TeamEvent, outbox *
 	if event == nil || outbox == nil {
 		return fmt.Errorf("event and outbox are required")
 	}
-	return r.sess.Tx(func(sess db.Session) error {
-		txRepo := &teamRepository{sess: sess}
+	return r.withTransaction(func(sess db.Session) error {
+		if err := lockTeamProjectionRow(sess, event.TeamID); err != nil {
+			return err
+		}
+		txRepo := &teamRepository{sess: sess, inTransaction: true}
 		// Commit the source observation with its recovery action. Otherwise a
 		// crash between the two writes makes stream deduplication lose recovery.
 		for _, observation := range observations {
@@ -501,28 +517,8 @@ func (r *teamRepository) CreateEventWithOutbox(event *models.TeamEvent, outbox *
 		if err := txRepo.CreateEvent(event); err != nil && !errors.Is(err, ErrDuplicateTeamEvent) {
 			return err
 		}
-		if outbox.Status == "" {
-			outbox.Status = "pending"
-		}
-		now := time.Now().UTC()
-		if outbox.AvailableAt.IsZero() {
-			outbox.AvailableAt = now
-		}
-		if outbox.CreatedAt.IsZero() {
-			outbox.CreatedAt = now
-		}
-		if outbox.UpdatedAt.IsZero() {
-			outbox.UpdatedAt = now
-		}
-		res, err := sess.Collection("team_event_outbox").Insert(outbox)
-		if err != nil {
-			if strings.Contains(err.Error(), "uk_team_event_outbox_message") {
-				return nil
-			}
-			return fmt.Errorf("failed to create team event outbox: %w", err)
-		}
-		if id, ok := res.ID().(int64); ok {
-			outbox.ID = int(id)
+		if err := txRepo.CreateEventOutbox(outbox); err != nil {
+			return err
 		}
 		return nil
 	})
@@ -595,7 +591,10 @@ func (r *teamRepository) acceptRootCompletion(task *models.TeamTask, expectedLed
 		return false, fmt.Errorf("task, accepted completion event and outbox are required")
 	}
 	accepted := false
-	err := r.sess.Tx(func(sess db.Session) error {
+	err := r.withTransaction(func(sess db.Session) error {
+		if err := lockTeamProjectionRow(sess, task.TeamID); err != nil {
+			return err
+		}
 		result, err := sess.SQL().Exec(`
 UPDATE team_tasks
 SET status = ?, workflow_state = ?, plan_version = ?, ledger_version = ?, current_phase_id = ?,
@@ -630,7 +629,7 @@ WHERE id = ? AND ledger_version = ? AND accepted_completion_id IS NULL
 		}
 		accepted = true
 		if singleItem != nil {
-			if err := (&teamRepository{sess: sess}).UpsertWorkItem(singleItem); err != nil {
+			if err := (&teamRepository{sess: sess, inTransaction: true}).UpsertWorkItem(singleItem); err != nil {
 				return err
 			}
 		}
@@ -672,34 +671,11 @@ WHERE team_id = ? AND current_task_id = ?
 		); err != nil {
 			return fmt.Errorf("failed to release members from completed team task: %w", err)
 		}
-		txRepo := &teamRepository{sess: sess}
+		txRepo := &teamRepository{sess: sess, inTransaction: true}
 		if err := txRepo.CreateEvent(event); err != nil && !errors.Is(err, ErrDuplicateTeamEvent) {
 			return err
 		}
-		if outbox.Status == "" {
-			outbox.Status = "pending"
-		}
-		now := time.Now().UTC()
-		if outbox.AvailableAt.IsZero() {
-			outbox.AvailableAt = now
-		}
-		if outbox.CreatedAt.IsZero() {
-			outbox.CreatedAt = now
-		}
-		if outbox.UpdatedAt.IsZero() {
-			outbox.UpdatedAt = now
-		}
-		insertResult, err := sess.Collection("team_event_outbox").Insert(outbox)
-		if err != nil {
-			if strings.Contains(err.Error(), "uk_team_event_outbox_message") {
-				return nil
-			}
-			return fmt.Errorf("failed to create completion acknowledgement outbox: %w", err)
-		}
-		if id, ok := insertResult.ID().(int64); ok {
-			outbox.ID = int(id)
-		}
-		return nil
+		return txRepo.CreateEventOutbox(outbox)
 	})
 	return accepted, err
 }
@@ -721,6 +697,20 @@ func (r *teamRepository) ListPendingEventOutbox(now time.Time, limit int) ([]mod
 func (r *teamRepository) CreateEventOutbox(outbox *models.TeamEventOutbox) error {
 	if outbox == nil {
 		return fmt.Errorf("team event outbox is required")
+	}
+	if !r.inTransaction {
+		return r.withTeamTransaction(outbox.TeamID, func(tx *teamRepository) error { return tx.CreateEventOutbox(outbox) })
+	}
+	if err := lockTeamProjectionRow(r.sess, outbox.TeamID); err != nil {
+		return err
+	}
+	if settled, err := settledOutboxReceipt(r.sess, outbox); err != nil {
+		return err
+	} else if settled {
+		return nil
+	}
+	if err := r.admitTeamOutbox(outbox); err != nil {
+		return err
 	}
 	if outbox.Status == "" {
 		outbox.Status = "pending"
@@ -752,7 +742,7 @@ func (r *teamRepository) MarkEventOutboxDelivered(id int, deliveredAt time.Time)
 	if id <= 0 {
 		return nil
 	}
-	return r.sess.Collection("team_event_outbox").Find(db.Cond{"id": id}).Update(map[string]interface{}{
+	return r.sess.Collection("team_event_outbox").Find(db.Cond{"id": id, "status !=": "cancelled"}).Update(map[string]interface{}{
 		"status":       "delivered",
 		"delivered_at": deliveredAt,
 		"last_error":   nil,
@@ -764,7 +754,7 @@ func (r *teamRepository) MarkEventOutboxFailed(id int, availableAt time.Time, ca
 	if id <= 0 {
 		return nil
 	}
-	return r.sess.Collection("team_event_outbox").Find(db.Cond{"id": id}).Update(map[string]interface{}{
+	return r.sess.Collection("team_event_outbox").Find(db.Cond{"id": id, "status": "pending"}).Update(map[string]interface{}{
 		"status":       "pending",
 		"attempts":     db.Raw("attempts + 1"),
 		"available_at": availableAt,
@@ -973,7 +963,10 @@ func (r *teamRepository) ListMonitorWorkItems(teamID int) ([]models.TeamWorkItem
 // Result metadata, delivery history, workflow version and the notification/ACK
 // intent commit together; a lost reply can safely observe this same record.
 func (r *teamRepository) CommitTeamDelivery(item *models.TeamWorkItem, event *models.TeamEvent, outbox *models.TeamEventOutbox, task *models.TeamTask, expected int64, observations []*models.TeamEvent, extra ...*models.TeamEventOutbox) error {
-	return r.sess.Tx(func(sess db.Session) error {
+	return r.withTransaction(func(sess db.Session) error {
+		if err := lockTeamProjectionRow(sess, task.TeamID); err != nil {
+			return err
+		}
 		var version int64
 		var status string
 		row, err := sess.SQL().QueryRow("SELECT ledger_version,status FROM team_tasks WHERE id=? FOR UPDATE", task.ID)
@@ -986,7 +979,7 @@ func (r *teamRepository) CommitTeamDelivery(item *models.TeamWorkItem, event *mo
 		if version != expected || status != task.Status {
 			return fmt.Errorf("delivery ledger changed; retry original projection")
 		}
-		tx := &teamRepository{sess: sess}
+		tx := &teamRepository{sess: sess, inTransaction: true}
 		if err := tx.UpsertWorkItem(item); err != nil {
 			return err
 		}

@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 )
@@ -48,6 +49,27 @@ func TestRuntimeEventServicePublishesJSONFields(t *testing.T) {
 	}
 	if event.Type != "runtime.instance.running" {
 		t.Fatalf("event type = %q", event.Type)
+	}
+}
+
+func TestRuntimeEventLargeNotificationKeepsRefreshIdentityWithinBudget(t *testing.T) {
+	r := &fakePlatformRedisClient{}
+	if err := NewRuntimeEventService(r).Publish(context.Background(), "runtime.instance.running", map[string]any{"instance_id": 17, "generation": 5, "huge": strings.Repeat("x", 100000)}); err != nil {
+		t.Fatal(err)
+	}
+	bytes := 0
+	for k, v := range r.xaddFields {
+		bytes += len(k) + len(v)
+	}
+	if bytes > 16<<10 {
+		t.Fatal("UI notification exceeded capacity", bytes)
+	}
+	var compact map[string]any
+	if err := json.Unmarshal([]byte(r.xaddFields["payload"]), &compact); err != nil {
+		t.Fatal(err)
+	}
+	if compact["refresh_required"] != true || compact["instance_id"] != float64(17) || compact["generation"] != float64(5) || compact["payload_sha256"] == "" {
+		t.Fatal("large notification lost refresh identity", compact)
 	}
 }
 

@@ -8,7 +8,7 @@ import (
 )
 
 func TestRuntimePublicationTimeoutCASMySQL(t *testing.T) {
-	for _, scenario := range []string{"expired", "running-won-race", "new-generation", "new-origin", "timely", "deleting"} {
+	for _, scenario := range []string{"expired", "running-won-race", "binding-running", "new-generation", "new-origin", "timely", "deleting"} {
 		t.Run(scenario, func(t *testing.T) {
 			r, _ := manualStartIntentRepository(t, "openclaw")
 			marker, ok := interface{}(r).(interface {
@@ -21,21 +21,44 @@ func TestRuntimePublicationTimeoutCASMySQL(t *testing.T) {
 			if _, err := r.sess.SQL().Exec(`UPDATE instances SET status='creating',runtime_generation=1,runtime_security_profile='isolated-network-v1',created_at=?,updated_at=NOW(),runtime_error_code=NULL,runtime_error_message=NULL WHERE id=7`, origin); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := r.sess.SQL().Exec(`INSERT INTO instance_runtime_bindings VALUES(7,9,'pending-7-1',1,'creating')`); err != nil {
+			if _, err := r.sess.SQL().Exec(`ALTER TABLE instance_runtime_bindings ADD COLUMN created_at DATETIME(6) NOT NULL`); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := r.sess.SQL().Exec(`INSERT INTO instance_runtime_bindings VALUES(7,9,'pending-7-1',1,'creating',20000,?)`, origin); err != nil {
 				t.Fatal(err)
 			}
 			switch scenario {
 			case "running-won-race":
 				_, _ = r.sess.SQL().Exec(`UPDATE instances SET status='running' WHERE id=7`)
+			case "binding-running":
+				_, _ = r.sess.SQL().Exec(`UPDATE instance_runtime_bindings SET state='running' WHERE instance_id=7`)
 			case "new-generation":
 				_, _ = r.sess.SQL().Exec(`UPDATE instances SET runtime_generation=2 WHERE id=7`)
 			case "new-origin":
-				_, _ = r.sess.SQL().Exec(`UPDATE instances SET created_at=NOW() WHERE id=7`)
+				_, _ = r.sess.SQL().Exec(`UPDATE instance_runtime_bindings SET created_at=NOW() WHERE instance_id=7`)
 			case "timely":
 				origin = time.Now().UTC().Truncate(time.Microsecond)
-				_, _ = r.sess.SQL().Exec(`UPDATE instances SET created_at=? WHERE id=7`, origin)
+				_, _ = r.sess.SQL().Exec(`UPDATE instance_runtime_bindings SET created_at=? WHERE instance_id=7`, origin)
 			case "deleting":
 				_, _ = r.sess.SQL().Exec(`UPDATE instances SET status='deleting' WHERE id=7`)
+			}
+			reported, err := r.RuntimePublicationOrigin(t.Context(), 7, 1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			switch scenario {
+			case "binding-running":
+				if !reported.IsZero() {
+					t.Fatalf("running binding still had a deadline origin: %v", reported)
+				}
+			case "new-origin":
+				if !reported.After(origin) {
+					t.Fatalf("replacement origin was not observed: %v", reported)
+				}
+			default:
+				if !reported.Equal(origin) {
+					t.Fatalf("reported origin = %v, want reservation time %v", reported, origin)
+				}
 			}
 			if _, err := r.sess.SQL().Exec(`DELETE FROM instance_model_activity WHERE instance_id=7`); err != nil {
 				t.Fatal(err)

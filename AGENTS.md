@@ -48,7 +48,7 @@
 
 ## AgentRuntime 镜像升级
 
-- 后续 AgentRuntime 镜像更新必须使用 CM 自带 Runtime 升级流程；优先使用仓库 `deployments/runtime-upgrade/upgrade-runtime.py`，由 CM 执行准备、预检、升级、验证及状态记录。
+- 后续 AgentRuntime 镜像更新必须使用 CM 自带 Runtime 升级流程；优先使用仓库 `tools/runtime-upgrade/upgrade-runtime.py`，由 CM 执行准备、预检、升级、验证及状态记录。
 - 目标镜像使用不可变 digest；不得以 `kubectl set image`、直接修改 Runtime Deployment 镜像/副本/身份环境变量、提前改默认镜像或写数据库替代升级流程。
 - 升级被未完成操作、休眠证明不符或原生兼容性检查阻止时，停止并报告具体操作；不得清除保护或回退到外部脚本强推。
 - CM 应用自身发布不等同于 AgentRuntime 升级。缺少原生数据安全升级能力的类型仍保持拒绝，不能为了发布新镜像移除安全边界。

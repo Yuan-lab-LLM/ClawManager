@@ -15,12 +15,7 @@
 .ws-dashboard ::selection{background:var(--cm-selected);color:var(--cm-ink)}
 .ws-dashboard :is(input,select){accent-color:var(--cm-primary);caret-color:var(--cm-primary)}
 .ws-dashboard *{scrollbar-color:var(--cm-border) transparent;scrollbar-width:thin}
-.ws-toolbar{display:flex;justify-content:space-between;gap:var(--cm-space-group);align-items:center;min-height:48px;flex:none}
-.ws-welcome{display:flex;gap:var(--cm-space-cell);align-items:center;min-width:0}
-.ws-welcome>div{min-width:0}
-.ws-welcome h1{font-size:var(--cm-font-subtitle);line-height:1.3;font-weight:600;color:var(--cm-ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.ws-welcome p,.ws-note,.ws-coverage{color:var(--cm-muted);font-size:var(--cm-font-label);line-height:var(--cm-line-height-label)}
-.ws-avatar{display:grid;place-items:center;background:var(--cm-selected);color:var(--cm-primary);width:40px;height:40px;border-radius:var(--cm-radius-circular);font-weight:600;font-size:var(--cm-font-title);flex:none}
+.ws-note,.ws-coverage{color:var(--cm-muted);font-size:var(--cm-font-label);line-height:var(--cm-line-height-label)}
 .ws-primary{display:inline-flex;align-items:center;justify-content:center;gap:var(--cm-space-control-gap);background:var(--cm-primary);color:var(--cm-on-primary)!important;border:1px solid var(--cm-primary);border-radius:var(--cm-radius-control);padding:0 var(--cm-space-cell);min-height:var(--cm-control-height);font-size:var(--cm-font-body)}
 .ws-primary:hover{background:var(--cm-primary-hover);border-color:var(--cm-primary-hover)}
 .ws-primary:active{background:var(--cm-primary-pressed);border-color:var(--cm-primary-pressed)}
@@ -189,7 +184,7 @@
 .ws-sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
 .ws-paused *{animation-play-state:paused!important;transition:none!important}
 @media(min-width:1101px) and (max-width:1400px){
- .ws-toolbar{min-height:40px}.ws-grid{grid-template-rows:minmax(340px,1.65fr) minmax(168px,.9fr) minmax(108px,.55fr)}
+ .ws-grid{grid-template-rows:minmax(340px,1.65fr) minmax(168px,.9fr) minmax(108px,.55fr)}
  .ws-operations{grid-template-columns:minmax(0,1.2fr) minmax(0,1.3fr) minmax(0,1fr)}
  .ws-pin-grid{grid-auto-rows:minmax(56px,1fr)}
 }
@@ -212,9 +207,6 @@
  .ws-pin-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
 }
 @media(max-width:767px){
- .ws-toolbar{gap:var(--cm-space-control-gap)}.ws-welcome{gap:var(--cm-space-control-gap)}
- .ws-avatar{height:32px;width:32px;font-size:var(--cm-font-body)}
- .ws-welcome h1{font-size:var(--cm-font-title);line-height:var(--cm-line-height-title)}
  .ws-resume,.ws-pins,.ws-operations>.ws-panel{padding-left:var(--cm-space-cell);padding-right:var(--cm-space-cell)}
  .ws-heading{gap:var(--cm-space-tight)}.ws-recent-list .ws-recent-time{max-width:100px}
  .ws-pin>div>svg:last-child{display:none}.ws-pin-grid[data-count="1"]{grid-template-columns:minmax(0,1fr)}
@@ -222,12 +214,10 @@
  .ws-grid[data-group=activity] .ws-heat{grid-template-rows:repeat(14,minmax(0,1fr));height:280px;gap:var(--cm-space-tight)}
  .ws-dialog{padding:var(--cm-space-group)}
 }
-@media(max-width:360px){.ws-welcome p{display:none}.ws-gauges{gap:var(--cm-space-tight)}.ws-pin-grid{grid-template-columns:minmax(0,1fr)}.ws-primary{gap:var(--cm-space-tight)}}
+@media(max-width:360px){.ws-gauges{gap:var(--cm-space-tight)}.ws-pin-grid{grid-template-columns:minmax(0,1fr)}.ws-primary{gap:var(--cm-space-tight)}}
 @media(prefers-reduced-motion:reduce){.ws-dashboard *{animation:none!important;transition:none!important}}
 @media(forced-colors:active){.ws-panel,.ws-pin,.ws-heat button{border:1px solid CanvasText}.ws-ring-segment,.ws-chart .ws-chart-line,.ws-chart circle{forced-color-adjust:none}.ws-dot{border:1px solid CanvasText}.ws-range [aria-pressed=true],.ws-groups [aria-pressed=true]{outline:1px solid Highlight}}
 
-.ws-welcome h1 .ws-greeting{font-size:var(--cm-font-body);font-weight:400;color:var(--cm-muted)}
-.ws-welcome h1 strong{font-size:var(--cm-font-subtitle);font-weight:600;color:var(--cm-primary-hover)}
 .ws-usage-stage{position:relative;display:flex;flex-direction:column;flex:1;min-height:0;transition:opacity 150ms ease}
 .ws-usage-stage>.ws-operation-body{transition:opacity 150ms ease}
 .ws-usage-stage[data-pending=true]>.ws-operation-body{opacity:.4}

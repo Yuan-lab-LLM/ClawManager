@@ -18,7 +18,7 @@ type ProtectedGatewayMissingReportMarker interface {
 func (r *instanceRuntimeBindingRepository) MarkProtectedGatewayReportMissing(ctx context.Context, binding models.InstanceRuntimeBinding, before time.Time, message string) (bool, error) {
 	marked := false
 	err := (&instanceRepository{r.sess}).withUnfencedInstance(ctx, binding.InstanceID, func(local *instanceRepository) error {
-		result, err := local.sess.SQL().ExecContext(ctx, `UPDATE instance_runtime_bindings SET error_message=? WHERE instance_id=? AND runtime_pod_id=? AND generation=? AND CAST(gateway_id AS BINARY)=CAST(? AS BINARY) AND state=? AND updated_at<=? AND (last_health_at IS NULL OR last_health_at<=?)`, message, binding.InstanceID, binding.RuntimePodID, binding.Generation, binding.GatewayID, binding.State, before, before)
+		result, err := local.sess.SQL().ExecContext(ctx, `UPDATE instance_runtime_bindings SET error_message=? WHERE id=? AND instance_id=? AND runtime_pod_id=? AND generation=? AND CAST(gateway_id AS BINARY)=CAST(? AS BINARY) AND gateway_port=? AND BINARY workspace_path=BINARY ? AND state=? AND updated_at<=? AND (last_health_at IS NULL OR last_health_at<=?)`, message, binding.ID, binding.InstanceID, binding.RuntimePodID, binding.Generation, binding.GatewayID, binding.GatewayPort, binding.WorkspacePath, binding.State, before, before)
 		if err != nil {
 			return err
 		}
@@ -52,6 +52,9 @@ func (r *instanceRuntimeBindingRepository) ReconcileUnboundProtectedReportedGate
 			return err
 		}
 		if err = row.Scan(&current.ID, &current.UserID, &current.Type, &current.InstanceMode, &current.RuntimeType, &current.Status, &current.RuntimeGeneration, &current.RuntimeSecurityProfile, &workspace); err != nil {
+			return err
+		}
+		if blocked, err := slotResetBlocksBinding(ctx, tx, binding, true); err != nil || blocked {
 			return err
 		}
 		if workspace != binding.WorkspacePath || current.UserID != owner || current.Type != binding.RuntimeType || current.InstanceMode != "lite" || current.RuntimeType != "gateway" || current.RuntimeSecurityProfile != "isolated-network-v1" || current.RuntimeGeneration != binding.Generation || (current.Status != "running" && current.Status != "creating") {

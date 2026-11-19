@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"strings"
 
+	"clawreef/internal/historymaintenance"
 	"clawreef/internal/systembackup/team"
 )
 
@@ -26,6 +27,9 @@ func validateTeamDataSQLSnapshot(r io.Reader, b CaptureBudget) (SQLResult, error
 	return ReadSQLSnapshot(r, func(t SQLTable) error {
 		base, ok := tables[t.Name]
 		if !ok {
+			if kind, _, monthly := historymaintenance.ParseMonthly(t.Name); monthly && (kind == "team_events" || kind == "team_tasks") {
+				return validateMonthlySQLTable(t)
+			}
 			return errors.New("unsupported_schema")
 		}
 		return validateTeamDataTable(t, base)
@@ -98,6 +102,19 @@ func ValidateTeamDataSchema(ctx context.Context, q SQLQueryer) error {
 	}
 	actual := map[string]bool{}
 	for _, name := range names {
+		if _, _, monthly := historymaintenance.ParseMonthly(name); monthly {
+			if err := historymaintenance.ValidateMonthly(ctx, q, name); err != nil {
+				return err
+			}
+			table, err := ReadTableSchema(ctx, q, name)
+			if err != nil {
+				return err
+			}
+			if err = validateMonthlySQLTable(table); err != nil {
+				return err
+			}
+			continue
+		}
 		if p, _ := Policy(name); p.Category != "system_backup" {
 			actual[name] = true
 		}
@@ -117,12 +134,7 @@ func ValidateTeamDataSchema(ctx context.Context, q SQLQueryer) error {
 			return e
 		}
 	}
-	var executable int
-	e = q.QueryRowContext(ctx, "SELECT (SELECT COUNT(*) FROM information_schema.TRIGGERS WHERE TRIGGER_SCHEMA=DATABASE()) + (SELECT COUNT(*) FROM information_schema.ROUTINES WHERE ROUTINE_SCHEMA=DATABASE()) + (SELECT COUNT(*) FROM information_schema.EVENTS WHERE EVENT_SCHEMA=DATABASE())").Scan(&executable)
-	if e == nil && executable != 0 {
-		e = errors.New("unsupported_schema")
-	}
-	return e
+	return validateCaptureExecutables(ctx, q)
 }
 
 // Only a new, owned, empty restore database receives these static additions.
@@ -143,9 +155,12 @@ func alignTeamDataRestoreSchema(ctx context.Context, db *sql.DB, r io.Reader) er
 	for _, table := range expected {
 		byName[table.Name] = table
 	}
-	_, e = ReadSQLSnapshot(r, func(table SQLTable) error {
+	result, e := ReadSQLSnapshot(r, func(table SQLTable) error {
 		base, ok := byName[table.Name]
 		if !ok {
+			if kind, _, monthly := historymaintenance.ParseMonthly(table.Name); monthly && (kind == "team_events" || kind == "team_tasks") {
+				return prepareMonthlyRestoreTable(ctx, db, table)
+			}
 			return errors.New("unsupported_schema")
 		}
 		if e := validateTeamDataTable(table, base); e != nil {
@@ -205,5 +220,8 @@ func alignTeamDataRestoreSchema(ctx context.Context, db *sql.DB, r io.Reader) er
 		}
 		return nil
 	}, nil)
-	return e
+	if e != nil {
+		return e
+	}
+	return prepareHistoryAllocators(ctx, db, result.AutoIncrement)
 }

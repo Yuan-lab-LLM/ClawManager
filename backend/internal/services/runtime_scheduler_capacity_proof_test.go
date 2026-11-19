@@ -84,3 +84,65 @@ func TestPhysicalExpansionRejectsConfiguredSubsetOfLayout(t *testing.T) {
 		t.Fatalf("configured subset gained expansion authority: free=%d", free)
 	}
 }
+
+func TestPhysicalExpansionCountsOnlyVerifiedEightSlotCapacity(t *testing.T) {
+	ctx := context.Background()
+	for _, scenario := range []string{"unknown-slot", "full-except-unverified", "quarantine", "slot-rpc-unreachable", "stale-sql-binding", "unknown-pod"} {
+		t.Run(scenario, func(t *testing.T) {
+			physical := auditRoutingPod(8, 1)
+			endpoint, uid := "https://10.0.0.2:19090", string(physical.UID)
+			client := NewSlotRuntimeAgentClientWithHTTPClient("control", fake.NewSimpleClientset(physical), "runtime", &http.Client{Transport: slotRoundTripper(func(r *http.Request) (*http.Response, error) {
+				snapshot := auditFreeSnapshot()
+				if strings.Contains(r.URL.Path, "/slot-0/") {
+					switch scenario {
+					case "unknown-slot", "full-except-unverified":
+						delete(snapshot, "idle_confirmed")
+					case "quarantine":
+						snapshot["quarantined"] = true
+					case "slot-rpc-unreachable":
+						return nil, errors.New("unreachable worker")
+					}
+				}
+				if scenario == "unknown-pod" {
+					return nil, errors.New("unreachable coordinator")
+				}
+				if !strings.Contains(r.URL.Path, "/slot-0/") && (!strings.Contains(r.URL.Path, "/slot-7/") || scenario == "full-except-unverified") {
+					snapshot = auditOccupiedSnapshot("running")
+				}
+				raw, _ := json.Marshal(snapshot)
+				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(string(raw)))}, nil
+			})}).(*slotRuntimeAgentClient)
+			bindings := newFakeRuntimeBindingRepo()
+			if scenario == "stale-sql-binding" {
+				bindings.bindings[9] = &models.InstanceRuntimeBinding{InstanceID: 9, RuntimePodID: 9, GatewayPort: 20000, State: "error"}
+			}
+			scheduler := NewRuntimeScheduler(newFakeRuntimeInstanceRepo(), &fakeRuntimePodRepo{}, bindings, nil, client, nil, nil, nil, time.Second)
+			pod := models.RuntimePod{ID: 9, RuntimeType: RuntimeTypeHermes, PodName: physical.Name, Namespace: physical.Namespace, PodIP: ptrString("10.0.0.2"), PodUID: &uid, AgentEndpoint: &endpoint, State: "ready", Capacity: 8}
+			free, err := scheduler.allocatableGatewaySlots(ctx, pod)
+			if scenario == "unknown-pod" {
+				if free != 0 || err == nil {
+					t.Fatalf("unknown pod counted available capacity: free=%d err=%v", free, err)
+				}
+			} else {
+				wantFree := 1
+				if scenario == "full-except-unverified" {
+					wantFree = 0
+				}
+				if free != wantFree || err != nil {
+					t.Fatalf("availability was not isolated by slot: free=%d want=%d err=%v", free, wantFree, err)
+				}
+			}
+		})
+	}
+}
+
+func TestRuntimeCapacityDeficit(t *testing.T) {
+	for _, tc := range []struct{ waiting, free, starting, want int }{
+		{1, 0, 0, 1}, {1, 1, 0, 0}, {9, 0, 8, 1}, {1, 0, 8, 0},
+		{8, 2, 2, 4}, {0, 1, 9, 0}, {-1, 2, 3, 0}, {2, -1, -1, 2},
+	} {
+		if got := runtimeCapacityDeficit(tc.waiting, tc.free, tc.starting); got != tc.want {
+			t.Fatalf("%+v: got %d", tc, got)
+		}
+	}
+}

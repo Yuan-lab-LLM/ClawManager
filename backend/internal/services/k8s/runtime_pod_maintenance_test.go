@@ -103,7 +103,7 @@ func maintenanceSourceFixture() (*runtimeDeploymentService, *fake.Clientset, *ap
 	spec := RuntimeDeploymentSpec{Name: "source", Namespace: "ns", RuntimeType: "openclaw", Image: "repo/runtime@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", SlotCount: 2, AgentTokenSecretName: "agent", WorkspacePVCClaimName: "workspace"}
 	deployment := BuildRuntimeDeployment(spec)
 	deployment.UID = types.UID("source-uid")
-	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "source-pod", Namespace: "ns", UID: types.UID("pod-uid"), OwnerReferences: []metav1.OwnerReference{{Kind: "ReplicaSet", Name: "rs", UID: types.UID("rs"), Controller: maintenanceBool(true)}}}, Spec: deployment.Spec.Template.Spec, Status: corev1.PodStatus{Phase: corev1.PodRunning, Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}}}}
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "source-pod", Namespace: "ns", UID: types.UID("pod-uid"), Annotations: deployment.Spec.Template.DeepCopy().Annotations, OwnerReferences: []metav1.OwnerReference{{Kind: "ReplicaSet", Name: "rs", UID: types.UID("rs"), Controller: maintenanceBool(true)}}}, Spec: deployment.Spec.Template.Spec, Status: corev1.PodStatus{Phase: corev1.PodRunning, Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}}}}
 	for _, c := range pod.Spec.Containers {
 		pod.Status.ContainerStatuses = append(pod.Status.ContainerStatuses, corev1.ContainerStatus{Name: c.Name, Ready: true, ImageID: spec.Image})
 	}

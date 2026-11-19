@@ -2,22 +2,28 @@ package northbound
 
 import (
 	"bufio"
-	"clawreef/internal/models"
-	"clawreef/internal/repository"
-	"clawreef/internal/services"
-	"clawreef/internal/services/k8s"
 	"context"
+	"errors"
 	"fmt"
-	"github.com/upper/db/v4"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes/fake"
+	"math/rand/v2"
 	"net"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"clawreef/internal/models"
+	"clawreef/internal/repository"
+	"clawreef/internal/services"
+	"clawreef/internal/services/k8s"
+
+	"github.com/upper/db/v4"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes/fake"
 )
+
+var errOwnerTeamFixtureLostCreate = errors.New("fixture lost create response after durable instance")
 
 type ownerTeamEngineInstances struct {
 	services.InstanceService
@@ -57,39 +63,56 @@ func (s *ownerTeamEngineInstances) CreatePrevalidated(uid int, req services.Crea
 	s.created++
 	if s.loseOnce {
 		s.loseOnce = false
-		return nil, fmt.Errorf("fixture lost create response after durable instance")
+		return nil, errOwnerTeamFixtureLostCreate
 	}
 	return item, nil
 }
 
 func TestOwnerTeamMySQLRealEngineResumesLostCreateWithoutNewInstance(t *testing.T) {
-	for _, runtimeType := range []string{"openclaw", "opencode"} {
-		t.Run(runtimeType, func(t *testing.T) { testOwnerTeamMySQLRealEngineResumesLostCreate(t, runtimeType) })
+	for _, workerRuntime := range []string{"openclaw", "opencode"} {
+		t.Run(workerRuntime, func(t *testing.T) { testOwnerTeamMySQLRealEngineResumesLostCreate(t, workerRuntime) })
 	}
 }
 
-func testOwnerTeamMySQLRealEngineResumesLostCreate(t *testing.T, runtimeType string) {
-	if os.Getenv("TEST_OWNER_TEAM_REDIS_PORT") == "" {
+func testOwnerTeamMySQLRealEngineResumesLostCreate(t *testing.T, workerRuntime string) {
+	redisPort := os.Getenv("TEST_OWNER_TEAM_REDIS_PORT")
+	if redisPort == "" {
 		t.Skip("isolated Redis required")
 	}
 	session := ownerTeamMySQL(t)
+	teamID := 10000 + rand.IntN(1<<30)
+	if _, err := session.SQL().Exec(fmt.Sprintf("ALTER TABLE teams AUTO_INCREMENT=%d", teamID)); err != nil {
+		t.Fatal(err)
+	}
+	send := ownerTeamEngineRedis(t, redisPort, teamID)
+	t.Setenv("CLAWMANAGER_TEAM_REDIS_URL", "redis://127.0.0.1:"+redisPort+"/15")
 	repo := repository.NewTeamRepository(session)
 	steps := repository.NewOwnerTeamRepository(session)
 	root := t.TempDir()
 	instances := &ownerTeamEngineInstances{repo: repository.NewInstanceRepository(session), root: root, loseOnce: true}
 	client := &k8s.Client{Clientset: fake.NewSimpleClientset(), Namespace: "owner-fixture", WorkspaceStorageClass: "standard"}
 	engine := services.NewTeamService(repo, instances, services.WithTeamKubernetesClient(client), services.WithTeamRuntimeWorkspaceRoot(root))
-	redisPort := os.Getenv("TEST_OWNER_TEAM_REDIS_PORT")
-	t.Setenv("CLAWMANAGER_TEAM_REDIS_URL", "redis://127.0.0.1:"+redisPort+"/15")
 	owner, name := "engine@example.com", "可恢复团队"
 	team := &models.Team{UserID: 1, Name: "nb-engine-test", DisplayName: &name, Owner: &owner, ResourceScope: models.TeamScopeNorthbound, Status: "creating", CommunicationMode: "leader_mediated", SharedMountPath: "/team", RedisEventsLastID: "0-0"}
 	if err := repo.CreateTeam(team); err != nil {
 		t.Fatal(err)
 	}
-	req := services.CreateTeamRequest{Name: name, CommunicationMode: "leader_mediated", Members: []services.CreateTeamMemberRequest{{MemberID: "leader", Name: "主编", Role: "leader", IsLeader: true, RuntimeType: runtimeType, InstanceMode: "lite"}, {MemberID: "worker", Name: "筛选员", Role: "worker", RuntimeType: runtimeType, InstanceMode: "lite"}}}
+	if team.ID != teamID {
+		t.Fatalf("Team fixture got ID %d, want %d", team.ID, teamID)
+	}
+	req := services.CreateTeamRequest{
+		Name: name, CommunicationMode: "leader_mediated",
+		Members: []services.CreateTeamMemberRequest{
+			{MemberID: "leader", Name: "主编", Role: "leader", IsLeader: true, RuntimeType: "openclaw", InstanceMode: "lite"},
+			{MemberID: "worker", Name: "筛选员", Role: "worker", RuntimeType: workerRuntime, InstanceMode: "lite"},
+		},
+	}
 	provision := engine.(services.OwnerTeamProvisioner)
-	if err := provision.ProvisionOwnerTeam(context.Background(), team, req, "fixture-op", steps); err == nil {
-		t.Fatal("lost response fixture did not fail")
+	if err := provision.ProvisionOwnerTeam(context.Background(), team, req, "fixture-op", steps); !errors.Is(err, errOwnerTeamFixtureLostCreate) {
+		t.Fatalf("want lost create response after durable instance, got %v", err)
+	}
+	if team.TeamTokenSecretName == nil {
+		t.Fatal("lost create response occurred before the Team token secret was recorded")
 	}
 	secret, err := client.Clientset.CoreV1().Secrets(client.GetNamespace(1)).Get(context.Background(), *team.TeamTokenSecretName, metav1.GetOptions{})
 	if err != nil {
@@ -114,6 +137,9 @@ func testOwnerTeamMySQLRealEngineResumesLostCreate(t *testing.T, runtimeType str
 	if err := provision.ProvisionOwnerTeam(context.Background(), team, req, "fixture-op", steps); err != nil {
 		t.Fatal(err)
 	}
+	if team.TeamTokenSecretName == nil {
+		t.Fatal("Team token secret reference was lost during recovery")
+	}
 	secret, err = client.Clientset.CoreV1().Secrets(client.GetNamespace(1)).Get(context.Background(), *team.TeamTokenSecretName, metav1.GetOptions{})
 	if err != nil || string(secret.Data["CLAWMANAGER_TEAM_TOKEN"]) != token {
 		t.Fatal("token rotated on recovery")
@@ -126,10 +152,20 @@ func testOwnerTeamMySQLRealEngineResumesLostCreate(t *testing.T, runtimeType str
 		if m.InstanceID == nil {
 			t.Fatal("missing binding")
 		}
-		instance, _ := instances.GetByID(*m.InstanceID)
+		instance, err := instances.GetByID(*m.InstanceID)
+		if err != nil || instance == nil || instance.WorkspacePath == nil {
+			t.Fatalf("member %s has no persisted instance workspace: %v", m.MemberKey, err)
+		}
+		wantRuntime := workerRuntime
+		if m.MemberKey == "leader" {
+			wantRuntime = "openclaw"
+		}
+		if instance.Type != wantRuntime || m.RuntimeType != wantRuntime {
+			t.Fatalf("member %s has instance type %q and runtime %q, want %q", m.MemberKey, instance.Type, m.RuntimeType, wantRuntime)
+		}
 		identityPath := filepath.Join(*instance.WorkspacePath, "home", ".openclaw", "workspace", "AGENTS.md")
 		marker := "CLAWMANAGER TEAM OVERLAY"
-		if runtimeType == "opencode" {
+		if instance.Type == "opencode" {
 			identityPath, marker = filepath.Join(*instance.WorkspacePath, "AGENTS.md"), "# ClawManager Team Runtime"
 		}
 		data, err := os.ReadFile(identityPath)
@@ -151,32 +187,70 @@ func testOwnerTeamMySQLRealEngineResumesLostCreate(t *testing.T, runtimeType str
 	if task.Status != "dispatched" {
 		t.Fatalf("not dispatched: %s", task.Status)
 	}
-	conn, err := net.DialTimeout("tcp", "127.0.0.1:"+redisPort, 3*time.Second)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer conn.Close()
-	reader := bufio.NewReader(conn)
-	send := func(args ...string) string {
-		fmt.Fprintf(conn, "*%d\r\n", len(args))
-		for _, arg := range args {
-			fmt.Fprintf(conn, "$%d\r\n%s\r\n", len(arg), arg)
-		}
-		reply, _ := reader.ReadString('\n')
-		return reply
-	}
-	if !strings.HasPrefix(send("SELECT", "15"), "+OK") {
-		t.Fatal("Redis selection failed")
-	}
-	if value := send("XLEN", fmt.Sprintf("claw:team:%d:inbox:leader", team.ID)); value != ":1\r\n" {
+	inbox := fmt.Sprintf("claw:team:%d:inbox:leader", team.ID)
+	if value := send("XLEN", inbox); value != ":1\r\n" {
 		t.Fatalf("Redis dispatch missing or duplicated: %q", value)
 	}
 	if _, err := engine.DispatchTask(1, team.ID, services.DispatchTeamTaskRequest{MessageID: "owner-engine-dispatch", Payload: map[string]interface{}{"prompt": "fixture business question", "user_key": "owner-" + owner}}); err != nil {
 		t.Fatal(err)
 	}
-	if value := send("XLEN", fmt.Sprintf("claw:team:%d:inbox:leader", team.ID)); value != ":1\r\n" {
+	if value := send("XLEN", inbox); value != ":1\r\n" {
 		t.Fatal("dispatch replay duplicated Redis delivery")
 	}
-	// Only these fixture keys are removed from the disposable local Redis.
-	send("DEL", fmt.Sprintf("claw:team:%d:inbox:leader", team.ID))
+}
+
+func ownerTeamEngineRedis(t *testing.T, redisPort string, teamID int) func(...string) string {
+	t.Helper()
+	conn, err := net.DialTimeout("tcp", "127.0.0.1:"+redisPort, 3*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	reader := bufio.NewReader(conn)
+	send := func(args ...string) string {
+		if err := conn.SetDeadline(time.Now().Add(3 * time.Second)); err != nil {
+			t.Errorf("set fixture Redis deadline: %v", err)
+			return ""
+		}
+		var command strings.Builder
+		fmt.Fprintf(&command, "*%d\r\n", len(args))
+		for _, arg := range args {
+			fmt.Fprintf(&command, "$%d\r\n%s\r\n", len(arg), arg)
+		}
+		if _, err := fmt.Fprint(conn, command.String()); err != nil {
+			t.Errorf("send fixture Redis %s: %v", args[0], err)
+			return ""
+		}
+		reply, err := reader.ReadString('\n')
+		if err != nil {
+			t.Errorf("read fixture Redis %s: %v", args[0], err)
+		}
+		return reply
+	}
+	if send("SELECT", "15") != "+OK\r\n" {
+		t.Fatal("Redis selection failed")
+	}
+	const fixtureKeys = `local matches = {}
+local cursor = "0"
+repeat
+  local page = redis.call("SCAN", cursor, "MATCH", ARGV[1], "COUNT", 100)
+  cursor = page[1]
+  for _, key in ipairs(page[2]) do matches[key] = true end
+until cursor == "0"
+local count = 0
+for key, _ in pairs(matches) do
+  count = count + 1
+  if ARGV[2] == "delete" then redis.call("DEL", key) end
+end
+return count`
+	pattern := fmt.Sprintf("claw:team:%d:*", teamID)
+	if reply := send("EVAL", fixtureKeys, "0", pattern, "check"); reply != ":0\r\n" {
+		t.Fatalf("fixture Redis prefix %s is not available: %q", pattern, reply)
+	}
+	t.Cleanup(func() {
+		if reply := send("EVAL", fixtureKeys, "0", pattern, "delete"); !strings.HasPrefix(reply, ":") {
+			t.Errorf("remove fixture Redis prefix %s: %q", pattern, reply)
+		}
+	})
+	return send
 }

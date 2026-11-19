@@ -239,15 +239,17 @@ func TestVerifiedUpgradeBindingMustStillBelongToReadyTarget(t *testing.T) {
 	}
 }
 
-func TestRuntimeUpgradeGuardAppliesOnlyToOpenClaw(t *testing.T) {
+func TestRuntimeNativeUpgradeGuardFailsClosedWithoutDatabase(t *testing.T) {
 	service := &RuntimeUpgradeService{}
-	for _, runtimeType := range []string{RuntimeTypeHermes, RuntimeTypeOpenCode, RuntimeTypeDeepSeekHarness} {
+	for _, runtimeType := range []string{RuntimeTypeHermes, RuntimeTypeDeepSeekHarness} {
 		if service.InstanceBlocked(context.Background(), runtimeType, 17) {
-			t.Fatalf("OpenClaw upgrade guard blocked %s instance", runtimeType)
+			t.Fatalf("native upgrade guard blocked unrelated %s instance", runtimeType)
 		}
 	}
-	if !service.InstanceBlocked(context.Background(), RuntimeTypeOpenClaw, 17) {
-		t.Fatal("OpenClaw guard must fail closed when its database is unavailable")
+	for _, runtimeType := range []string{RuntimeTypeOpenClaw, RuntimeTypeOpenCode} {
+		if !service.InstanceBlocked(context.Background(), runtimeType, 17) {
+			t.Fatalf("%s native upgrade guard must fail closed without its database", runtimeType)
+		}
 	}
 }
 

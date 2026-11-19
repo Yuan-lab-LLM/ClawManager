@@ -13,13 +13,15 @@ import (
 )
 
 type stubAIObservabilityHandlerService struct {
-	overview  *services.InstanceSessionUsageOverview
-	err       error
-	lastQuery services.InstanceSessionUsageOverviewQuery
+	overview   *services.InstanceSessionUsageOverview
+	err        error
+	lastQuery  services.InstanceSessionUsageOverviewQuery
+	auditQuery services.AuditQuery
 }
 
-func (s *stubAIObservabilityHandlerService) ListAuditItems(services.AuditQuery) (*services.AuditListResult, error) {
-	return nil, nil
+func (s *stubAIObservabilityHandlerService) ListAuditItems(q services.AuditQuery) (*services.AuditListResult, error) {
+	s.auditQuery = q
+	return &services.AuditListResult{Items: []services.AuditListItem{}, Page: 1, Limit: 20}, s.err
 }
 func (s *stubAIObservabilityHandlerService) GetTraceDetail(string) (*services.AuditTraceDetail, error) {
 	return nil, nil

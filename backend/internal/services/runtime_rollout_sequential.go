@@ -39,6 +39,9 @@ func LoadRuntimePoolProgress(ctx context.Context, repo any, id int64) (*RuntimeP
 		Kind string `json:"kind"`
 	}
 	_ = json.Unmarshal([]byte(raw), &kind)
+	if kind.Kind == "opencode-native-preserve" {
+		return nil, nil
+	}
 	if err := json.Unmarshal([]byte(raw), &p); err != nil {
 		return nil, err
 	}

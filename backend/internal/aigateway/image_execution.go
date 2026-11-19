@@ -23,7 +23,6 @@ import (
 )
 
 const imageTrafficClass = "llm_image"
-const maxImageResponseBytes = 64 << 20
 
 // Optional extension, leaving existing chat-only service implementations intact.
 type ImagesService interface {
@@ -351,9 +350,9 @@ func (s *service) ExecuteImage(ctx context.Context, userID int, req *ImageOperat
 		}
 		return nil, imageError(502, "image_provider_rejected", "Image provider did not return a successful result; inspect the Gateway invocation record before retrying")
 	}
-	raw, err := io.ReadAll(io.LimitReader(response.Body, maxImageResponseBytes+1))
-	if err != nil || len(raw) > maxImageResponseBytes {
-		return nil, imageError(502, "image_result_invalid", "Image result is incomplete or exceeds Gateway limits; do not retry automatically")
+	raw, err := io.ReadAll(response.Body)
+	if err != nil {
+		return nil, imageError(502, "image_result_invalid", "Image result is incomplete; do not retry automatically")
 	}
 	var parsed ImageExecutionResponse
 	if json.Unmarshal(raw, &parsed) != nil || len(parsed.Data) == 0 || len(parsed.Data) > req.count {
@@ -369,11 +368,11 @@ func (s *service) ExecuteImage(ctx context.Context, userID int, req *ImageOperat
 	decoded := make([][]byte, len(parsed.Data))
 	media := make([]string, len(parsed.Data))
 	for i, item := range parsed.Data {
-		if item.URL != "" || item.Base64 == "" || len(item.Base64) > base64.StdEncoding.EncodedLen(services.MaxGatewayImageArtifactBytes) {
-			return nil, imageError(502, "image_result_invalid", "Image results must contain bounded base64 images, not URLs")
+		if item.URL != "" || item.Base64 == "" {
+			return nil, imageError(502, "image_result_invalid", "Image results must contain base64 images")
 		}
 		data, err := base64.StdEncoding.DecodeString(item.Base64)
-		if err != nil || len(data) > services.MaxGatewayImageArtifactBytes {
+		if err != nil {
 			return nil, imageError(502, "image_result_invalid", "Image result encoding is invalid")
 		}
 		config, format, err := image.DecodeConfig(bytes.NewReader(data))

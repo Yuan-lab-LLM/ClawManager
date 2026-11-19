@@ -82,7 +82,7 @@ export default function InstanceCollapsiblePanel({
 
   return (
     <section className={`cm-surface shrink-0 px-4 ${collapsed ? "py-2" : "py-3"}`}>
-      <div className="flex items-start justify-between gap-3">
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <button
           type="button"
           onClick={toggle}
@@ -104,7 +104,7 @@ export default function InstanceCollapsiblePanel({
             ) : null}
           </span>
         </button>
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="flex min-w-0 max-w-full basis-full items-start gap-2 sm:basis-auto">
           {!collapsed ? headerActions : null}
           <button
             type="button"

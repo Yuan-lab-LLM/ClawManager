@@ -31,3 +31,14 @@ func TestParseOptionalRFC3339(t *testing.T) {
 		t.Fatalf("expected invalid timestamp error")
 	}
 }
+
+func TestSessionUsageWindowDefaultsAndMaximum(t *testing.T) {
+	since, until, err := normalizeSessionUsageTimeRange(nil, nil)
+	if err != nil || until.Sub(*since) != 30*24*time.Hour {
+		t.Fatalf("default window: %v %v %v", since, until, err)
+	}
+	old := until.Add(-91 * 24 * time.Hour)
+	if _, _, err = normalizeSessionUsageTimeRange(&old, until); err == nil {
+		t.Fatal("unbounded synchronous history accepted")
+	}
+}

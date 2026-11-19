@@ -32,6 +32,35 @@ func configureNoExternalWorkspaceWrites(t *testing.T, client RuntimeAgentClient)
 	}
 }
 
+func TestRuntimeSlotAuxiliaryExitProofRequiresActualContainerTermination(t *testing.T) {
+	i := runtimeSlotStopIntent{Version: 1, OperationID: strings.Repeat("1", 32), PodUID: "pod-uid", Slot: "slot-0", GatewayID: "gw-7-1", InstanceID: 7, UserID: 2, Generation: 1, WorkerEpoch: strings.Repeat("2", 32), AssignmentDigest: strings.Repeat("d", 64), Graceful: true}
+	m := runtimeSlotTerminationMessage{runtimeSlotStopIntent: i, AuxiliaryExitPending: true}
+	commitment, err := containerTerminationCommitment(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(commitment, "C2:") {
+		t.Fatalf("not an explicit auxiliary continuation: %s", commitment)
+	}
+	if commitment != "C2:_g2jKPGMrAfIFNc7Dftf_axlSa6ZXBKdkHtvhc2h6Ok" {
+		t.Fatalf("CM/AR auxiliary proof schema drift: %s", commitment)
+	}
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{UID: types.UID(i.PodUID)}, Status: corev1.PodStatus{ContainerStatuses: []corev1.ContainerStatus{{Name: i.Slot, ContainerID: "containerd://old", State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{}}}}}}
+	if _, err = runtimeSlotTerminationProof(pod, i); err == nil {
+		t.Fatal("live old container accepted")
+	}
+	pod.Status.ContainerStatuses[0].LastTerminationState.Terminated = &corev1.ContainerStateTerminated{ContainerID: "containerd://old", FinishedAt: metav1.Now(), Message: commitment}
+	proof, err := runtimeSlotTerminationProof(pod, i)
+	if err != nil || proof.CleanupConfirmed || !proof.AuxiliaryExitPending || !proof.Graceful {
+		t.Fatalf("lost exact auxiliary continuation: %+v %v", proof, err)
+	}
+	maintenance := i
+	maintenance.Kind = "maintenance"
+	if _, err = runtimeSlotTerminationProof(pod, maintenance); err == nil {
+		t.Fatal("auxiliary exit manufactured native maintenance completion")
+	}
+}
+
 func TestRuntimeSlotTerminationRequiresMatchingActualContainer(t *testing.T) {
 	intent := runtimeSlotStopIntent{Version: 1, OperationID: "11111111111111111111111111111111", PodUID: "pod-uid", Slot: "slot-0", GatewayID: "gw-7-1", InstanceID: 7, UserID: 2, Generation: 1, WorkerEpoch: "22222222222222222222222222222222", AssignmentDigest: strings.Repeat("d", 64)}
 	message := runtimeSlotTerminationMessage{runtimeSlotStopIntent: intent, CleanupConfirmed: true}

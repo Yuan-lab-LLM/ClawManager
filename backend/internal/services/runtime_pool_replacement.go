@@ -31,6 +31,12 @@ func LoadRuntimePoolOperation(ctx context.Context, repo any, id int64) (*Runtime
 	if err != nil || raw == "" {
 		return nil, err
 	}
+	var kind struct {
+		Kind string `json:"kind"`
+	}
+	if json.Unmarshal([]byte(raw), &kind) == nil && kind.Kind == "opencode-native-preserve" {
+		return nil, nil
+	}
 	var p poolReplacementProgress
 	if err = json.Unmarshal([]byte(raw), &p); err != nil {
 		return nil, err

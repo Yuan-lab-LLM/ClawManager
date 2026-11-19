@@ -146,7 +146,7 @@ Agent state report 可选上报 LLM 配置指纹，便于平台检测配置漂�
 
 管理页面会分页加载全部实例和用户选项。两类选项独立加载，单个接口失败不会清空另一类；失败时显示对应错误，点击“刷新”可重试。列表、错误提示和加载状态仅接受最新请求的结果，切换语言、重复加载或组件卸载后，旧请求不会覆盖当前列表。
 
-可选网络加固：在 ClawManager 后端设置 `CLAWMANAGER_INSTANCE_NETWORK_LOCK=true` 后，新建的 **Pro（独立 Pod）** OpenClaw/Hermes 实例会自动创建 egress NetworkPolicy。**Lite（gateway 池）** 实例共享 runtime Pod，不适用按实例 NetworkPolicy。参考 `deployments/k8s/single-node/instance-egress-networkpolicy.yaml`。
+可选网络加固：在 ClawManager 后端设置 `CLAWMANAGER_INSTANCE_NETWORK_LOCK=true` 后，新建的 **Pro（独立 Pod）** OpenClaw/Hermes 实例会自动创建 egress NetworkPolicy。**Lite（gateway 池）** 实例共享 runtime Pod，不适用按实例 NetworkPolicy。参考 `tools/k8s/single-node/instance-egress-networkpolicy.yaml`。
 
 ## Agent 生命周期
 
@@ -587,7 +587,7 @@ X-ClawManager-Runtime-Generation: <当前实例代次>
 
 > 历史问题：2026-10-19 打包复核发现，最初的补丁和 129 项核心测试针对开发快照 `4643e65ad6334de3e4e68dedc201d5fbb828c9fe`（包版本 1.18.18），不是本机正式版 2.0.27。这些历史测试不能用于证明正式运行时兼容。现已重新移植到正式版 `v2.0.27`、提交 `1f4d07a4a519185955ae8ab2ea3607805509e386`；源码测试与真实镜像/实例验收仍须区分。正式构建入口参见 [v2.0.27 CLI 构建脚本](https://github.com/anomalyco/opencode/blob/v2.0.27/packages/cli/script/build.ts)。
 
-`D:\AgentsRuntime\opencode\model-governance` 包含正式版的 `governance.ts`、`governance.test.ts`、版本校验安装器和 Dockerfile。ClawManager 内 `deployments/opencode-governance` 保存同一套交付来源；同步脚本使用 apply_patch 更新对应交付文件。旧 `.mjs` 客户端及 effect 实验文件保留但不参与新构建。补丁修改运行时核心，不改 OpenCode UI；正式版目录变化通过现有 `model.updated` 事件通知界面，轮询间隔约 3 秒。
+`D:\AgentsRuntime\opencode\model-governance` 包含正式版的 `governance.ts`、`governance.test.ts`、版本校验安装器和 Dockerfile。ClawManager 内 `tools/images/opencode-governance` 保存同一套交付来源；同步脚本使用 apply_patch 更新对应交付文件。旧 `.mjs` 客户端及 effect 实验文件保留但不参与新构建。补丁修改运行时核心，不改 OpenCode UI；正式版目录变化通过现有 `model.updated` 事件通知界面，轮询间隔约 3 秒。
 
 构建上下文是 `opencode/model-governance` 目录，显式提供现有 Lite/Pro 运行时镜像作为 `BASE_IMAGE`。安装器同时检查精确提交、包版本和各目标文件与上游的一致性，所有锚点通过才写入，并记录补丁文件哈希。正式 CLI 使用 `--target=opencode-linux-x64`，输出目录为 `packages/cli/dist/cli-linux-x64`；交付构建固定 Bun 1.4.2。不能只重建 ClawManager 镜像就认为运行时适配已部署。
 

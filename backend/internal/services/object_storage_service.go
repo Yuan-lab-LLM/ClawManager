@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -59,10 +60,34 @@ func (s *objectStorageService) PutObject(ctx context.Context, objectKey string, 
 		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 			return fmt.Errorf("failed to prepare local object storage directory: %w", err)
 		}
-		if err := os.WriteFile(target, body, 0o644); err != nil {
-			return fmt.Errorf("failed to write local object storage object: %w", err)
+		// Publish complete objects atomically; concurrent content-addressed
+		// uploads must not tear an object already referenced by committed SQL.
+		temporary, err := os.CreateTemp(filepath.Dir(target), ".object-")
+		if err != nil {
+			return err
 		}
-		return nil
+		name := temporary.Name()
+		defer os.Remove(name)
+		if _, err = temporary.Write(body); err != nil {
+			temporary.Close()
+			return err
+		}
+		if err = temporary.Sync(); err != nil {
+			temporary.Close()
+			return err
+		}
+		if err = temporary.Close(); err != nil {
+			return err
+		}
+		if err = os.Rename(name, target); err != nil {
+			return err
+		}
+		directory, err := os.Open(filepath.Dir(target))
+		if err != nil {
+			return err
+		}
+		defer directory.Close()
+		return directory.Sync()
 	}
 
 	exists, err := s.minioClient.BucketExists(ctx, s.bucket)
@@ -125,7 +150,7 @@ func (s *objectStorageService) GetObjectLimited(ctx context.Context, key string,
 	if err := validateImageObjectKey(key); err != nil {
 		return nil, err
 	}
-	if limit <= 0 || limit > maxStoredImageArtifactBytes {
+	if limit <= 0 || limit == math.MaxInt64 {
 		return nil, ErrImageArtifactUnavailable
 	}
 	var reader io.ReadCloser
@@ -149,6 +174,32 @@ func (s *objectStorageService) GetObjectLimited(ctx context.Context, key string,
 func (s *objectStorageService) DeleteObject(ctx context.Context, key string) error {
 	if err := validateImageObjectKey(key); err != nil {
 		return err
+	}
+	if s.minioClient != nil {
+		return s.minioClient.RemoveObject(ctx, s.bucket, s.resolveObjectKey(key), minio.RemoveObjectOptions{})
+	}
+	err := os.Remove(filepath.Join(s.localPath, filepath.FromSlash(s.resolveObjectKey(key))))
+	if os.IsNotExist(err) {
+		return nil
+	}
+	return err
+}
+
+// DeleteObservabilityObject accepts only generated owner-scoped encrypted keys.
+func (s *objectStorageService) DeleteObservabilityObject(ctx context.Context, key string) error {
+	parts := strings.Split(key, "/")
+	if len(parts) != 4 || parts[0] != "observability" || parts[1] != "v1" {
+		return fmt.Errorf("invalid observability object key")
+	}
+	for _, part := range parts[2:] {
+		if len(part) != 64 {
+			return fmt.Errorf("invalid observability digest")
+		}
+		for _, ch := range part {
+			if !(ch >= '0' && ch <= '9' || ch >= 'a' && ch <= 'f') {
+				return fmt.Errorf("invalid observability digest")
+			}
+		}
 	}
 	if s.minioClient != nil {
 		return s.minioClient.RemoveObject(ctx, s.bucket, s.resolveObjectKey(key), minio.RemoveObjectOptions{})
