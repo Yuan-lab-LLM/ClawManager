@@ -5,6 +5,7 @@ import (
 	"clawreef/internal/repository"
 	"clawreef/internal/runtimeauth"
 	"context"
+	"encoding/json"
 	"fmt"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -78,7 +79,8 @@ func (s *BrowserWorkerService) verifyNoBrowserWriterHistory(ctx context.Context,
 	if err != nil {
 		return err
 	}
-	if revision != 0 || raw != "" {
+	if (revision != 0 || raw != "") &&
+		!(instance.Type == RuntimeTypeOpenCode && instance.InstanceMode == InstanceModeLite && neverAdmittedBrowserWriterRegistry(raw, revision)) {
 		return fmt.Errorf("browser writer admission history requires confirmed external teardown")
 	}
 	name := s.name(id.InstanceID)
@@ -223,4 +225,12 @@ func (s *BrowserWorkerService) verifyNoBrowserWriterHistory(ctx context.Context,
 		}
 	}
 	return nil
+}
+
+// NFS cleanup records a first empty registry even when a browser was never
+// admitted. Accept that original record without erasing it; later revisions or
+// any admission/controller/Pod history still require positive teardown proof.
+func neverAdmittedBrowserWriterRegistry(raw string, revision int) bool {
+	initial, _ := json.Marshal(nfsBrowserStopEvidence{Pods: map[string]nfsBrowserPodEvidence{}})
+	return revision == 1 && raw == string(initial)
 }
