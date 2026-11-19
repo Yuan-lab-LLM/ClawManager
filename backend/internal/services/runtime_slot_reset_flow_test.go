@@ -18,7 +18,7 @@ import (
 )
 
 // The physical stop is simulated here; real CRI/NFS/website evidence is recorded
-// separately by deployments/validation/runtime-slot-native-acceptance.py.
+// separately by e2e/runtime-slot-native-acceptance.py.
 type slotResetFlowDeployment struct {
 	fakeRuntimeDeploymentService
 	kube  *fake.Clientset

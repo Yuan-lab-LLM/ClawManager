@@ -6,8 +6,8 @@ import test from 'node:test'
 
 // Exercise the actual njs source with a minimal nginx request facade. These
 // synthetic keys/tokens are local fixtures and never authenticate to a cluster.
-const source = readFileSync(new URL('../deployments/nginx/njs/desktop_auth.js', import.meta.url), 'utf8')
-const nginx = readFileSync(new URL('../deployments/nginx/nginx.conf', import.meta.url), 'utf8')
+const source = readFileSync(new URL('../tools/images/nginx/njs/desktop_auth.js', import.meta.url), 'utf8')
+const nginx = readFileSync(new URL('../tools/images/nginx/nginx.conf', import.meta.url), 'utf8')
 const key = 'desktop-proxy-edge-test-only'
 const fallback = 'http://127.0.0.1:9001'
 

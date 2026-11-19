@@ -85,6 +85,9 @@ Thumbs.db
 /deployments/k8s/sites/nine-node-production/server_login.md
 /deployments/k8s/sites/nine-node-production/private/
 /deployments/k8s/sites/nine-node-production/certificates/
+/tools/k8s/sites/nine-node-production/server_login.md
+/tools/k8s/sites/nine-node-production/private/
+/tools/k8s/sites/nine-node-production/certificates/
 
 # Team runtime config snapshots
 /team-*.json

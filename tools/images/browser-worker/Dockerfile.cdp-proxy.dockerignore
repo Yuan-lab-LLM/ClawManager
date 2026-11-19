@@ -1,0 +1,14 @@
+**
+!AgentsRuntime/
+!AgentsRuntime/clawmanager-agent/
+!AgentsRuntime/clawmanager-agent/**
+!ClawManager/
+!ClawManager/tools/
+!ClawManager/tools/images/
+!ClawManager/tools/images/browser-worker/
+!ClawManager/tools/images/browser-worker/cdp-proxy/
+!ClawManager/tools/images/browser-worker/cdp-proxy/**
+**/.git
+**/.private
+**/.env
+**/*.log

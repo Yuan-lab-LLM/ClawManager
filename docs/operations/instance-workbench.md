@@ -4,7 +4,7 @@
 
 ## 可用范围
 
-首版执行能力由启用了隔离网络的容器槽位 Runtime 提供，具体部署可参考 `deployments/k8s/lite-slots/`。现有 Pro 或传统非槽位实例即使支持文件工作区，也不会因此具备 Git、终端和预览执行协议；界面按能力接口结果显示，文件管理仍可使用。启用这些执行能力需要兼容的运行方式和镜像，仅更新前端不生效。
+首版执行能力由启用了隔离网络的容器槽位 Runtime 提供，具体部署可参考 `tools/k8s/lite-slots/`。现有 Pro 或传统非槽位实例即使支持文件工作区，也不会因此具备 Git、终端和预览执行协议；界面按能力接口结果显示，文件管理仍可使用。启用这些执行能力需要兼容的运行方式和镜像，仅更新前端不生效。
 
 ## 网页预览域名
 
@@ -16,7 +16,7 @@
 CLAWMANAGER_WORKBENCH_PREVIEW_ORIGIN=https://p-{token}.preview.example.net
 ```
 
-可参考 `deployments/k8s/workbench/backend-patch.example.yaml` 和 `deployments/k8s/workbench/ingress.example.yaml`，并按实际后端 Service 名称、端口和 Ingress 控制器调整。
+可参考 `tools/k8s/workbench/backend-patch.example.yaml` 和 `tools/k8s/workbench/ingress.example.yaml`，并按实际后端 Service 名称、端口和 Ingress 控制器调整。
 
 为 `*.preview.example.net` 设置通配 DNS、TLS 证书和到 CM 后端的 Ingress。必须允许任意请求路径、流式响应和 WebSocket Upgrade，并为长连接配置合适的超时。域名模板中必须恰好包含一个 `{token}`，不能包含路径、查询参数或账号信息。可以在现有后端 Deployment 中添加环境变量，在 Ingress 中添加通配主机规则；无需为每个预览创建 Kubernetes Service 或 Ingress。
 

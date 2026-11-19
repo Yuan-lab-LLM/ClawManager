@@ -27,7 +27,7 @@ const ieiInstanceSource = readFileSync(
   "utf8",
 );
 const nginxSource = readFileSync(
-  path.join(repoRoot, "deployments/nginx/nginx.conf"),
+  path.join(repoRoot, "tools/images/nginx/nginx.conf"),
   "utf8",
 );
 

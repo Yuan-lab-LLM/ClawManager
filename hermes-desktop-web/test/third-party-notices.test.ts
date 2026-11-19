@@ -44,7 +44,7 @@ test('license report uses a visible root static path and build hooks require a n
   assert.ok(plugin.generateBundle)
   assert.ok(plugin.writeBundle)
   assert.ok(plugin.transformIndexHtml)
-  const nginx = readFileSync(path.join(root, '../deployments/nginx/nginx.conf'), 'utf8')
+  const nginx = readFileSync(path.join(root, '../tools/images/nginx/nginx.conf'), 'utf8')
   assert.match(nginx, /location \^~ \/hermes-desktop-web\//)
   assert.ok(nginx.includes('try_files $uri $uri/ =404;'))
 })

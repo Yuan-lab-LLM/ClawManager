@@ -71,7 +71,7 @@ func TestHistoryCLIActualBackfillRestoreCredentialAndBackupPause(t *testing.T) {
 	dir := t.TempDir()
 	bootstrap := filepath.Join(dir, "restore")
 	restoreUser := "cmproof_" + suffix[:20]
-	prep := exec.Command("python3", "../../../deployments/k8s/observability/prepare-history-restore.py", "--output", bootstrap, "--host", "127.0.0.1", "--port", port, "--user", restoreUser, "--tls", "false")
+	prep := exec.Command("python3", "../../../tools/k8s/observability/prepare-history-restore.py", "--output", bootstrap, "--host", "127.0.0.1", "--port", port, "--user", restoreUser, "--tls", "false")
 	if out, err := prep.CombinedOutput(); err != nil {
 		t.Fatalf("credential generation failed: %v %s", err, out)
 	}

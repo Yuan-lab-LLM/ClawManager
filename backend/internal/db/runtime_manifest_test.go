@@ -45,7 +45,7 @@ func TestRuntimeManifestsAreValidYAML(t *testing.T) {
 
 func TestClawManagerReadinessWaitsForBackend(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
-	manifests := append(deploymentRuntimeManifests(repoRoot), filepath.Join(repoRoot, "deployments", "k8s", "sites", "nine-node-production", "20-clawmanager-production.yaml"))
+	manifests := append(deploymentRuntimeManifests(repoRoot), filepath.Join(repoRoot, "tools", "k8s", "sites", "nine-node-production", "20-clawmanager-production.yaml"))
 	for _, manifest := range manifests {
 		t.Run(manifest, func(t *testing.T) {
 			raw, err := os.ReadFile(manifest)
@@ -162,7 +162,7 @@ func TestDeploymentManifestsConfigureHermesDesktopWeb(t *testing.T) {
 
 func TestNineNodeProductionDatabaseLoadControls(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
-	manifest := filepath.Join(repoRoot, "deployments", "k8s", "sites", "nine-node-production", "20-clawmanager-production.yaml")
+	manifest := filepath.Join(repoRoot, "tools", "k8s", "sites", "nine-node-production", "20-clawmanager-production.yaml")
 	file, err := os.Open(manifest)
 	if err != nil {
 		t.Fatalf("open production manifest: %v", err)
@@ -208,8 +208,8 @@ func TestNineNodeProductionUsesPinnedClawManagerImage(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 	want := "10.130.15.40:5000/clawmanager@sha256:0fe32d900babed48ea224a1043d140a28335db9220c108128b8fb2f47b8c34de"
 	for _, relativePath := range []string{
-		filepath.Join("deployments", "k8s", "sites", "nine-node-production", "20-clawmanager-production.yaml"),
-		filepath.Join("deployments", "k8s", "sites", "nine-node-production", "50-northbound-production.yaml"),
+		filepath.Join("tools", "k8s", "sites", "nine-node-production", "20-clawmanager-production.yaml"),
+		filepath.Join("tools", "k8s", "sites", "nine-node-production", "50-northbound-production.yaml"),
 	} {
 		manifest := filepath.Join(repoRoot, relativePath)
 		raw, err := os.ReadFile(manifest)
@@ -294,7 +294,7 @@ func TestRuntimeManifestsExposeOpenCodePublicURLTemplate(t *testing.T) {
 
 func TestNginxRoutesOpenCodePerInstanceOrigins(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
-	raw, err := os.ReadFile(filepath.Join(repoRoot, "deployments", "nginx", "nginx.conf"))
+	raw, err := os.ReadFile(filepath.Join(repoRoot, "tools", "images", "nginx", "nginx.conf"))
 	if err != nil {
 		t.Fatalf("read nginx config: %v", err)
 	}
@@ -314,7 +314,7 @@ func TestNginxRoutesOpenCodePerInstanceOrigins(t *testing.T) {
 }
 func TestDesktopAuthAcceptsDedicatedRuntimeInstanceVariable(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
-	raw, err := os.ReadFile(filepath.Join(repoRoot, "deployments", "nginx", "njs", "desktop_auth.js"))
+	raw, err := os.ReadFile(filepath.Join(repoRoot, "tools", "images", "nginx", "njs", "desktop_auth.js"))
 	if err != nil {
 		t.Fatalf("read desktop auth script: %v", err)
 	}
@@ -335,7 +335,7 @@ func TestDesktopAuthAcceptsDedicatedRuntimeInstanceVariable(t *testing.T) {
 
 func TestNginxRoutesOpenCodeDedicatedOrigins(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
-	raw, err := os.ReadFile(filepath.Join(repoRoot, "deployments", "nginx", "nginx.conf"))
+	raw, err := os.ReadFile(filepath.Join(repoRoot, "tools", "images", "nginx", "nginx.conf"))
 	if err != nil {
 		t.Fatalf("read nginx config: %v", err)
 	}
@@ -352,7 +352,7 @@ func TestNginxRoutesOpenCodeDedicatedOrigins(t *testing.T) {
 
 func TestNginxBrowserWorkerPreservesPublicOriginAndWebSocket(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
-	raw, err := os.ReadFile(filepath.Join(repoRoot, "deployments", "nginx", "nginx.conf"))
+	raw, err := os.ReadFile(filepath.Join(repoRoot, "tools", "images", "nginx", "nginx.conf"))
 	if err != nil {
 		t.Fatalf("read nginx config: %v", err)
 	}
@@ -372,7 +372,7 @@ func TestNginxBrowserWorkerPreservesPublicOriginAndWebSocket(t *testing.T) {
 
 func TestNginxWorkersAreBoundedOnLargeClusterNodes(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
-	raw, err := os.ReadFile(filepath.Join(repoRoot, "deployments", "nginx", "nginx.conf"))
+	raw, err := os.ReadFile(filepath.Join(repoRoot, "tools", "images", "nginx", "nginx.conf"))
 	if err != nil {
 		t.Fatalf("read nginx config: %v", err)
 	}
@@ -387,7 +387,7 @@ func TestNginxWorkersAreBoundedOnLargeClusterNodes(t *testing.T) {
 
 func TestNginxDedicatedRuntimeOriginsExposeCertificateConfirmation(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
-	raw, err := os.ReadFile(filepath.Join(repoRoot, "deployments", "nginx", "nginx.conf"))
+	raw, err := os.ReadFile(filepath.Join(repoRoot, "tools", "images", "nginx", "nginx.conf"))
 	if err != nil {
 		t.Fatalf("read nginx config: %v", err)
 	}
@@ -414,7 +414,7 @@ func TestNginxDedicatedRuntimeOriginsExposeCertificateConfirmation(t *testing.T)
 
 func TestNginxAgentRoutesSupportSilentRenewalAndLongRunningWork(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
-	raw, err := os.ReadFile(filepath.Join(repoRoot, "deployments", "nginx", "nginx.conf"))
+	raw, err := os.ReadFile(filepath.Join(repoRoot, "tools", "images", "nginx", "nginx.conf"))
 	if err != nil {
 		t.Fatalf("read nginx config: %v", err)
 	}
@@ -439,7 +439,7 @@ func TestNginxAgentRoutesSupportSilentRenewalAndLongRunningWork(t *testing.T) {
 
 func TestDesktopAuthAllowsDedicatedOriginTokenRotation(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
-	raw, err := os.ReadFile(filepath.Join(repoRoot, "deployments", "nginx", "njs", "desktop_auth.js"))
+	raw, err := os.ReadFile(filepath.Join(repoRoot, "tools", "images", "nginx", "njs", "desktop_auth.js"))
 	if err != nil {
 		t.Fatalf("read desktop auth script: %v", err)
 	}
@@ -532,7 +532,7 @@ func deploymentRuntimeManifests(repoRoot string) []string {
 
 func TestNginxRoutesOpenCodePerInstanceOriginsAndClearsPublicHeader(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
-	raw, err := os.ReadFile(filepath.Join(repoRoot, "deployments", "nginx", "nginx.conf"))
+	raw, err := os.ReadFile(filepath.Join(repoRoot, "tools", "images", "nginx", "nginx.conf"))
 	if err != nil {
 		t.Fatalf("read nginx config: %v", err)
 	}
@@ -556,7 +556,7 @@ func TestInitialSchemasIncludeOptionalInstanceAlias(t *testing.T) {
 	manifests := append(
 		deploymentRuntimeManifests(repoRoot),
 		filepath.Join(repoRoot, "backend", "deployments", "k8s", "clawreef-incluster.yaml"),
-		filepath.Join(repoRoot, "deployments", "k8s", "sites", "nine-node-production", "20-clawmanager-production.yaml"),
+		filepath.Join(repoRoot, "tools", "k8s", "sites", "nine-node-production", "20-clawmanager-production.yaml"),
 	)
 	for _, manifest := range manifests {
 		raw, err := os.ReadFile(manifest)
@@ -572,8 +572,8 @@ func TestInitialSchemasIncludeOptionalInstanceAlias(t *testing.T) {
 func TestNorthboundGatewayBootstrapIncludesDynamicSettingsReadGrants(t *testing.T) {
 	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
 	for _, relative := range []string{
-		filepath.Join("deployments", "k8s", "sites", "nine-node-production", "scripts", "bootstrap-northbound-secrets.sh"),
-		filepath.Join("deployments", "k8s", "northbound", "README.md"),
+		filepath.Join("tools", "k8s", "sites", "nine-node-production", "scripts", "bootstrap-northbound-secrets.sh"),
+		filepath.Join("tools", "k8s", "northbound", "README.md"),
 		filepath.Join("docs", "northbound-upgrade-guide.md"),
 	} {
 		raw, err := os.ReadFile(filepath.Join(repoRoot, relative))

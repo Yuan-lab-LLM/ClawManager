@@ -107,7 +107,7 @@ Laya 的 `classification.probabilities` 返回 simple/medium/complex/reasoning �
 
 ## 提示词 v2
 
-提示词位于 `backend/internal/aigateway/laya_prompt.go`，成功分类的 signals 返回 `laya_multilingual_tier_v2`，方便识别评测版本。Python 客户端 `deployments/laya/call_laya.py --task tier` 使用相同说明、选项顺序、单条用户输入结构和推理预算；自动测试检查两端文案一致。默认 `--task category` 仍然判断用途类别，不要拿它与管理端的能力档位混淆。
+提示词位于 `backend/internal/aigateway/laya_prompt.go`，成功分类的 signals 返回 `laya_multilingual_tier_v2`，方便识别评测版本。Python 客户端 `tools/images/laya/call_laya.py --task tier` 使用相同说明、选项顺序、单条用户输入结构和推理预算；自动测试检查两端文案一致。默认 `--task category` 仍然判断用途类别，不要拿它与管理端的能力档位混淆。
 
 本次明确的边界：
 
@@ -133,8 +133,8 @@ Laya 的每个选项最多保留 48 tokens，instructions 与选项共享 head �
 可重复检查（需本地安装 `tokenizers`，无网络请求）：
 
 ```text
-python deployments/laya/check_prompt_budget.py --tokenizer <部署模型的本地tokenizer.json路径>
-python -m unittest discover -s deployments/laya -p test_call_laya.py
+python tools/images/laya/check_prompt_budget.py --tokenizer <部署模型的本地tokenizer.json路径>
+python -m unittest discover -s tools/images/laya -p test_call_laya.py
 ```
 
 历史 `e2e/routing-classifier/compare_laya.py` 保留冻结的 v1 评测说明，以便复现旧报告；旧分数不能作为 v2 成绩。提示词修改没有调用远端模型或宣称准确率提升。发布只需更新 ClawManager；Laya 服务镜像和模型权重不需要因本次提示词改动重建。

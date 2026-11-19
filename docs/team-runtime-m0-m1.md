@@ -27,7 +27,7 @@ weaken the isolation policy or alter cluster-wide settings during M1.
 Run the read-only inventory against explicitly selected deployments:
 
 ```sh
-python3 deployments/k8s/lite-slots/preflight.py --namespace YOUR_NAMESPACE \
+python3 tools/k8s/lite-slots/preflight.py --namespace YOUR_NAMESPACE \
   --deployment openclaw-runtime --deployment opencode-runtime
 ```
 

@@ -93,14 +93,14 @@ jobs:
           go-version-file: ClawManager/backend/go.mod
           cache: false
       - name: Test authenticated CDP and GUI relay
-        working-directory: ClawManager/deployments/browser-worker/cdp-proxy
+        working-directory: ClawManager/tools/images/browser-worker/cdp-proxy
         run: go test -race .
       - uses: docker/setup-buildx-action@v3
       - name: Build visible browser
         uses: docker/build-push-action@v6
         with:
-          context: ClawManager/deployments/browser-worker
-          file: ClawManager/deployments/browser-worker/Dockerfile
+          context: ClawManager/tools/images/browser-worker
+          file: ClawManager/tools/images/browser-worker/Dockerfile
           platforms: linux/amd64
           push: false
           tags: browser-worker:ci
@@ -108,7 +108,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: ClawManager/deployments/browser-worker/Dockerfile.cdp-proxy
+          file: ClawManager/tools/images/browser-worker/Dockerfile.cdp-proxy
           platforms: linux/amd64
           push: false
           tags: browser-worker-relay:ci
@@ -235,7 +235,18 @@ jobs:
         run: kubectl -n clawmanager-system rollout status deployment/mysql --timeout=300s
 
       - name: Start ClawManager after MySQL is ready
-        run: kubectl -n clawmanager-system scale deployment/clawmanager-app --replicas=1
+        shell: bash
+        run: |
+          private_dir=$(mktemp -d "${RUNNER_TEMP}/cm-audit.XXXXXX")
+          trap 'rm -rf -- "$private_dir"' EXIT
+          python3 tools/k8s/observability/prepare-observability-secret.py --initialize \
+            --key-file "$private_dir/master.key" --output "$private_dir/audit-secret.json"
+          python3 tools/k8s/observability/prepare-history-restore.py \
+            --output "$private_dir/restore" --tls skip-verify
+          kubectl apply -f "$private_dir/audit-secret.json" -f "$private_dir/restore/secret.json"
+          kubectl -n clawmanager-system exec -i deployment/mysql -- sh -c \
+            'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql -uroot' < "$private_dir/restore/bootstrap.sql"
+          kubectl -n clawmanager-system scale deployment/clawmanager-app --replicas=1
 
       - name: Wait for ClawManager deployment
         run: kubectl -n clawmanager-system rollout status deployment/clawmanager-app --timeout=300s

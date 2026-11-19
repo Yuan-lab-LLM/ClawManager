@@ -1,7 +1,7 @@
 package aigateway
 
 // Version the rubric independently of the model weights. Keep the Python CLI's
-// tier rubric in sync (checked by deployments/laya/test_call_laya.py).
+// tier rubric in sync (checked by tools/images/laya/test_call_laya.py).
 // Laya caps EACH rendered option at 48 tokens; instructions and options share
 // head_max_len. Check with the deployed multilingual tokenizer after edits.
 const layaPromptVersion = "laya_multilingual_tier_v2"

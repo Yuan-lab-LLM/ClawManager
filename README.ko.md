@@ -167,7 +167,7 @@ OpenClaw, Hermes, OpenCode, DeepSeek Harness를 Lite/Pro로 만들고 이미지,
 
 외부 시스템은 별도로 배포된 Northbound Gateway를 통해 ClawManager와 연동합니다. 일회용 JWE 인증, Scope, Owner 격리, 멱등 비동기 작업, Rate Limit, Audit, Gateway-to-Core mTLS로 공개 연동 경계를 관리 콘솔과 분리합니다. 관리자는 LDAP/LDAPS 또는 StartTLS를 구성하고 Directory User를 미리 보고 가져오며 Group을 Platform Role에 매핑할 수 있습니다.
 
-Northbound API는 OpenClaw, Hermes, OpenCode, DeepSeek Harness Lite/Pro의 생성, 조회, 재시작, 명시적 확인이 필요한 Reset, Password 보호 Share Link를 관리합니다. [Northbound API Guide](./docs/northbound-api-guide.md)와 [Deployment Add-on](./deployments/k8s/northbound/README.md)을 참고하세요.
+Northbound API는 OpenClaw, Hermes, OpenCode, DeepSeek Harness Lite/Pro의 생성, 조회, 재시작, 명시적 확인이 필요한 Reset, Password 보호 Share Link를 관리합니다. [Northbound API Guide](./docs/northbound-api-guide.md)와 [Deployment Add-on](./tools/k8s/northbound/README.md)을 참고하세요.
 
 <a id="ai-gateway"></a>
 ### AI Gateway
@@ -327,7 +327,7 @@ Runtime과 Protocol 기술 자료는 Contributor를 위해 `docs/`에 유지하�
 - [Resource Management Guide](./docs/resource-management_ko.md)
 - [Skill Hub Guide](./docs/skill-hub-guide_ko.md)
 - [OpenCode Workspace Guide](./docs/opencode-lite-pro-agent-development_ko.md)
-- [Northbound API Deployment Add-on](./deployments/k8s/northbound/README.md)
+- [Northbound API Deployment Add-on](./tools/k8s/northbound/README.md)
 - [Northbound API Guide (중국어)](./docs/northbound-api-guide.md)
 - [Northbound API Upgrade Guide (중국어)](./docs/northbound-upgrade-guide.md)
 - [Northbound OpenAPI 3.1 Specification](./docs/northbound-openapi.yaml)

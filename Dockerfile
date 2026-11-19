@@ -57,7 +57,7 @@ RUN cd /app/tools/runtime-template-hash \
 FROM nginx:1.27-alpine
 
 # nginx-module-njs provides ngx_http_js_module.so, loaded by nginx.conf to run
-# the desktop access-token verification (deployments/nginx/njs/desktop_auth.js).
+# the desktop access-token verification (tools/images/nginx/njs/desktop_auth.js).
 RUN apk add --no-cache dumb-init openssl nginx-module-njs sqlite
 
 WORKDIR /app
@@ -70,9 +70,9 @@ COPY --from=backend-builder /out/runtime-eviction-helper /usr/local/bin/runtime-
 COPY --from=backend-builder --chmod=0755 /out/cm-runtime-template-hash-v1.35 /usr/local/bin/cm-runtime-template-hash-v1.35
 COPY --from=frontend-builder /app/frontend/dist /usr/share/nginx/html
 COPY --from=hermes-desktop-builder /app/frontend/public/hermes-desktop-web /usr/share/nginx/html/hermes-desktop-web
-COPY deployments/nginx/nginx.conf /etc/nginx/nginx.conf
-COPY deployments/nginx/njs/desktop_auth.js /etc/nginx/njs/desktop_auth.js
-COPY deployments/container/start.sh /app/start.sh
+COPY tools/images/nginx/nginx.conf /etc/nginx/nginx.conf
+COPY tools/images/nginx/njs/desktop_auth.js /etc/nginx/njs/desktop_auth.js
+COPY tools/images/container/start.sh /app/start.sh
 
 RUN chmod +x /app/start.sh \
     && mkdir -p /etc/nginx/tls /var/log/clawreef

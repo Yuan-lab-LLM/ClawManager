@@ -151,7 +151,7 @@
 
 新工具仅对满足严格治理要求的新版实例注册。旧实例不会仅因 Gateway 更新就自动获得工具；不得为了启用新功能强制破坏旧实例兼容性。
 
-主要代码：[图片工具](../deployments/opencode-governance/image-tools.ts)、[工具测试](../deployments/opencode-governance/image-tools.test.ts)、[运行时补丁说明](../deployments/opencode-governance/README.md)。
+主要代码：[图片工具](../tools/images/opencode-governance/image-tools.ts)、[工具测试](../tools/images/opencode-governance/image-tools.test.ts)、[运行时补丁说明](../tools/images/opencode-governance/README.md)。
 
 ## 五、已经执行的验证与尚未证明的事项
 
@@ -275,7 +275,7 @@
 
 - [AI Gateway 操作指南：第 16 节为图片能力说明](aigateway-operation-guide_cn.md)
 - [AI Gateway 路由与治理介绍](aigateway-routing-governance_cn.md)
-- [OpenCode 治理与图片工具补丁](../deployments/opencode-governance/README.md)
+- [OpenCode 治理与图片工具补丁](../tools/images/opencode-governance/README.md)
 - [图片任务数据库测试](../backend/internal/services/gateway_image_job_mysql_test.go)
 - [图片分析记录恢复数据库测试](../backend/internal/services/gateway_image_analytics_mysql_test.go)
 

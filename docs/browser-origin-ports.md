@@ -22,12 +22,12 @@ port pool. Missing NodePorts cause connection failures that the browser's
 certificate probe can display as a certificate-confirmation prompt; confirming a
 certificate cannot repair an unreachable port.
 
-For server54, apply the checked-in [browser-origin Service](../deployments/k8s/sites/server54/browser-origins.yaml)
+For server54, apply the checked-in [browser-origin Service](../tools/k8s/sites/server54/browser-origins.yaml)
 alongside the application deployment, including after cluster reinstallation:
 
 ```sh
-kubectl apply --dry-run=server -f deployments/k8s/sites/server54/browser-origins.yaml
-kubectl apply -f deployments/k8s/sites/server54/browser-origins.yaml
+kubectl apply --dry-run=server -f tools/k8s/sites/server54/browser-origins.yaml
+kubectl apply -f tools/k8s/sites/server54/browser-origins.yaml
 kubectl -n clawmanager-system get service clawmanager-browser-origins
 kubectl -n clawmanager-system get endpointslice -l kubernetes.io/service-name=clawmanager-browser-origins
 ```

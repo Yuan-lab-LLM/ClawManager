@@ -679,6 +679,6 @@ NORTHBOUND_REFRESH_TOKEN_TTL_HOURS
 - Gateway 入口：`backend/cmd/northbound-gateway/main.go`
 - Core 北向模块：`backend/internal/northbound/`
 - 数据库迁移：`backend/internal/db/migrations/045_add_northbound_api.sql`
-- Kubernetes 部署附加包：`deployments/k8s/northbound/`
+- Kubernetes 部署附加包：`tools/k8s/northbound/`
 
 功能仍由 `CLAWMANAGER_NORTHBOUND_ENABLED` 控制且默认关闭。生产开放前必须完成第 15 节的认证、并发、网络和故障恢复验收，并配置 WAF 或合作方 IP 白名单。
