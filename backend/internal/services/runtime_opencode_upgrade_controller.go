@@ -1002,8 +1002,9 @@ func openCodeImmutablePlanDigest(p openCodeUpgradePlan) string {
 		p.Instances[i].Restore = nil
 	}
 	raw, _ := json.Marshal(p)
-	sum := sha256.Sum256(raw)
-	return hex.EncodeToString(sum[:])
+	// MySQL JSON normalizes nested RawMessage object formatting and key order.
+	// Compare the immutable JSON meaning while retaining exact checkpoint CAS.
+	return openCodePreflightFingerprint(raw)
 }
 
 func openCodePreflightFingerprint(raw []byte) string {

@@ -94,12 +94,16 @@ func (a *forceFlowAgent) openCodeForceNativeEvidence(context.Context, int64, []o
 	if a.proofErr != nil {
 		return nil, a.proofErr
 	}
-	return json.RawMessage(`[{"record_uid":"frozen-failed-receipt","result_sha256":"` + strings.Repeat("f", 64) + `"}]`), nil
+	return json.RawMessage(`[{"operation_id":"original-operation","pod_uid":"target-pod-uid","record_uid":"frozen-failed-receipt","result_sha256":"` + strings.Repeat("f", 64) + `"}]`), nil
 }
 
 func openCodeForceFixture(t *testing.T) (db.Session, *RuntimeScheduler, *models.RuntimeRollout, *forceFlowAgent, *forceFlowBackend) {
 	t.Helper()
 	sess, s, r, agent := openCodeActiveControllerFixture(t)
+	// Production preflight_json is JSON, while checkpoint state_json is TEXT.
+	if _, err := sess.SQL().Exec(`ALTER TABLE runtime_rollouts MODIFY COLUMN preflight_json JSON NULL`); err != nil {
+		t.Fatal(err)
+	}
 	ctx := context.Background()
 	for i := 0; i < 4; i++ {
 		current, _ := s.rolloutRepo.GetByID(ctx, r.ID)
@@ -407,5 +411,69 @@ func TestOpenCodeForceRetryMySQLLostZeroReplyDoesNotReinspectGoneTargetOrResubmi
 	p, err := s.loadOpenCodePlan(ctx, current)
 	if err != nil || p.Stage != "force_replace" || b.zeroCalls != 1 || a.acquireCalls != 0 {
 		t.Fatal(p, err, b.zeroCalls, a.acquireCalls)
+	}
+}
+
+func TestOpenCodeForceRetryMySQLJSONColumnRetainsIdentityAndSameConfirmedAttempt(t *testing.T) {
+	sess, s, r, a, b := openCodeForceFixture(t)
+	ctx := context.Background()
+	image := "clawmanager.local/opencode-lite@sha256:" + strings.Repeat("b", 64)
+	var columnType string
+	row, _ := sess.SQL().QueryRow(`SELECT DATA_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='runtime_rollouts' AND COLUMN_NAME='preflight_json'`)
+	if err := row.Scan(&columnType); err != nil || columnType != "json" {
+		t.Fatal("production JSON column required", columnType, err)
+	}
+	pf, err := s.PreflightOpenCodeForceRetry(ctx, r.ID, image)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := OpenCodeForceRetryRequest{TargetImageRef: image, Force: true, RequestID: "0afeb7c4-1cf6-4f88-8e4a-fe835bc2efb2", Fingerprint: pf.Fingerprint}
+	if _, err = s.ConfirmOpenCodeForceRetry(ctx, r.ID, req, 1); err != nil {
+		t.Fatal(err)
+	}
+	current, _ := s.rolloutRepo.GetByID(ctx, r.ID)
+	checkpoint, err := s.rolloutRepo.(rolloutCheckpointStore).LoadRolloutCheckpoint(ctx, r.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var live, frozen openCodeUpgradePlan
+	if err = json.Unmarshal([]byte(checkpoint), &live); err != nil {
+		t.Fatal(err)
+	}
+	if err = json.Unmarshal([]byte(*current.PreflightJSON), &frozen); err != nil {
+		t.Fatal(err)
+	}
+	if string(live.ForceRetry.NativeEvidence) == string(frozen.ForceRetry.NativeEvidence) {
+		t.Fatal("fixture did not exercise MySQL nested JSON key reordering")
+	}
+	if _, err = s.loadOpenCodePlan(ctx, current); err != nil {
+		t.Fatalf("same confirmed JSON plan refused: %v", err)
+	}
+	if _, err = s.ConfirmOpenCodeForceRetry(ctx, r.ID, req, 1); err != nil {
+		t.Fatal("same UUID could not be observed after JSON storage", err)
+	}
+	if err = s.advanceOpenCodeUpgrade(ctx, current); err != nil {
+		t.Fatal("persisted confirmed operation could not resume", err)
+	}
+	if b.zeroCalls != 1 || a.acquireCalls != 0 || a.migrations != 0 || !s.upgrade.InstanceBlocked(ctx, RuntimeTypeOpenCode, 7) {
+		t.Fatal("resume duplicated native work or released protection")
+	}
+	row, _ = sess.SQL().QueryRow(`SELECT COUNT(*) FROM runtime_upgrade_audits WHERE rollout_id=? AND action='opencode_force_retry'`, r.ID)
+	var count int
+	if err = row.Scan(&count); err != nil || count != 1 {
+		t.Fatal("confirmation audit duplicated", count, err)
+	}
+	current, _ = s.rolloutRepo.GetByID(ctx, r.ID)
+	p, err := s.loadOpenCodePlan(ctx, current)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.ForceRetry.NativeEvidence = json.RawMessage(`[{"operation_id":"different-operation"}]`)
+	if err = s.saveOpenCodePlan(ctx, current, p); err != nil {
+		t.Fatal(err)
+	}
+	current, _ = s.rolloutRepo.GetByID(ctx, r.ID)
+	if _, err = s.loadOpenCodePlan(ctx, current); err == nil {
+		t.Fatal("real native receipt drift accepted")
 	}
 }
