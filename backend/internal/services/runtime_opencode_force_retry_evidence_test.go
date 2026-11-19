@@ -96,6 +96,22 @@ func TestOpenCodeForceEvidenceSourceIsExactAndReadOnly(t *testing.T) {
 	forceEvidenceAssertReadOnly(t, kube, from)
 }
 
+func TestOpenCodeForceEvidenceSourceRedactedRequestSurvivesCheckpointRoundTrip(t *testing.T) {
+	c, kube, want, proof := forceSourceEvidenceFixture(t)
+	var persisted k8s.RuntimeAssignment
+	if err := json.Unmarshal(mustForceJSON(t, want), &persisted); err != nil {
+		t.Fatal(err)
+	}
+	if string(persisted.Request) != "null" {
+		t.Fatal("fixture must exercise persisted JSON null")
+	}
+	from := len(kube.Actions())
+	if err := c.openCodeForceReadOnlySourceProof(context.Background(), persisted, proof); err != nil {
+		t.Fatal(err)
+	}
+	forceEvidenceAssertReadOnly(t, kube, from)
+}
+
 func TestOpenCodeForceEvidenceSourceRefusesDrift(t *testing.T) {
 	for _, name := range []string{"running", "unreleased", "changed-frozen", "changed-current", "changed-request", "wrong-generation", "wrong-pod", "missing-pod", "external-unknown"} {
 		t.Run(name, func(t *testing.T) {

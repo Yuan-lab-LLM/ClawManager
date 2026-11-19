@@ -30,7 +30,7 @@ func (c *slotRuntimeAgentClient) openCodeForceReadOnlySourceProof(ctx context.Co
 	if state != "stopped" || actual.InstanceID != want.InstanceID || actual.UserID != want.UserID || actual.Generation != want.Generation || actual.PodUID != want.PodUID || actual.RuntimeType != want.RuntimeType || intent == nil || !validContainerIntent(*intent) {
 		return fmt.Errorf("OpenCode force source assignment is not the exact stopped generation")
 	}
-	if len(want.Request) != 0 {
+	if request := bytes.TrimSpace(want.Request); len(request) != 0 && !bytes.Equal(request, []byte("null")) {
 		actualRequest, actualErr := canonicalNativeMaintenance(actual.Request)
 		wantRequest, wantErr := canonicalNativeMaintenance(want.Request)
 		if actualErr != nil || wantErr != nil || !bytes.Equal(actualRequest, wantRequest) {
