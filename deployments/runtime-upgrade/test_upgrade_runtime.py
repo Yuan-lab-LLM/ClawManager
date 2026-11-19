@@ -8,6 +8,7 @@ import sys
 import tempfile
 import threading
 import unittest
+import uuid
 
 SCRIPT = Path(__file__).with_name("upgrade-runtime.py")
 IMAGE = "registry.example/runtime@sha256:" + "a" * 64
@@ -31,6 +32,11 @@ class DeliveryTest(unittest.TestCase):
         self.drop_preparation = False
         self.redirect = False
         self.preparation_status = "completed"
+        self.force_attempt = None
+        self.force_allowed = True
+        self.drop_force = False
+        self.drop_force_preflight = False
+        self.force_visible = True
         test = self
 
         class Handler(http.server.BaseHTTPRequestHandler):
@@ -55,6 +61,8 @@ class DeliveryTest(unittest.TestCase):
                 data = {"rollout": rollout}
                 if test.native_operation is not None:
                     data["native_operation"] = test.native_operation
+                if test.force_attempt is not None and test.force_visible:
+                    data["native_operation"] = {"kind": "opencode-native-preserve", "rollout_id": test.operation_id, "stage": "force_zero", "blocked": False, "protection_held": True, "force_retry": test.force_attempt}
                 status = 200
                 preparation = {"id": "prep-31", "kind": "rollout_wake", "runtime_type": test.runtime, "status": test.preparation_status, "phase": "wake"}
                 if self.path.endswith("/prepare"):
@@ -64,6 +72,19 @@ class DeliveryTest(unittest.TestCase):
                     data = {"operation": preparation}
                 elif self.path == "/api/v1/admin/runtime-scheduling":
                     data = {"items": [preparation]}
+                elif self.path.endswith("/force-retry/preflight"):
+                    if test.drop_force_preflight:
+                        self.close_connection = True
+                        return
+                    status = 200 if test.force_allowed else 409
+                    data = {"rollout_id": test.operation_id, "allowed": test.force_allowed, "fingerprint": "b" * 64, "old_target_image_ref": "registry.example/runtime@sha256:" + "c" * 64, "target_image_ref": IMAGE, "stage": "preserve", "protection_held": True}
+                elif self.path.endswith("/force-retry"):
+                    test.force_attempt = {"request_id": body.get("request_id"), "target_image_ref": IMAGE, "stage": "force_zero", "confirmed": True, "actor_user_id": 1}
+                    if test.drop_force:
+                        self.close_connection = True
+                        return
+                    data["native_operation"] = {"kind": "opencode-native-preserve", "rollout_id": test.operation_id, "stage": "force_zero", "blocked": False, "protection_held": True, "force_retry": test.force_attempt}
+                    status = 202
                 elif self.path.endswith("/preflight"):
                     if test.drop_preflight:
                         self.close_connection = True
@@ -302,6 +323,87 @@ class DeliveryTest(unittest.TestCase):
         self.assertNotEqual(result.returncode,0)
         self.assertIn("native operation identity mismatch",result.stderr)
         self.assertTrue(all(m=="GET" for m,_,_ in self.calls))
+
+    def test_force_retry_confirms_once_and_resumes_original_id(self):
+        self.runtime = "opencode"
+        self.operation_id = 14
+        for _ in range(2):
+            result = self.run_cli("--force-retry-id", "14")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            observed = json.loads(result.stdout.splitlines()[-1])
+            self.assertEqual(observed["native_stage"], "force_zero")
+            self.assertEqual(observed["target_digest"], "sha256:" + "a" * 64)
+            self.assertEqual(observed["force_request_id"], self.force_attempt["request_id"])
+        posts = [(p, b) for m, p, b in self.calls if m == "POST"]
+        self.assertEqual([p for p, _ in posts], ["/api/v1/admin/runtime-rollouts/14/force-retry/preflight", "/api/v1/admin/runtime-rollouts/14/force-retry"])
+        self.assertTrue(posts[1][1]["force"])
+        self.assertEqual(posts[1][1]["fingerprint"], "b" * 64)
+        self.assertEqual(str(uuid.UUID(posts[1][1]["request_id"])), posts[1][1]["request_id"])
+        saved = json.loads(self.state.read_text())
+        self.assertEqual(saved["operation_id"], 14)
+        self.assertEqual(saved["force_request_id"], posts[1][1]["request_id"])
+        self.assertEqual(self.state.stat().st_mode & 0o777, 0o600)
+
+    def test_force_retry_lost_confirmation_observes_uuid_without_repost(self):
+        self.runtime = "opencode"
+        self.operation_id = 14
+        self.drop_force = True
+        self.assertNotEqual(self.run_cli("--force-retry-id", "14").returncode, 0)
+        self.assertEqual(json.loads(self.state.read_text())["stage"], "force_submitting")
+        self.assertEqual(self.run_cli("--force-retry-id", "14").returncode, 0)
+        self.assertEqual(sum(m == "POST" for m, _, _ in self.calls), 2)
+
+    def test_force_retry_unknown_confirmation_stays_unknown(self):
+        self.runtime = "opencode"
+        self.operation_id = 14
+        self.drop_force = True
+        self.force_visible = False
+        self.assertNotEqual(self.run_cli("--force-retry-id", "14").returncode, 0)
+        before = list(self.calls)
+        self.assertNotEqual(self.run_cli("--force-retry-id", "14").returncode, 0)
+        self.assertEqual(json.loads(self.state.read_text())["stage"], "force_submitting")
+        self.assertTrue(all(m == "GET" for m, _, _ in self.calls[len(before):]))
+
+    def test_force_retry_refuses_other_attempt_without_repost(self):
+        self.runtime = "opencode"
+        self.operation_id = 14
+        self.drop_force = True
+        self.assertNotEqual(self.run_cli("--force-retry-id", "14").returncode, 0)
+        self.force_attempt["request_id"] = str(uuid.uuid4())
+        before = list(self.calls)
+        result = self.run_cli("--force-retry-id", "14")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertTrue(all(m == "GET" for m, _, _ in self.calls[len(before):]))
+
+    def test_force_retry_preflight_refusal_never_confirms(self):
+        self.runtime = "opencode"
+        self.operation_id = 14
+        self.force_allowed = False
+        for _ in range(2):
+            self.assertNotEqual(self.run_cli("--force-retry-id", "14").returncode, 0)
+        self.assertEqual(sum(m == "POST" for m, _, _ in self.calls), 1)
+
+    def test_force_retry_lost_preflight_does_not_repost(self):
+        self.runtime = "opencode"
+        self.operation_id = 14
+        self.drop_force_preflight = True
+        for _ in range(2):
+            self.assertNotEqual(self.run_cli("--force-retry-id", "14").returncode, 0)
+        self.assertEqual(sum(m == "POST" for m, _, _ in self.calls), 1)
+
+    def test_force_retry_rejects_non_opencode_before_network(self):
+        self.assertNotEqual(self.run_cli("--force-retry-id", "14").returncode, 0)
+        self.assertEqual(self.calls, [])
+
+    def test_force_retry_cannot_reuse_normal_delivery_state(self):
+        self.runtime = "opencode"
+        self.operation_id = 14
+        self.assertEqual(self.run_cli().returncode, 0)
+        original = self.state.read_bytes()
+        self.calls.clear()
+        self.assertNotEqual(self.run_cli("--force-retry-id", "14").returncode, 0)
+        self.assertEqual(self.state.read_bytes(), original)
+        self.assertEqual(self.calls, [])
 
 
 if __name__ == "__main__":
