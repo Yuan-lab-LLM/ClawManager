@@ -234,7 +234,12 @@ func (c *slotRuntimeAgentClient) confirmPublishedSecurity(ctx context.Context, p
 	}
 	instance, err := c.security.instances.GetByIDContext(ctx, req.InstanceID)
 	if err == nil && instance != nil {
-		if timeout := recordRuntimePublicationTimeout(ctx, c.security.instances, instance); timeout != nil {
+		origin, originErr := runtimePublicationOrigin(ctx, c.security.instances, instance)
+		if originErr != nil {
+			logRuntimeSecurityFailure(ctx, identity, 0, originErr)
+			return originErr
+		}
+		if timeout := recordRuntimePublicationTimeout(ctx, c.security.instances, instance, origin); timeout != nil {
 			logRuntimeSecurityFailure(ctx, identity, 0, timeout)
 			return timeout
 		}

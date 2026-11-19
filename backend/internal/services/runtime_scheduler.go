@@ -1721,7 +1721,7 @@ func (s *RuntimeScheduler) reconcileCreatingInstanceLocked(ctx context.Context, 
 			binding.Generation == instance.RuntimeGeneration && binding.State == RuntimeGatewayBindingCreating &&
 			binding.GatewayID == fmt.Sprintf("pending-%d-%d", instance.ID, instance.RuntimeGeneration) {
 			if client.security != nil && client.security.assignments != nil {
-				if timeout := recordRuntimePublicationTimeout(ctx, s.instanceRepo, &instance); timeout != nil {
+				if timeout := recordRuntimePublicationTimeout(ctx, s.instanceRepo, &instance, binding.CreatedAt); timeout != nil {
 					return []error{timeout}
 				}
 			}

@@ -133,7 +133,11 @@ func (a *RuntimeSecurityAuthority) validatedSnapshotForIdentity(ctx context.Cont
 		return runtimeSecuritySnapshot{}, runtimeSecurityError("instance_unavailable", "instance", nil, nil)
 	}
 	instanceCopy := *instance
-	if timeout := runtimePublicationCreateTimeout(&instanceCopy); timeout != nil {
+	origin, err := runtimePublicationOrigin(ctx, a.instances, &instanceCopy)
+	if err != nil {
+		return runtimeSecuritySnapshot{}, err
+	}
+	if timeout := runtimePublicationCreateTimeout(&instanceCopy, origin); timeout != nil {
 		return runtimeSecuritySnapshot{}, timeout
 	}
 	if !validRuntimeSecurityInstance(id, &instanceCopy) {
