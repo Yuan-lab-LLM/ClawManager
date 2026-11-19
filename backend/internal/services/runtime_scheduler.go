@@ -2229,9 +2229,14 @@ func (s *RuntimeScheduler) assignInstance(ctx context.Context, instance models.I
 		if scaled {
 			return errRuntimeScaleOutPending
 		}
+		if s.hasApprovedExpansion() {
+			// The expansion check found sufficient capacity after the earlier
+			// schedulable-Pod read. Re-run placement with fresh observations.
+			return fmt.Errorf("%w: recheck available %s Runtime capacity", errRuntimeControlPlanePending, runtimeType)
+		}
 		// A retained Pod can be starting or awaiting its first registration.
 		// Waiting for that existing capacity is not an automatic error retry.
-		if s.deployments != nil && !s.hasApprovedExpansion() {
+		if s.deployments != nil {
 			inventory, err := s.RuntimeDeploymentPods(ctx, runtimeType)
 			if err != nil {
 				return fmt.Errorf("%w: inspect starting %s Runtime: %v", errRuntimeControlPlanePending, runtimeType, err)

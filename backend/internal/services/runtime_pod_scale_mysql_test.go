@@ -180,6 +180,28 @@ func TestDefaultOpenClawScaleAfterInPlacePoolResetMySQL(t *testing.T) {
 	}
 }
 
+type staleSchedulableScaleRepo struct {
+	repository.RuntimePodRepository
+}
+
+func (staleSchedulableScaleRepo) ListSchedulable(context.Context, string) ([]models.RuntimePod, error) {
+	return nil, nil
+}
+
+func TestDefaultRuntimeScaleMySQLWaitsForCapacityFromLaterObservation(t *testing.T) {
+	ctx := context.Background()
+	sess, service, kube := runtimeScaleMySQLFixture(t, RuntimeTypeHermes, "hermes-runtime")
+	service.scheduler.podRepo = staleSchedulableScaleRepo{repository.NewRuntimePodRepository(sess)}
+	instance := models.Instance{ID: 17, UserID: 1, Type: RuntimeTypeHermes, RuntimeType: RuntimeBackendGateway, InstanceMode: InstanceModeLite, Status: "creating", RuntimeGeneration: 1, WorkspacePath: ptrString("/workspace")}
+	if err := service.scheduler.assignInstance(ctx, instance); !errors.Is(err, errRuntimeControlPlanePending) {
+		t.Fatalf("capacity appearing after the first placement read should be retried: %v", err)
+	}
+	deployment, err := kube.AppsV1().Deployments("runtime").Get(ctx, "hermes-runtime", metav1.GetOptions{})
+	if err != nil || *deployment.Spec.Replicas != 2 {
+		t.Fatalf("already available capacity must not trigger extra scale-out: %v", err)
+	}
+}
+
 func TestDefaultRuntimeScaleMySQLAdmission(t *testing.T) {
 	for _, scenario := range []string{"busy-operation", "unrelated-upgrade", "same-type-pending", "same-type-running", "scale-in-pending", "scale-in-attention", "deletion-intent"} {
 		t.Run(scenario, func(t *testing.T) {
