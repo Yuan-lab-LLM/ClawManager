@@ -45,6 +45,12 @@
   </a>
 </p>
 
+<p align="center">
+  <a href="https://trendshift.io/repositories/24427#achievements">
+    <img src="https://trendshift.io/api/badge/trendshift/repositories/24427/daily" alt="ClawManager's Repository of the Day achievement on Trendshift" width="250" height="55" />
+  </a>
+</p>
+
 <h2 align="center">See ClawManager in 60 Seconds</h2>
 
 <p align="center">
