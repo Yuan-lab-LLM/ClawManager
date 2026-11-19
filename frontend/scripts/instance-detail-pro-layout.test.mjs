@@ -54,6 +54,11 @@ assert(
 );
 
 assert(
+  !detailSource.includes("InstanceSessionUsagePanel"),
+  "Lite and Pro instance details must not mount the session token usage panel.",
+);
+
+assert(
   detailSource.includes('instance.type === "workbuddy"') &&
     detailSource.includes('instance.runtime_variant === "linux"') &&
     detailSource.includes('instance.mount_path?.trim() === "/config"'),
