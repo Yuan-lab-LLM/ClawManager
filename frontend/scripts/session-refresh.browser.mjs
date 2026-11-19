@@ -25,7 +25,9 @@ try{
     if(fail503){fail503=false;await route.fulfill({status:503,json:{error:'Fixture catchup in progress'}});return;}
     data={summary,compliance,total:61,items:[{instance_id:9,instance_name:fresh?'New facts':'Initial facts',instance_type:'openclaw',user_id:1,summary,compliance}],next_cursor:query.cursor?'page-three-chain':'frozen-chain'};
     if(holdNext){holdNext=false;data.items[0].instance_name='Stale response';await new Promise(resolve=>{releaseOld=resolve});}
-   }else if(u.pathname.endsWith('/instances/9'))data={instance:{id:9,user_id:1,name:'Fixture instance',type:kind==='pro'?'hermes':'openclaw',status:'stopped',runtime_type:'docker',instance_mode:kind==='pro'?'pro':'lite',cpu_cores:1,memory_gb:1,disk_gb:1,os_type:'linux',os_version:'fixture'}};
+   }else if(u.pathname.endsWith('/instances/9/session-usage')){
+    data={summary:{total_tokens:0,total_estimated_cost:0,currency:'USD',session_count:0},compliance:{has_fallback_sessions:false},items:[],total:0,page:1,limit:10};
+   }else if(u.pathname.endsWith('/instances/9'))data={instance:{id:9,user_id:1,name:'Fixture instance',type:kind==='pro'?'hermes':'openclaw',status:'stopped',runtime_type:kind==='pro'?'docker':'gateway',instance_mode:kind==='pro'?'pro':'lite',cpu_cores:1,memory_gb:1,disk_gb:1,os_type:'linux',os_version:'fixture'}};
    else if(u.pathname.endsWith('/instances/9/status'))data={instance_status:{id:9,status:'stopped',availability:'unavailable'}};
    else if(u.pathname.endsWith('/instances'))data={instances:[],items:[],total:0,limit:20};
    await route.fulfill({json:{success:true,data}});
