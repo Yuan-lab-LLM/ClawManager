@@ -12,6 +12,8 @@ async function load(path) {
 }
 const routing = await load('../src/lib/modelRoutingPlan.ts');
 const selection = await load('../src/lib/modelSelection.ts');
+const imports = await load('../src/lib/modelImport.ts');
+const context = await load('../src/lib/modelContext.ts');
 const providers = await load('../src/lib/modelProviderTemplates.ts');
 const page = read('../src/pages/admin/ModelManagementPage.tsx');
 const section = (start, end) => {
@@ -24,14 +26,15 @@ const section = (start, end) => {
 const makeActions = new Function('env', compile(`
   const { models, setModels, updateCard, setBulkSaving, setPageError, modelService,
     t, selectedRows, mergeBatchSave, modelRoutingPlanRows, plannedModelKind, plannedReasoningEnabled,
-    supportsManagedReasoningControl, resolveProviderProtocolType } = env;
+    supportsManagedReasoningControl, resolveProviderProtocolType, importableModels, DEFAULT_CONTEXT_WINDOW_TOKENS, contextWindowTokensOrDefault, isValidContextWindow } = env;
   const bulkSaving = false;
   const hasEditingCard = true;
   ${section('const createEmptyModel =', 'const AUTO_DISCOVERY_PROVIDERS')}
   ${section('function uniqueImportedDisplayName', 'function getProviderTypeLabel')}
   ${section('  const applyDiscoveryPlan =', '  const saveCard =')}
+  ${section('  const saveCard =', '  const saveSelectedCards =')}
   ${section('  const saveSelectedCards =', '  const deleteCard =')}
-  return { applyDiscoveryPlan };
+  return { applyDiscoveryPlan, saveCard, saveSelectedCards, createEmptyModel };
 `));
 const row = (id) => ({ id, display_name: id, suggested_pool: 'general', suggested_quality_tier: 2, suggested_priority: 40 });
 function harness(rows, respond, existing = [], sourcePatch = {}) {
@@ -39,7 +42,7 @@ function harness(rows, respond, existing = [], sourcePatch = {}) {
     local_id: 'source', isNew: true, isEditing: true,
     display_name: rows[0]?.display_name || '', provider_model_name: rows[0]?.id || '',
     provider_type: 'local', protocol_type: 'openai-compatible', base_url: 'https://proxy.example/v1',
-    discovered_models: rows, context_window_tokens: 32000, max_concurrent_requests: 7,
+    discovered_models: rows, context_window_edited: true, context_window_tokens: 32000, max_concurrent_requests: 7,
     description: 'Shared description', is_active: false, is_secure: true,
     api_key: 'test-only', input_price: 2, output_price: 3, currency: 'USD',
     ...sourcePatch,
@@ -49,19 +52,21 @@ function harness(rows, respond, existing = [], sourcePatch = {}) {
   let busy = false;
   const calls = [];
   const actions = makeActions({
-    ...routing, ...selection, ...providers, models: state,
+    ...routing, ...selection, ...providers, ...imports, ...context, models: state,
     setModels: (update) => { state = update(state); },
     updateCard: (id, patch) => { state = state.map((item) => item.local_id === id ? { ...item, ...patch } : item); },
     setBulkSaving: (value) => { busy = value; }, setPageError: (value) => { error = value; },
     t: (key) => key,
-    modelService: { saveModelsBatch: async (payloads) => {
+    modelService: { saveModel: async (payload) => {
+      calls.push([payload]); return { ...payload, id: payload.id ?? 1000 };
+    }, saveModelsBatch: async (payloads) => {
       calls.push(payloads);
       return respond ? respond(payloads, calls.length) : {
         saved: payloads.map((item, index) => ({ ...item, id: calls.length * 1000 + index })), failed: [],
       };
     } },
   });
-  return { save: (ids) => actions.applyDiscoveryPlan('source', ids), calls, state: () => state, error: () => error, busy: () => busy };
+  return { newModel: actions.createEmptyModel, saveOne: () => actions.saveCard(state[0]), saveBatch: () => actions.saveSelectedCards(state, true), save: (ids) => actions.applyDiscoveryPlan('source', ids), calls, state: () => state, error: () => error, busy: () => busy };
 }
 
 test('one Save submits only checked models, with shared settings and per-model choices', async () => {
@@ -111,7 +116,7 @@ test('selected image rows save independent capabilities without entering chat or
 });
 
 test('already configured models are not overwritten or deleted by batch save', async () => {
-  const existing = { ...row('a'), id: 42, local_id: 'existing', provider_model_name: 'a', base_url: 'https://proxy.example/v1' };
+  const existing = { ...row('a'), id: 42, local_id: 'existing', provider_model_name: 'a', base_url: 'https://proxy.example/v1', provider_type: 'local', protocol_type: 'openai-compatible', api_key: 'test-only' };
   const h = harness([row('a'), row('b')], undefined, [existing]);
   await h.save(['a', 'b']);
   assert.deepEqual(h.calls[0].map((item) => item.provider_model_name), ['b']);
@@ -143,4 +148,89 @@ test('interrupted later chunk preserves previous saved IDs and remaining retryab
   assert.equal(h.state().filter((item) => item.isNew).length, 1);
   assert.ok(h.error());
   assert.equal(h.busy(), false);
+});
+
+
+test('same URL and model with a different API key creates an independent deployment', async () => {
+  const existing = { ...row('a'), id: 42, local_id: 'original', provider_model_name: 'a', provider_type: 'local', protocol_type: 'openai-compatible', base_url: 'https://proxy.example/v1', api_key: 'first-account-key' };
+  const before = structuredClone(existing);
+  const h = harness([row('a')], undefined, [existing], { api_key: 'second-account-key' });
+  await h.save(['a']);
+  assert.equal(h.calls.length, 1);
+  assert.equal(h.calls[0][0].id, undefined);
+  assert.equal(h.calls[0][0].api_key, 'second-account-key');
+  assert.notEqual(h.calls[0][0].display_name, existing.display_name);
+  assert.equal(h.state().find(item => item.id === 42), existing);
+  assert.deepEqual(existing, before);
+  assert.equal(h.state().length, 2);
+  assert.equal(h.state().filter(item => item.isNew).length, 0);
+  assert.ok(!h.calls[0][0].display_name.includes('account-key'));
+});
+
+test('different Secret Refs on the same URL remain independent', async () => {
+  const existing = { ...row('a'), id: 42, local_id: 'original', provider_model_name: 'a', provider_type: 'local', protocol_type: 'openai-compatible', base_url: 'https://proxy.example/v1', api_key_secret_ref: 'env:ACCOUNT_A' };
+  const h = harness([row('a')], undefined, [existing], { api_key: '', api_key_secret_ref: 'env:ACCOUNT_B' });
+  await h.save(['a']);
+  assert.equal(h.calls[0][0].api_key_secret_ref, 'env:ACCOUNT_B');
+  assert.equal(h.state().find(item => item.id === 42), existing);
+});
+
+test('same credentials deduplicate, while protocol and model ID remain significant', () => {
+  const source = { provider_type: 'local', protocol_type: 'openai-compatible', base_url: 'https://proxy.example/v1', api_key: 'test-only' };
+  const existing = [{ ...source, provider_model_name: 'Model' }];
+  assert.deepEqual(imports.importableModels({ ...source, base_url: source.base_url+'/', api_key: ' test-only ' }, [row('Model'), row('model'), row('model')], existing).map(x => x.id), ['model']);
+  assert.deepEqual(imports.importableModels({ ...source, protocol_type: 'anthropic' }, [row('Model')], existing).map(x => x.id), ['Model']);
+});
+
+
+test('K input is converted once, and new models have an explicit 256K default', () => {
+  const h = harness([row('a')]);
+  assert.equal(h.newModel().context_window_tokens, 262144);
+  assert.equal(context.TOKENS_PER_K, 1024);
+  assert.equal(context.contextWindowInputTokens('256'), 262144);
+  assert.equal(context.contextWindowInputTokens('128.0009765625'), 131073);
+  assert.equal(context.contextWindowInputTokens(String(context.MAX_CONTEXT_WINDOW_TOKENS / context.TOKENS_PER_K)), context.MAX_CONTEXT_WINDOW_TOKENS);
+  assert.equal(context.contextWindowInputTokens('128'), 131072);
+  assert.equal(context.contextWindowInputTokens(''), undefined);
+  assert.equal(context.contextWindowTokensOrDefault(0), 262144);
+  assert.equal(context.contextWindowTokensOrDefault(undefined), 262144);
+  assert.equal(context.contextWindowTokensOrDefault(131072), 131072);
+});
+
+test('single and batch saves send explicit tokens without multiplying an existing value', async () => {
+  for (const value of [262144, 256000, 131073, 131072, 0, undefined]) {
+    for (const method of ['saveOne', 'saveBatch']) {
+      const h = harness([row('a')], undefined, [], { context_window_tokens: value });
+      await h[method]();
+      assert.equal(h.calls.length, 1);
+      assert.equal(h.calls[0][0].context_window_tokens, value || 262144);
+    }
+  }
+});
+
+test('single and batch saves reject out-of-range context sizes', async () => {
+  for (const value of [-1, 0.5, Number.NaN, Number.POSITIVE_INFINITY, 2147483648]) {
+    for (const method of ['saveOne', 'saveBatch']) {
+      const h = harness([row('a')], undefined, [], { context_window_tokens: value });
+      await h[method]();
+      assert.equal(h.calls.length, 0);
+      assert.ok(h.state()[0].error);
+    }
+  }
+});
+
+test('unmodified import defaults preserve known provider windows and fill unknown windows with 256K', async () => {
+  const h = harness([{ ...row('known'), context_window_tokens: 131072 }, row('unknown')], undefined, [], {
+    context_window_tokens: 262144, context_window_edited: false,
+  });
+  await h.save(['known', 'unknown']);
+  assert.deepEqual(h.calls[0].map((model) => model.context_window_tokens), [131072, 262144]);
+});
+
+test('an explicit administrator 256K choice overrides the discovered window', async () => {
+  const h = harness([{ ...row('a'), context_window_tokens: 128000 }], undefined, [], {
+    context_window_tokens: context.contextWindowInputTokens('256'), context_window_edited: true,
+  });
+  await h.save(['a']);
+  assert.equal(h.calls[0][0].context_window_tokens, 262144);
 });

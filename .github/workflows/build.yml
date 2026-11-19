@@ -39,6 +39,9 @@ jobs:
       - name: Test Hermes iframe boundaries
         run: node --test src/lib/hermesDesktopFrame.test.mjs src/lib/browserWorkerAccess.test.mjs src/services/authService.test.mjs ../e2e/desktop-proxy-edge.test.mjs
 
+      - name: Test credential-scoped model imports
+        run: node --test scripts/model-plan-save.test.mjs scripts/model-edit-recovery.test.mjs
+
       - name: Test OpenCode default entry
         run: npm run test:opencode-default-entry
 

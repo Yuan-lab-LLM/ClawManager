@@ -5,6 +5,7 @@ import SelectionCheckbox from './SelectionCheckbox';
 import { selectedRows, toggleSelection } from '../lib/modelSelection';
 import { modelToolSupport } from '../lib/modelToolSupport';
 import { modelVisionSupport } from '../lib/modelVisionSupport';
+import { TOKENS_PER_K } from '../lib/modelContext';
 
 interface Props<T extends CatalogModel> {
   models: T[];
@@ -127,7 +128,7 @@ export default function ModelCatalog<T extends CatalogModel>({ models, busy, edi
                         [label('imageEditEnabled'), label(model.image_edit_enabled ? 'visionSupported' : 'visionUnsupported')],
                         ...(model.model_kind === 'image' ? [[label('imagePricePerImage'), model.image_price_per_image == null ? label('imagePriceUnset') : `${model.image_price_per_image} USD`]] : []),
                         [label('modelGroup'), model.model_group], [label('deploymentPriority'), model.deployment_priority ?? 100],
-                        [label('contextWindowTokens'), model.context_window_tokens ? model.context_window_tokens.toLocaleString() : label('contextWindowUnknown')],
+                        [label('contextWindowTokens'), model.context_window_tokens ? (model.context_window_tokens / TOKENS_PER_K).toLocaleString(undefined, { maximumFractionDigits: 10 }) : label('contextWindowUnknown')],
                         [label('maxConcurrentRequests'), model.max_concurrent_requests || label('maxConcurrentUnlimited')],
                         [label('protocol'), model.protocol_type || model.provider_type],
                         [label('inputPriceShort'), `${model.input_price} ${model.currency}`], [label('outputPriceShort'), `${model.output_price} ${model.currency}`],
