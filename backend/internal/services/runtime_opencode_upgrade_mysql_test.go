@@ -716,14 +716,14 @@ func TestOpenCodeNativeMySQLDefaultQueryKeepsTwoGenerationLineageAndIgnoresLegac
 	if err := repo.Create(ctx, &models.RuntimeRollout{RuntimeType: "hermes", Status: "finished", TargetImageRef: hermesImage, BatchSize: 1, MaxUnavailable: 1}); err != nil {
 		t.Fatal(err)
 	}
-	history, err := runtimeScaleDefaultRollouts(ctx, sess, "opencode")
+	history, checkpoints, err := runtimeScaleDefaultRollouts(ctx, sess, "opencode")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(history) != 3 {
 		t.Fatalf("default SQL loader discarded lineage: %d records", len(history))
 	}
-	targets, err := runtimeDefaultScaleTargets("runtime", "opencode", history)
+	targets, err := runtimeDefaultScaleTargets("runtime", "opencode", history, checkpoints)
 	if err != nil || len(targets) != 1 || targets[0].DeploymentName != runtimeUpgradeTargetDeploymentName(secondSource.Name, second.ID) {
 		t.Fatalf("default targets=%+v err=%v", targets, err)
 	}

@@ -274,7 +274,7 @@ func TestColdSuccessorMySQLNativeCommitAndFailureIsolation(t *testing.T) {
 			if e = s.upgrade.sess.Collection("runtime_rollouts").Find(db.Cond{"status": "finished"}).All(&finished); e != nil {
 				t.Fatal(e)
 			}
-			targets, e := runtimeDefaultScaleTargets("tenant", "openclaw", finished)
+			targets, e := runtimeDefaultScaleTargets("tenant", "openclaw", finished, nil)
 			if e != nil || len(targets) != 1 || targets[0].DeploymentName != p.SuccessorName || targets[0].DeploymentUID != proof.SuccessorUID {
 				t.Fatal("new canonical lineage not reusable", targets, e)
 			}

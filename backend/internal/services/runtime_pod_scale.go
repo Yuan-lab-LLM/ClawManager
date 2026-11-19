@@ -46,7 +46,7 @@ func (s *RuntimePodMaintenanceService) scaleKube() (k8s.RuntimePodScaleDeploymen
 // OpenClaw retains serving old pools after scoped upgrades. Only committed,
 // approved source inventories establish which descendants are current defaults.
 // Registration order, replicas and names alone never select an upgrade pool.
-func runtimeDefaultScaleTargets(namespace, runtimeType string, rollouts []models.RuntimeRollout) ([]k8s.RuntimePodScaleTarget, error) {
+func runtimeDefaultScaleTargets(namespace, runtimeType string, rollouts []models.RuntimeRollout, checkpoints map[int64]string) ([]k8s.RuntimePodScaleTarget, error) {
 	base := runtimeType + "-runtime"
 	if runtimeType == "deepseek-harness" {
 		base = "deepseek-harness-runtime"
@@ -121,6 +121,13 @@ func runtimeDefaultScaleTargets(namespace, runtimeType string, rollouts []models
 			targets = []k8s.RuntimePodScaleTarget{target}
 			continue
 		}
+		if isEmptyOpenClawPoolReset(&rollout) {
+			targets, proofErr = openClawInPlaceScaleTargets(rollout, checkpoints[rollout.ID], targets)
+			if proofErr != nil {
+				return nil, proofErr
+			}
+			continue
+		}
 		if rollout.PreflightID == nil || strings.TrimSpace(*rollout.PreflightID) == "" || rollout.PlanFingerprint == nil || strings.TrimSpace(*rollout.PlanFingerprint) == "" || rollout.SourceImagesJSON == nil || strings.TrimSpace(rollout.TargetImageRef) == "" {
 			return nil, fmt.Errorf("finished OpenClaw rollout %d lacks approved default source proof", rollout.ID)
 		}
@@ -152,6 +159,54 @@ func runtimeDefaultScaleTargets(namespace, runtimeType string, rollouts []models
 	return targets, nil
 }
 
+// An empty-pool reset updates the source Deployment in place. Its completed
+// checkpoint records which Deployment UID was actually switched and verified.
+func openClawInPlaceScaleTargets(rollout models.RuntimeRollout, raw string, current []k8s.RuntimePodScaleTarget) ([]k8s.RuntimePodScaleTarget, error) {
+	unproven := fmt.Errorf("finished OpenClaw rollout %d lacks approved in-place default source proof", rollout.ID)
+	var progress poolReplacementProgress
+	if json.Unmarshal([]byte(raw), &progress) != nil || progress.Kind != "openclaw-pool-replacement" ||
+		progress.Mode != "" || progress.Version != 2 || progress.Stage != "cleanup_success" ||
+		!progress.Changed || progress.Restored || progress.Submitted || progress.Failure != "" ||
+		len(progress.Targets) == 0 || progress.PoolIndex != len(progress.Targets) || progress.ProbeIndex != len(progress.Targets) ||
+		!IsImmutableRuntimeImage(rollout.TargetImageRef) {
+		return nil, unproven
+	}
+	var sources map[string]string
+	if json.Unmarshal([]byte(stringValue(rollout.SourceImagesJSON)), &sources) != nil || len(sources) != len(progress.Targets) {
+		return nil, unproven
+	}
+	proven := make(map[string]k8s.RuntimeRolloutTarget, len(progress.Targets))
+	for _, source := range progress.Targets {
+		key := replacementKey(source)
+		if source.Namespace == "" || source.Name == "" || source.UID == "" || source.Image == "" || sources[key] != source.Image {
+			return nil, unproven
+		}
+		if _, duplicate := proven[key]; duplicate {
+			return nil, unproven
+		}
+		proven[key] = source
+	}
+	var targets []k8s.RuntimePodScaleTarget
+	for _, target := range current {
+		source, ok := proven[target.Namespace+"/"+target.DeploymentName]
+		if !ok {
+			continue
+		}
+		if (target.DeploymentUID != "" && target.DeploymentUID != source.UID) ||
+			(target.ImageRef != "" && target.ImageRef != source.Image) {
+			return nil, unproven
+		}
+		target.DeploymentUID = source.UID
+		target.ImageRef = rollout.TargetImageRef
+		target.ApprovalSource = fmt.Sprintf("committed-in-place:%d:%x", rollout.ID, sha256.Sum256([]byte(raw)))
+		targets = append(targets, target)
+	}
+	if len(targets) == 0 {
+		return nil, unproven
+	}
+	return targets, nil
+}
+
 type runtimeScaleEvidence uint8
 
 const (
@@ -160,30 +215,41 @@ const (
 	scaleRequireApproval
 )
 
-func runtimeScaleDefaultRollouts(ctx context.Context, sess db.Session, runtimeType string) ([]models.RuntimeRollout, error) {
+func runtimeScaleDefaultRollouts(ctx context.Context, sess db.Session, runtimeType string) ([]models.RuntimeRollout, map[int64]string, error) {
 	switch runtimeType {
 	case RuntimeTypeOpenClaw, RuntimeTypeHermes, RuntimeTypeDeepSeekHarness, RuntimeTypeOpenCode:
 	default:
-		return nil, nil
+		return nil, nil, nil
 	}
-	query := `SELECT r.id,r.runtime_type,r.status,r.phase,r.target_image_ref,r.preflight_id,r.preflight_json,r.source_images_json,r.plan_fingerprint FROM runtime_rollouts r WHERE r.runtime_type=? AND ` + runtimeCommittedDefaultPredicate + ` ORDER BY r.id DESC`
+	checkpointColumn, checkpointJoin := "''", ""
+	if runtimeType == RuntimeTypeOpenClaw {
+		checkpointColumn = "COALESCE(c.state_json,'')"
+		checkpointJoin = " LEFT JOIN runtime_rollout_checkpoints c ON c.rollout_id=r.id AND r.phase='empty_pool_reset' AND r.preflight_id IS NULL"
+	}
+	query := `SELECT r.id,r.runtime_type,r.status,r.phase,r.target_image_ref,r.preflight_id,r.preflight_json,r.source_images_json,r.plan_fingerprint,` +
+		checkpointColumn + ` FROM runtime_rollouts r` + checkpointJoin + ` WHERE r.runtime_type=? AND ` + runtimeCommittedDefaultPredicate + ` ORDER BY r.id DESC`
 	if runtimeType != RuntimeTypeOpenClaw && runtimeType != RuntimeTypeOpenCode {
 		query += " LIMIT 1"
 	}
 	rows, err := sess.SQL().QueryContext(ctx, query, runtimeType)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer rows.Close()
 	var rollouts []models.RuntimeRollout
+	checkpoints := map[int64]string{}
 	for rows.Next() {
 		var r models.RuntimeRollout
-		if err := rows.Scan(&r.ID, &r.RuntimeType, &r.Status, &r.Phase, &r.TargetImageRef, &r.PreflightID, &r.PreflightJSON, &r.SourceImagesJSON, &r.PlanFingerprint); err != nil {
-			return nil, err
+		var checkpoint string
+		if err := rows.Scan(&r.ID, &r.RuntimeType, &r.Status, &r.Phase, &r.TargetImageRef, &r.PreflightID, &r.PreflightJSON, &r.SourceImagesJSON, &r.PlanFingerprint, &checkpoint); err != nil {
+			return nil, nil, err
 		}
 		rollouts = append(rollouts, r)
+		if checkpoint != "" {
+			checkpoints[r.ID] = checkpoint
+		}
 	}
-	return rollouts, rows.Err()
+	return rollouts, checkpoints, rows.Err()
 }
 
 func (s *RuntimePodMaintenanceService) defaultScaleSnapshot(ctx context.Context, sess db.Session, kube k8s.RuntimePodScaleDeploymentService, runtimeType string, evidence runtimeScaleEvidence) (k8s.RuntimePodScaleTarget, *k8s.RuntimePodScaleSnapshot, error) {
@@ -192,11 +258,11 @@ func (s *RuntimePodMaintenanceService) defaultScaleSnapshot(ctx context.Context,
 		ctx, cancel = context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
 	}
-	rollouts, err := runtimeScaleDefaultRollouts(ctx, sess, runtimeType)
+	rollouts, checkpoints, err := runtimeScaleDefaultRollouts(ctx, sess, runtimeType)
 	if err != nil {
 		return k8s.RuntimePodScaleTarget{}, nil, err
 	}
-	targets, err := runtimeDefaultScaleTargets(s.scheduler.runtimeNamespace, runtimeType, rollouts)
+	targets, err := runtimeDefaultScaleTargets(s.scheduler.runtimeNamespace, runtimeType, rollouts, checkpoints)
 	if err != nil {
 		return k8s.RuntimePodScaleTarget{}, nil, err
 	}

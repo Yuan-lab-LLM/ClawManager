@@ -32,16 +32,19 @@ import (
 func runtimeScaleMySQLFixture(t *testing.T, runtimeType string, names ...string) (db.Session, *RuntimePodMaintenanceService, *fake.Clientset) {
 	t.Helper()
 	sess := runtimeManagementMySQLDB(t)
-	migration, err := os.ReadFile("../db/migrations/124_runtime_scale_approvals.sql")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, statement := range strings.Split(string(migration), ";") {
-		if strings.TrimSpace(statement) == "" {
-			continue
-		}
-		if _, err := sess.SQL().Exec(statement); err != nil {
+	for _, file := range []string{"124_runtime_scale_approvals.sql", "068_add_runtime_rollout_checkpoints.sql"} {
+		migration, err := os.ReadFile("../db/migrations/" + file)
+		if err != nil {
 			t.Fatal(err)
+		}
+		schema := string(migration)
+		for _, statement := range strings.Split(schema[strings.Index(schema, "CREATE TABLE"):], ";") {
+			if strings.TrimSpace(statement) == "" {
+				continue
+			}
+			if _, err := sess.SQL().Exec(statement); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
 	scheduler := runtimeManagementMySQLService(sess).scheduler
@@ -139,6 +142,42 @@ func scaleFixtureNativeAgent(kube *fake.Clientset, before func(*http.Request) er
 		}
 		return nil, errors.New("unknown worker endpoint")
 	})})
+}
+
+func TestDefaultOpenClawScaleAfterInPlacePoolResetMySQL(t *testing.T) {
+	ctx := context.Background()
+	sess, service, kube := runtimeScaleMySQLFixture(t, RuntimeTypeOpenClaw, "openclaw-runtime", "aaa-custom")
+	sourceImage := "repo/runtime@sha256:" + strings.Repeat("b", 64)
+	targetImage := "repo/runtime@sha256:" + strings.Repeat("a", 64)
+	sources := fmt.Sprintf(`{"runtime/openclaw-runtime":%q}`, sourceImage)
+	_, err := sess.SQL().Exec(`INSERT INTO runtime_rollouts(id,runtime_type,status,phase,target_image_ref,preflight_json,source_images_json)
+		VALUES(9,'openclaw','finished','empty_pool_reset',?,'{"cold_successor":null,"pool_switch_waiting_instance_ids":[]}',?)`, targetImage, sources)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := poolReplacementProgress{
+		Kind: "openclaw-pool-replacement", Version: 2, Stage: "cleanup_success",
+		ProbeIndex: 1, PoolIndex: 1, Changed: true,
+		Targets: []k8s.RuntimeRolloutTarget{{Namespace: "runtime", Name: "openclaw-runtime", UID: "openclaw-runtime-uid", Image: sourceImage, Ready: true}},
+	}
+	raw, err := json.Marshal(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.NewRuntimeRolloutRepository(sess).(rolloutCheckpointStore).SaveRolloutCheckpoint(ctx, 9, string(raw)); err != nil {
+		t.Fatal(err)
+	}
+	result, err := service.Scale(ctx, k8s.RuntimePodScaleRequest{RuntimeType: RuntimeTypeOpenClaw, PodCount: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.DeploymentName != "openclaw-runtime" || result.PreviousReplicas != 2 || result.Replicas != 4 {
+		t.Fatalf("in-place reset did not expand the original default: %+v", result)
+	}
+	custom, err := kube.AppsV1().Deployments("runtime").Get(ctx, "aaa-custom", metav1.GetOptions{})
+	if err != nil || *custom.Spec.Replicas != 9 {
+		t.Fatalf("custom pool changed: %v", err)
+	}
 }
 
 func TestDefaultRuntimeScaleMySQLAdmission(t *testing.T) {
