@@ -168,6 +168,16 @@ func TestDurableInvocationRealMySQLDedupAndHydration(t *testing.T) {
 	if e != nil || got.RequestPayload == nil || *got.RequestPayload != body {
 		t.Fatalf("hydrate: %v %+v", e, got)
 	}
+	flowRepo := repo.(*modelInvocationRepository)
+	previewRemaining := int64(2*len(body) - 1)
+	if _, err := flowRepo.TraceFlowInvocation(ctx, record.TraceID, id, &previewRemaining); !errors.Is(err, ErrTraceFlowBudget) || previewRemaining != int64(2*len(body)-1) {
+		t.Fatalf("oversized encrypted bodies read: %d %v", previewRemaining, err)
+	}
+	previewRemaining++
+	preview, e := flowRepo.TraceFlowInvocation(ctx, record.TraceID, id, &previewRemaining)
+	if e != nil || previewRemaining != 0 || preview.RequestPayload == nil || *preview.RequestPayload != body || preview.ResponsePayload == nil || *preview.ResponsePayload != body {
+		t.Fatalf("flow preview did not hydrate within budget: %d %v", previewRemaining, e)
+	}
 	row, e := sess.SQL().QueryRow("SELECT COUNT(*),MAX(LENGTH(request_payload)) FROM model_invocations")
 	if e != nil {
 		t.Fatal(e)
@@ -249,6 +259,11 @@ func TestDurableInvocationRealMySQLDedupAndHydration(t *testing.T) {
 	expired, err := repo.GetByID(id)
 	if err != nil || expired.BodyStatus["RequestPayload"] != "expired" {
 		t.Fatalf("expired status missing: %+v %v", expired, err)
+	}
+	previewRemaining = 1 << 20
+	preview, err = flowRepo.TraceFlowInvocation(ctx, record.TraceID, id, &previewRemaining)
+	if err != nil || preview.RequestPayload != nil || preview.BodyStatus["RequestPayload"] != "expired" {
+		t.Fatalf("flow preview expiration: %+v %v", preview.BodyStatus, err)
 	}
 	// An old unacknowledged event must not resurrect archived source rows or
 	// re-account its fee after the hot row and body have expired.

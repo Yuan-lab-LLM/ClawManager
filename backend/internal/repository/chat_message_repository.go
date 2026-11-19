@@ -2,11 +2,15 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
 	"sort"
 	"time"
 
+	"clawreef/internal/backupgate"
 	"clawreef/internal/models"
+	"clawreef/internal/observability"
 
 	"github.com/upper/db/v4"
 )
@@ -42,6 +46,65 @@ func (r *chatMessageRepository) Create(message *models.ChatMessageRecord) error 
 		message.ID = int(res.ID().(int64))
 		return maintainObservationSummary(context.Background(), tx, "chat_messages", message)
 	})
+}
+
+// CreateBatch persists one request's transcript before projecting its messages.
+func (r *chatMessageRepository) CreateBatch(messages []*models.ChatMessageRecord) error {
+	runtime := installedObservability.Load()
+	if runtime != nil && len(messages) > 1 {
+		handled, err := r.persistBatch(runtime, messages)
+		if handled {
+			return err
+		}
+	}
+	for _, message := range messages {
+		if err := r.Create(message); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (r *chatMessageRepository) persistBatch(runtime *observationRuntime, messages []*models.ChatMessageRecord) (bool, error) {
+	ctx := context.Background()
+	release, err := backupgate.HoldWorkUnit(ctx, "observability.persist")
+	if err != nil {
+		return true, err
+	}
+	defer release()
+
+	events := make([]observability.Event, 0, len(messages))
+	now := time.Now()
+	for _, message := range messages {
+		if message.CreatedAt.IsZero() {
+			message.CreatedAt = now
+		}
+		event, err := makeObservationEvent("chat_messages", message)
+		if err != nil {
+			return true, err
+		}
+		events = append(events, event)
+	}
+	first := events[0]
+	if err := runtime.journal.AppendBatch(ctx, events); errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	} else if err != nil {
+		runtime.failures.Store(first.Owner+"\x00"+first.RequestID, err)
+		return true, err
+	}
+
+	delivered := make([]observability.Event, 0, len(events))
+	for i, event := range events {
+		projectCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		projected, err := runtime.projectValue(projectCtx, r.sess, event)
+		cancel()
+		if err != nil {
+			break // The encrypted batch remains recoverable during storage outages.
+		}
+		messages[i].ID = projected.(*models.ChatMessageRecord).ID
+		delivered = append(delivered, event)
+	}
+	return true, runtime.journal.DeliveredBatch(ctx, delivered)
 }
 
 func (r *chatMessageRepository) ListByTraceID(traceID string) ([]models.ChatMessageRecord, error) {

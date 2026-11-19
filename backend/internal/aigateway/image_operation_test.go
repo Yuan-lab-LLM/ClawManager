@@ -140,6 +140,53 @@ func TestImageEditMultipartPreservesBytesAndSanitizesFilename(t *testing.T) {
 	}
 }
 
+func TestImageEditAcceptsMoreThanSixteenJSONReferences(t *testing.T) {
+	refs := strings.Repeat(`{"image_url":"https://example.com/a.png"},`, 16) + `{"image_url":"https://example.com/b.png"}`
+	request, err := ParseImageOperationRequest(ImageEdit, "application/json", strings.NewReader(`{"model":"edit","prompt":"change color","images":[`+refs+`]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := request.AuditMetadata()["input_images"]; got != 17 {
+		t.Fatalf("got %v input images, want 17", got)
+	}
+}
+
+func TestImageEditAcceptsLargeMultipartUploads(t *testing.T) {
+	t.Run("large image", func(t *testing.T) {
+		pixels := visionTestLargePNG(t, 1280)
+		if len(pixels) <= 5<<20 {
+			t.Fatalf("fixture is only %d bytes", len(pixels))
+		}
+		prompt := strings.Repeat("change color ", 12000)
+		raw, contentType := editMultipart(t, map[string][]string{"model": {"edit"}, "prompt": {prompt}}, [][2]string{{"image", string(pixels)}})
+		request, err := ParseImageOperationRequest(ImageEdit, contentType, bytes.NewReader(raw))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(request.uploads) != 1 || !bytes.Equal(request.uploads[0].data, pixels) || request.prompt != prompt {
+			t.Fatal("multipart image or prompt changed")
+		}
+	})
+	t.Run("many images", func(t *testing.T) {
+		pixels, err := base64.StdEncoding.DecodeString(visionTestPNG(t))
+		if err != nil {
+			t.Fatal(err)
+		}
+		uploads := make([][2]string, 41)
+		for i := range uploads {
+			uploads[i] = [2]string{"image[]", string(pixels)}
+		}
+		raw, contentType := editMultipart(t, map[string][]string{"model": {"edit"}, "prompt": {"change color"}}, uploads)
+		request, err := ParseImageOperationRequest(ImageEdit, contentType, bytes.NewReader(raw))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := request.AuditMetadata()["input_images"]; got != len(uploads) {
+			t.Fatalf("got %v input images, want %d", got, len(uploads))
+		}
+	})
+}
+
 func TestImageOperationRejectsAmbiguousAndUnsupportedInput(t *testing.T) {
 	for _, raw := range []string{
 		`null`, `[]`, `{"model":"m","prompt":""}`, `{"model":"m","prompt":"x","n":0}`, `{"model":"m","prompt":"x","n":11}`,

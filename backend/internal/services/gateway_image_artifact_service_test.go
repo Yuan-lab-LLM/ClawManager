@@ -62,3 +62,16 @@ func TestImageObjectStoreLimitsAndNarrowDeletion(t *testing.T) {
 		t.Fatal("parent directory unexpectedly deleted", err)
 	}
 }
+
+func TestImageObjectStoreReadsBeyondFormerArtifactByteLimit(t *testing.T) {
+	storage := &objectStorageService{localPath: t.TempDir(), basePath: "skills"}
+	key := "gateway-images/img_" + strings.Repeat("a", 32)
+	content := bytes.Repeat([]byte("x"), (16<<20)+128)
+	if err := storage.PutObject(t.Context(), key, content, "application/octet-stream"); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := storage.GetObjectLimited(t.Context(), key, int64(len(content)))
+	if err != nil || !bytes.Equal(stored, content) {
+		t.Fatalf("could not read full image object: %v", err)
+	}
+}

@@ -59,7 +59,6 @@ func (h *AIGatewayHandler) imageOperation(c *gin.Context, operation aigateway.Im
 		utils.Error(c, http.StatusServiceUnavailable, "Image service unavailable")
 		return
 	}
-	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, aigateway.MaxVisionRequestBytes)
 	req, err := aigateway.ParseImageOperationRequest(operation, c.GetHeader("Content-Type"), c.Request.Body)
 	if err != nil {
 		h.writeImageError(c, err)

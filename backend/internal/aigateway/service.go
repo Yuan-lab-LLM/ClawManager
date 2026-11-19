@@ -1,7 +1,6 @@
 package aigateway
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"crypto/rand"
@@ -136,8 +135,6 @@ const maxStoredIdentifierLength = 100
 const anthropicVersionHeader = "2023-06-01"
 const defaultAnthropicMaxTokens = defaultGatewayOutputTokens
 const providerRequestTimeout = 3 * time.Minute
-const upstreamStreamInterruptedCode = "upstream_stream_interrupted"
-const maxDeferredStreamPreludeBytes = 256 * 1024
 
 var providerVersionSegmentPattern = regexp.MustCompile(`(?i)^v\d+(?:[a-z0-9._-]*)?$`)
 
@@ -166,153 +163,6 @@ type preparedChatRequest struct {
 	priorAttemptTokens      int
 	priorAttemptCost        float64
 	req                     ChatCompletionRequest
-}
-
-type openAIStreamChunk struct {
-	ID      string `json:"id"`
-	Object  string `json:"object,omitempty"`
-	Created int64  `json:"created,omitempty"`
-	Model   string `json:"model,omitempty"`
-	Choices []struct {
-		Index int `json:"index"`
-		Delta struct {
-			Role             string      `json:"role,omitempty"`
-			Content          interface{} `json:"content,omitempty"`
-			ToolCalls        []ToolCall  `json:"tool_calls,omitempty"`
-			Refusal          interface{} `json:"refusal,omitempty"`
-			ReasoningContent interface{} `json:"reasoning_content,omitempty"`
-			Reasoning        interface{} `json:"reasoning,omitempty"`
-		} `json:"delta"`
-		FinishReason *string `json:"finish_reason,omitempty"`
-	} `json:"choices"`
-	Usage *struct {
-		PromptTokens     int `json:"prompt_tokens"`
-		CompletionTokens int `json:"completion_tokens"`
-		TotalTokens      int `json:"total_tokens"`
-	} `json:"usage,omitempty"`
-	Error *struct {
-		Message string `json:"message,omitempty"`
-		Type    string `json:"type,omitempty"`
-		Code    string `json:"code,omitempty"`
-	} `json:"error,omitempty"`
-}
-
-type openAIStreamInspection struct {
-	Done          bool
-	Finished      bool
-	Semantic      bool
-	ProviderError error
-}
-
-type openAIStreamProxyResult struct {
-	RawStream        string
-	AssistantText    string
-	PromptTokens     int
-	CompletionTokens int
-	TotalTokens      int
-	SawDone          bool
-	SawFinishReason  bool
-	Terminal         bool
-	FirstTokenAt     time.Time
-}
-
-type upstreamStreamReadError struct {
-	err error
-}
-
-func (e *upstreamStreamReadError) Error() string {
-	return fmt.Sprintf("failed while reading provider stream: %v", e.err)
-}
-
-func (e *upstreamStreamReadError) Unwrap() error {
-	return e.err
-}
-
-type upstreamStreamProviderError struct {
-	message string
-}
-
-func (e *upstreamStreamProviderError) Error() string {
-	return e.message
-}
-
-type downstreamStreamWriteError struct {
-	err error
-}
-
-func (e *downstreamStreamWriteError) Error() string {
-	return fmt.Sprintf("failed while writing provider stream: %v", e.err)
-}
-
-func (e *downstreamStreamWriteError) Unwrap() error {
-	return e.err
-}
-
-// deferredStreamWriter holds protocol prelude/heartbeat frames until either a
-// semantic token (text, reasoning, refusal or tool call) or a valid terminal event is observed.
-// This keeps the downstream response uncommitted while another deployment can
-// still be selected safely.
-type deferredStreamWriter struct {
-	writer    io.Writer
-	flusher   http.Flusher
-	pending   bytes.Buffer
-	committed bool
-}
-
-func (w *deferredStreamWriter) Write(payload []byte) (int, error) {
-	if w.committed {
-		return w.writer.Write(payload)
-	}
-	if w.pending.Len()+len(payload) > maxDeferredStreamPreludeBytes {
-		return 0, errors.New("upstream stream prelude exceeded the safety limit before producing a semantic token")
-	}
-	return w.pending.Write(payload)
-}
-
-func (w *deferredStreamWriter) Flush() {
-	if w.committed {
-		w.flusher.Flush()
-	}
-}
-
-func (w *deferredStreamWriter) Commit() error {
-	if w.committed {
-		return nil
-	}
-	w.committed = true
-	if w.pending.Len() > 0 {
-		if _, err := w.writer.Write(w.pending.Bytes()); err != nil {
-			return err
-		}
-		w.pending.Reset()
-	}
-	w.flusher.Flush()
-	return nil
-}
-
-type openAIStreamDelta struct {
-	Role      string      `json:"role,omitempty"`
-	Content   interface{} `json:"content,omitempty"`
-	ToolCalls []ToolCall  `json:"tool_calls,omitempty"`
-}
-
-type openAIStreamChoice struct {
-	Index        int               `json:"index"`
-	Delta        openAIStreamDelta `json:"delta"`
-	FinishReason *string           `json:"finish_reason,omitempty"`
-}
-
-type openAIStreamResponseChunk struct {
-	ID      string               `json:"id"`
-	Object  string               `json:"object,omitempty"`
-	Created int64                `json:"created,omitempty"`
-	Model   string               `json:"model,omitempty"`
-	Choices []openAIStreamChoice `json:"choices"`
-	Usage   *struct {
-		PromptTokens     int `json:"prompt_tokens"`
-		CompletionTokens int `json:"completion_tokens"`
-		TotalTokens      int `json:"total_tokens"`
-	} `json:"usage,omitempty"`
 }
 
 type anthropicRequestMessage struct {
@@ -361,46 +211,6 @@ type anthropicMessageResponse struct {
 		InputTokens  int `json:"input_tokens"`
 		OutputTokens int `json:"output_tokens"`
 	} `json:"usage"`
-}
-
-type anthropicStreamEvent struct {
-	Type         string                    `json:"type"`
-	Message      *anthropicMessageResponse `json:"message,omitempty"`
-	Index        *int                      `json:"index,omitempty"`
-	ContentBlock *anthropicContentBlock    `json:"content_block,omitempty"`
-	Delta        *struct {
-		Type         string `json:"type,omitempty"`
-		Text         string `json:"text,omitempty"`
-		PartialJSON  string `json:"partial_json,omitempty"`
-		StopReason   string `json:"stop_reason,omitempty"`
-		StopSequence string `json:"stop_sequence,omitempty"`
-	} `json:"delta,omitempty"`
-	Usage *struct {
-		InputTokens  int `json:"input_tokens"`
-		OutputTokens int `json:"output_tokens"`
-	} `json:"usage,omitempty"`
-	Error *struct {
-		Type    string `json:"type,omitempty"`
-		Message string `json:"message,omitempty"`
-	} `json:"error,omitempty"`
-}
-
-type anthropicStreamState struct {
-	ResponseID       string
-	Model            string
-	Created          int64
-	PromptTokens     int
-	CompletionTokens int
-	AssistantText    strings.Builder
-	ToolCalls        map[int]*anthropicToolCallState
-	SentRole         bool
-	FirstTokenAt     time.Time
-}
-
-type anthropicToolCallState struct {
-	ID        string
-	Name      string
-	Arguments strings.Builder
 }
 
 // Service defines gateway operations.
@@ -620,10 +430,6 @@ func (s *service) ChatCompletions(ctx context.Context, userID int, req ChatCompl
 			return nil, prepared.traceID, err
 		}
 		attemptStartedAt := time.Now()
-		if err := repository.PreflightObservedRequest(callCtx, userID, prepared.requestID); err != nil {
-			stopGuard()
-			return nil, prepared.traceID, err
-		}
 		response, traceID, callErr := s.callNonStreamingDeployment(callCtx, prepared)
 		if response != nil && prepared.observabilityAdmitted {
 			if response.Headers == nil {
@@ -644,7 +450,7 @@ func (s *service) ChatCompletions(ctx context.Context, userID int, req ChatCompl
 		}
 		prepared.attemptStatusCode = statusCode
 		success := callErr == nil && statusCode >= http.StatusOK && statusCode < http.StatusMultipleChoices
-		s.finishDeploymentAttempt(prepared, candidate, lease, time.Since(attemptStartedAt), success && accessCause == nil, accessCause == nil && shouldPenalizeDeployment(ctx, statusCode, callErr, response))
+		s.finishDeploymentAttempt(prepared, candidate, lease, time.Since(attemptStartedAt), success && accessCause == nil, prepared.attemptDispatched && accessCause == nil && shouldPenalizeDeployment(ctx, statusCode, callErr, response))
 		if accessCause != nil {
 			s.finalizeFailedAttemptAccounting(prepared)
 			if ctx.Err() == nil {
@@ -722,7 +528,7 @@ func (s *service) recordDeploymentFailover(prepared *preparedChatRequest, failed
 		InstanceMode: runtimeAttributionString(prepared.req.InstanceMode), RuntimeType: runtimeAttributionString(prepared.req.RuntimeType),
 		GatewayID: runtimeAttributionString(prepared.req.GatewayID), RuntimePodID: runtimeAttributionInt64(prepared.req.RuntimePodID),
 		EventType: "gateway.deployment.failover", TrafficClass: models.TrafficClassLLM, Severity: models.AuditSeverityWarn,
-		Message: fmt.Sprintf("Failing over model group %s from %s to %s: %s", failed.ModelGroup, failed.DisplayName, next.DisplayName, reason),
+		Message: gatewayAuditMessage(fmt.Sprintf("Failing over model group %s from %s to %s: %s", failed.ModelGroup, failed.DisplayName, next.DisplayName, reason)),
 		Details: stringPtr(string(details)),
 	}); err != nil {
 		logPersistenceError("record gateway.deployment.failover", prepared.traceID, err)
@@ -822,14 +628,10 @@ func (s *service) streamPreparedChatCompletions(ctx context.Context, prepared *p
 		}
 		attemptStartedAt := time.Now()
 		hasFallback := index+1 < len(candidates)
-		if err := repository.PreflightObservedRequest(callCtx, prepared.userID, prepared.requestID); err != nil {
-			stopGuard()
-			return err
-		}
 		callErr := s.streamDeployment(callCtx, prepared, trackedWriter, hasFallback)
 		accessCause := context.Cause(callCtx)
 		stopGuard()
-		s.finishDeploymentAttempt(prepared, candidate, lease, time.Since(attemptStartedAt), prepared.attemptSucceeded && accessCause == nil, accessCause == nil && shouldPenalizeDeployment(ctx, prepared.attemptStatusCode, callErr, prepared.attemptFailureResponse))
+		s.finishDeploymentAttempt(prepared, candidate, lease, time.Since(attemptStartedAt), prepared.attemptSucceeded && accessCause == nil, prepared.attemptDispatched && accessCause == nil && shouldPenalizeDeployment(ctx, prepared.attemptStatusCode, callErr, prepared.attemptFailureResponse))
 		if accessCause != nil {
 			s.finalizeFailedAttemptAccounting(prepared)
 			if ctx.Err() == nil {
@@ -936,7 +738,7 @@ func (e *retryableStreamResponseError) Error() string {
 	return fmt.Sprintf("provider returned retryable status %d: %s", e.StatusCode, e.Message)
 }
 
-func (s *service) prepareChatRequest(ctx context.Context, userID int, req ChatCompletionRequest) (*preparedChatRequest, error) {
+func (s *service) prepareChatRequest(ctx context.Context, userID int, req ChatCompletionRequest) (result *preparedChatRequest, resultErr error) {
 	if err := NormalizeVisionRequest(&req); err != nil {
 		return nil, err
 	}
@@ -989,14 +791,22 @@ func (s *service) prepareChatRequest(ctx context.Context, userID int, req ChatCo
 	prepared.requestID = normalizeOrCreateID(req.RequestID, "req")
 	prepared.requestIDPtr = stringPtr(prepared.requestID)
 	if repository.ObservabilityEnabled() {
-		// Reserve bounded recovery space before any provider can execute.
-		if len(rawOrJSONRequestPayload(req)) > 256<<10 || len(req.Messages) > 64 {
-			return prepared, errors.New("request exceeds durable observability admission limit (256 KiB or 64 messages)")
-		}
 		if err := repository.BeginObservedRequest(ctx, userID, prepared.requestID); err != nil {
 			return prepared, err
 		}
 		prepared.observabilityAdmitted = true
+		// The caller closes admissions after receiving a prepared request.
+		// Close here if preparation aborts before transferring ownership.
+		defer func() {
+			if result != nil {
+				return
+			}
+			finishCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := repository.FinishObservedRequest(finishCtx, userID, prepared.requestID); err != nil {
+				logPersistenceError("close aborted audit admission", prepared.traceID, err)
+			}
+		}()
 	}
 
 	if sessionSource == "trace_fallback" && req.InstanceID != nil {
@@ -1195,7 +1005,7 @@ func (s *service) prepareChatRequest(ctx context.Context, userID int, req ChatCo
 	// A removed saved catalog member must not reach the dispatcher's legacy
 	// empty-list fallback, which would resurrect its stale selected snapshot.
 	if len(prepared.deploymentCandidates) == 0 {
-		return nil, models.ErrModelUnavailable
+		return prepared, models.ErrModelUnavailable
 	}
 	if isAutoModelRequest(requestedModel) {
 		prepared.deploymentCandidates = s.orderAutoDeploymentGroups(ctx, prepared, routing, prepared.deploymentCandidates)
@@ -1264,6 +1074,10 @@ func (s *service) callOpenAICompatible(ctx context.Context, prepared *preparedCh
 		return nil, prepared.traceID, err
 	}
 
+	if err := prepared.reserveProviderAudit(ctx, providerRequestBody); err != nil {
+		return nil, prepared.traceID, err
+	}
+
 	startedAt := time.Now()
 	prepared.attemptDispatched = true
 	response, err := s.httpClient.Do(httpRequest)
@@ -1273,7 +1087,7 @@ func (s *service) callOpenAICompatible(ctx context.Context, prepared *preparedCh
 	}
 	defer response.Body.Close()
 
-	responseBody, readErr := readDurableProviderBody(response.Body)
+	responseBody, readErr := io.ReadAll(response.Body)
 	if readErr != nil {
 		s.recordFailure(prepared.traceID, prepared.requestID, prepared.req, userIDOrZero(prepared.userIDPtr), prepared.resolvedModel, startedAt, fmt.Sprintf("failed to read provider response: %v", readErr), providerRequestBody, prepared.attemptNumber, prepared.attemptPromptTokens, prepared.attemptCompletionTokens)
 		return nil, prepared.traceID, fmt.Errorf("failed to read provider response: %w", readErr)
@@ -1321,6 +1135,10 @@ func (s *service) callAnthropic(ctx context.Context, prepared *preparedChatReque
 		return nil, prepared.traceID, err
 	}
 
+	if err := prepared.reserveProviderAudit(ctx, providerRequestBody); err != nil {
+		return nil, prepared.traceID, err
+	}
+
 	startedAt := time.Now()
 	prepared.attemptDispatched = true
 	response, err := s.httpClient.Do(httpRequest)
@@ -1330,7 +1148,7 @@ func (s *service) callAnthropic(ctx context.Context, prepared *preparedChatReque
 	}
 	defer response.Body.Close()
 
-	responseBody, readErr := readDurableProviderBody(response.Body)
+	responseBody, readErr := io.ReadAll(response.Body)
 	if readErr != nil {
 		s.recordFailure(prepared.traceID, prepared.requestID, prepared.req, userIDOrZero(prepared.userIDPtr), prepared.resolvedModel, startedAt, fmt.Sprintf("failed to read provider response: %v", readErr), providerRequestBody, prepared.attemptNumber, prepared.attemptPromptTokens, prepared.attemptCompletionTokens)
 		return nil, prepared.traceID, fmt.Errorf("failed to read provider response: %w", readErr)
@@ -1369,256 +1187,6 @@ func (s *service) callAnthropic(ctx context.Context, prepared *preparedChatReque
 	return proxyResponse, prepared.traceID, nil
 }
 
-func (s *service) recordFailure(traceID, requestID string, req ChatCompletionRequest, userID int, model *models.LLMModel, startedAt time.Time, failure string, providerRequestBody []byte, attemptNumbers ...int) {
-	completedAt := time.Now()
-	latencyMs := int(time.Since(startedAt).Milliseconds())
-	attemptNo := 1
-	if len(attemptNumbers) > 0 && attemptNumbers[0] > 0 {
-		attemptNo = attemptNumbers[0]
-	}
-	promptTokens := 0
-	completionTokens := 0
-	if len(attemptNumbers) > 1 && attemptNumbers[1] > 0 {
-		promptTokens = attemptNumbers[1]
-	}
-	if len(attemptNumbers) > 2 && attemptNumbers[2] > 0 {
-		completionTokens = attemptNumbers[2]
-	}
-	requestPayload := visionSafePayload(providerRequestBody)
-	if strings.TrimSpace(requestPayload) == "" {
-		requestPayload = rawOrJSONRequestPayload(req)
-	}
-	responsePayload := failure
-	invocation := &models.ModelInvocation{
-		TraceID:             traceID,
-		SessionID:           req.SessionID,
-		RequestID:           requestID,
-		UserID:              intPtr(userID),
-		InstanceID:          req.InstanceID,
-		InstanceMode:        runtimeAttributionString(req.InstanceMode),
-		RuntimeType:         runtimeAttributionString(req.RuntimeType),
-		GatewayID:           runtimeAttributionString(req.GatewayID),
-		RuntimePodID:        runtimeAttributionInt64(req.RuntimePodID),
-		GatewayKeyID:        req.GatewayKeyID,
-		ModelID:             intPtr(model.ID),
-		ProviderType:        model.ProviderType,
-		RequestedModel:      req.Model,
-		ActualProviderModel: model.ProviderModelName,
-		TrafficClass:        models.TrafficClassLLM,
-		RequestPayload:      &requestPayload,
-		ResponsePayload:     &responsePayload,
-		PromptTokens:        promptTokens,
-		CompletionTokens:    completionTokens,
-		TotalTokens:         promptTokens + completionTokens,
-		LatencyMs:           &latencyMs,
-		AttemptNo:           attemptNo,
-		IsStreaming:         req.Stream,
-		Status:              models.ModelInvocationStatusFailed,
-		ErrorMessage:        stringPtr(failure),
-		CompletedAt:         &completedAt,
-	}
-	if err := s.invocationService.RecordInvocation(invocation); err != nil {
-		logPersistenceError("record failed invocation", traceID, err)
-	}
-
-	providerRequestPayload := requestPayload
-	if err := s.auditEventService.RecordEvent(&models.AuditEvent{
-		TraceID:      traceID,
-		SessionID:    req.SessionID,
-		RequestID:    stringPtr(requestID),
-		UserID:       intPtr(userID),
-		InstanceID:   req.InstanceID,
-		InstanceMode: runtimeAttributionString(req.InstanceMode),
-		RuntimeType:  runtimeAttributionString(req.RuntimeType),
-		GatewayID:    runtimeAttributionString(req.GatewayID),
-		RuntimePodID: runtimeAttributionInt64(req.RuntimePodID),
-		GatewayKeyID: req.GatewayKeyID,
-		InvocationID: intPtr(invocation.ID),
-		EventType:    "gateway.request.failed",
-		TrafficClass: models.TrafficClassLLM,
-		Severity:     models.AuditSeverityError,
-		Message:      failure,
-		Details:      &providerRequestPayload,
-	}); err != nil {
-		logPersistenceError("record gateway.request.failed", traceID, err)
-	}
-}
-
-func (s *service) recordSuccess(prepared *preparedChatRequest, providerRequestBody []byte, responsePayload, assistantContent string, promptTokens, completionTokens, totalTokens, latencyMs int, isStreaming bool) {
-	completedAt := time.Now()
-	requestPayload := visionSafePayload(providerRequestBody)
-	if strings.TrimSpace(requestPayload) == "" {
-		requestPayload = rawOrJSONRequestPayload(prepared.req)
-	}
-	promptTokens, completionTokens, totalTokens, usageEstimated := resolveRequestUsage(prepared.req, assistantContent, promptTokens, completionTokens, totalTokens)
-	prepared.attemptPromptTokens = promptTokens
-	prepared.attemptCompletionTokens = completionTokens
-	if prepared.attemptNumber <= 0 {
-		prepared.attemptNumber = 1
-	}
-	prepared.attemptSucceeded = true
-	if isStreaming && prepared.attemptGenerationMs <= 0 {
-		prepared.attemptGenerationMs = latencyMs
-		if prepared.attemptTTFTMs > 0 && latencyMs > prepared.attemptTTFTMs {
-			prepared.attemptGenerationMs = latencyMs - prepared.attemptTTFTMs
-		}
-	}
-	if isStreaming && completionTokens > 0 && prepared.attemptGenerationMs > 0 {
-		prepared.attemptTokensPerSecond = float64(completionTokens) / (float64(prepared.attemptGenerationMs) / 1000.0)
-	}
-	var ttftMs *int
-	if prepared.attemptTTFTMs > 0 {
-		ttftMs = intPtr(prepared.attemptTTFTMs)
-	}
-	var generationMs *int
-	if prepared.attemptGenerationMs > 0 {
-		generationMs = intPtr(prepared.attemptGenerationMs)
-	}
-	var tokensPerSecond *float64
-	if prepared.attemptTokensPerSecond > 0 {
-		value := prepared.attemptTokensPerSecond
-		tokensPerSecond = &value
-	}
-	if prepared.req.UsageFinalizer != nil {
-		if err := prepared.req.UsageFinalizer(prepared.priorAttemptTokens + totalTokens); err != nil {
-			logPersistenceError("finalize gateway key token usage", prepared.traceID, err)
-		}
-	}
-	invocation := &models.ModelInvocation{
-		TraceID:             prepared.traceID,
-		SessionID:           prepared.sessionIDPtr,
-		RequestID:           prepared.requestID,
-		UserID:              prepared.userIDPtr,
-		InstanceID:          prepared.req.InstanceID,
-		InstanceMode:        runtimeAttributionString(prepared.req.InstanceMode),
-		RuntimeType:         runtimeAttributionString(prepared.req.RuntimeType),
-		GatewayID:           runtimeAttributionString(prepared.req.GatewayID),
-		RuntimePodID:        runtimeAttributionInt64(prepared.req.RuntimePodID),
-		GatewayKeyID:        prepared.req.GatewayKeyID,
-		ModelID:             intPtr(prepared.resolvedModel.ID),
-		ProviderType:        prepared.resolvedModel.ProviderType,
-		RequestedModel:      prepared.req.Model,
-		ActualProviderModel: prepared.resolvedModel.ProviderModelName,
-		TrafficClass:        models.TrafficClassLLM,
-		RequestPayload:      &requestPayload,
-		ResponsePayload:     &responsePayload,
-		PromptTokens:        promptTokens,
-		CompletionTokens:    completionTokens,
-		TotalTokens:         totalTokens,
-		LatencyMs:           &latencyMs,
-		TTFTMs:              ttftMs,
-		GenerationMs:        generationMs,
-		TokensPerSecond:     tokensPerSecond,
-		AttemptNo:           prepared.attemptNumber,
-		IsStreaming:         isStreaming,
-		Status:              models.ModelInvocationStatusCompleted,
-		CompletedAt:         &completedAt,
-	}
-	if err := s.invocationService.RecordInvocation(invocation); err != nil {
-		logPersistenceError("record completed invocation", prepared.traceID, err)
-	}
-	if err := s.chatMessageService.RecordMessages(
-		prepared.traceID,
-		prepared.sessionID,
-		prepared.requestIDPtr,
-		prepared.userIDPtr,
-		prepared.req.InstanceID,
-		intPtr(invocation.ID),
-		[]services.PersistedChatMessage{
-			{
-				Role:       "assistant",
-				Content:    assistantContent,
-				SequenceNo: len(prepared.req.Messages) + 1,
-			},
-		},
-	); err != nil {
-		logPersistenceError("record assistant messages", prepared.traceID, err)
-	}
-
-	estimatedCost := calculateEstimatedCost(prepared.resolvedModel, promptTokens, completionTokens)
-	settledCost := prepared.priorAttemptCost + estimatedCost
-	if prepared.req.BudgetController != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		if err := prepared.req.BudgetController.Finalize(ctx, settledCost, routingCurrency(prepared.resolvedModel)); err != nil {
-			logPersistenceError("finalize gateway key budget", prepared.traceID, err)
-		}
-		cancel()
-	}
-	internalCost := 0.0
-	if prepared.resolvedModel.IsSecure {
-		internalCost = estimatedCost
-	}
-	if err := s.costRecordService.RecordCost(&models.CostRecord{
-		EventUID:           stringPtr(repository.ObservationAttemptUID("cost_records", prepared.userID, prepared.requestID, prepared.attemptNumber, prepared.resolvedModel.ProviderType, prepared.resolvedModel.ProviderModelName)),
-		InvocationEventUID: invocation.EventUID,
-		TraceID:            prepared.traceID,
-		SessionID:          prepared.req.SessionID,
-		RequestID:          prepared.requestIDPtr,
-		UserID:             prepared.userIDPtr,
-		InstanceID:         prepared.req.InstanceID,
-		InstanceMode:       runtimeAttributionString(prepared.req.InstanceMode),
-		RuntimeType:        runtimeAttributionString(prepared.req.RuntimeType),
-		GatewayID:          runtimeAttributionString(prepared.req.GatewayID),
-		RuntimePodID:       runtimeAttributionInt64(prepared.req.RuntimePodID),
-		GatewayKeyID:       prepared.req.GatewayKeyID,
-		InvocationID:       intPtr(invocation.ID),
-		ModelID:            intPtr(prepared.resolvedModel.ID),
-		ProviderType:       prepared.resolvedModel.ProviderType,
-		ModelName:          prepared.resolvedModel.DisplayName,
-		Currency:           fallbackCurrency(prepared.resolvedModel.Currency),
-		PromptTokens:       promptTokens,
-		CompletionTokens:   completionTokens,
-		TotalTokens:        totalTokens,
-		InputUnitPrice:     prepared.resolvedModel.InputPrice,
-		OutputUnitPrice:    prepared.resolvedModel.OutputPrice,
-		EstimatedCost:      estimatedCost,
-		InternalCost:       internalCost,
-	}); err != nil {
-		logPersistenceError("record cost", prepared.traceID, err)
-	}
-
-	if err := s.auditEventService.RecordEvent(&models.AuditEvent{
-		TraceID:      prepared.traceID,
-		SessionID:    prepared.sessionIDPtr,
-		RequestID:    prepared.requestIDPtr,
-		UserID:       prepared.userIDPtr,
-		InstanceID:   prepared.req.InstanceID,
-		InstanceMode: runtimeAttributionString(prepared.req.InstanceMode),
-		RuntimeType:  runtimeAttributionString(prepared.req.RuntimeType),
-		GatewayID:    runtimeAttributionString(prepared.req.GatewayID),
-		RuntimePodID: runtimeAttributionInt64(prepared.req.RuntimePodID),
-		GatewayKeyID: prepared.req.GatewayKeyID,
-		InvocationID: intPtr(invocation.ID),
-		EventType:    "gateway.request.completed",
-		TrafficClass: models.TrafficClassLLM,
-		Severity:     models.AuditSeverityInfo,
-		Message:      fmt.Sprintf("Completed LLM request for model %s", prepared.resolvedModel.DisplayName),
-	}); err != nil {
-		logPersistenceError("record gateway.request.completed", prepared.traceID, err)
-	}
-	if usageEstimated {
-		if err := s.auditEventService.RecordEvent(&models.AuditEvent{
-			TraceID:      prepared.traceID,
-			SessionID:    prepared.sessionIDPtr,
-			RequestID:    prepared.requestIDPtr,
-			UserID:       prepared.userIDPtr,
-			InstanceID:   prepared.req.InstanceID,
-			InstanceMode: runtimeAttributionString(prepared.req.InstanceMode),
-			RuntimeType:  runtimeAttributionString(prepared.req.RuntimeType),
-			GatewayID:    runtimeAttributionString(prepared.req.GatewayID),
-			RuntimePodID: runtimeAttributionInt64(prepared.req.RuntimePodID),
-			GatewayKeyID: prepared.req.GatewayKeyID,
-			InvocationID: intPtr(invocation.ID),
-			EventType:    "gateway.usage.estimated",
-			TrafficClass: models.TrafficClassLLM,
-			Severity:     models.AuditSeverityWarn,
-			Message:      "Provider usage was missing; token usage was estimated locally.",
-		}); err != nil {
-			logPersistenceError("record gateway.usage.estimated", prepared.traceID, err)
-		}
-	}
-}
-
 func setPartialAttemptUsage(prepared *preparedChatRequest, assistantContent string, promptTokens, completionTokens int) {
 	if prepared == nil {
 		return
@@ -1649,6 +1217,10 @@ func (s *service) streamOpenAICompatible(ctx context.Context, prepared *prepared
 		return err
 	}
 
+	if err := prepared.reserveProviderAudit(ctx, providerRequestBody); err != nil {
+		return err
+	}
+
 	startedAt := time.Now()
 	prepared.attemptDispatched = true
 	response, err := s.streamHTTPClient.Do(httpRequest)
@@ -1665,7 +1237,7 @@ func (s *service) streamOpenAICompatible(ctx context.Context, prepared *prepared
 	}
 
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		responseBody, _ := readDurableProviderBody(response.Body)
+		responseBody, _ := io.ReadAll(response.Body)
 		prepared.attemptFailureResponse = &ProxyResponse{StatusCode: response.StatusCode, Body: responseBody}
 		message := strings.TrimSpace(string(responseBody))
 		if message == "" {
@@ -1759,6 +1331,10 @@ func (s *service) streamAnthropic(ctx context.Context, prepared *preparedChatReq
 		return err
 	}
 
+	if err := prepared.reserveProviderAudit(ctx, providerRequestBody); err != nil {
+		return err
+	}
+
 	startedAt := time.Now()
 	prepared.attemptDispatched = true
 	response, err := s.streamHTTPClient.Do(httpRequest)
@@ -1775,7 +1351,7 @@ func (s *service) streamAnthropic(ctx context.Context, prepared *preparedChatReq
 	}
 
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		responseBody, _ := readDurableProviderBody(response.Body)
+		responseBody, _ := io.ReadAll(response.Body)
 		prepared.attemptFailureResponse = &ProxyResponse{StatusCode: response.StatusCode, Body: responseBody}
 		message := strings.TrimSpace(string(responseBody))
 		if message == "" {
@@ -1888,293 +1464,6 @@ func (s *service) streamAnthropic(ctx context.Context, prepared *preparedChatReq
 	return nil
 }
 
-func proxyAnthropicStream(reader io.Reader, writer io.Writer, flusher http.Flusher, state *anthropicStreamState, deferUntilSemantic ...bool) (string, error) {
-	buffered := bufio.NewReader(io.LimitReader(reader, 1<<20+1))
-	var deferred *deferredStreamWriter
-	if len(deferUntilSemantic) > 0 && deferUntilSemantic[0] {
-		deferred = &deferredStreamWriter{writer: writer, flusher: flusher}
-		writer, flusher = deferred, deferred
-	}
-	var rawStream strings.Builder
-	eventType := ""
-	dataLines := make([]string, 0, 2)
-	done := false
-
-	flushEvent := func() error {
-		if len(dataLines) == 0 {
-			eventType = ""
-			return nil
-		}
-		payload := strings.Join(dataLines, "\n")
-		dataLines = dataLines[:0]
-		finished, err := processAnthropicStreamEvent(payload, eventType, state, writer, flusher)
-		eventType = ""
-		if err != nil {
-			return err
-		}
-		if finished {
-			done = true
-		}
-		if deferred != nil && (!state.FirstTokenAt.IsZero() || finished) {
-			if err := deferred.Commit(); err != nil {
-				return &downstreamStreamWriteError{err: err}
-			}
-		}
-		return nil
-	}
-
-	for !done {
-		line, readErr := buffered.ReadString('\n')
-		if rawStream.Len()+len(line) > 1<<20 {
-			readErr = errors.New("provider stream exceeded durable response limit (1 MiB)")
-			line = ""
-		}
-		if line != "" {
-			rawStream.WriteString(line)
-			trimmedLine := strings.TrimRight(line, "\r\n")
-			switch {
-			case trimmedLine == "":
-				if err := flushEvent(); err != nil {
-					return rawStream.String(), err
-				}
-			case strings.HasPrefix(trimmedLine, "event:"):
-				eventType = strings.TrimSpace(strings.TrimPrefix(trimmedLine, "event:"))
-			case strings.HasPrefix(trimmedLine, "data:"):
-				dataLines = append(dataLines, strings.TrimSpace(strings.TrimPrefix(trimmedLine, "data:")))
-			}
-		}
-
-		if readErr != nil {
-			if errors.Is(readErr, io.EOF) {
-				if err := flushEvent(); err != nil {
-					return rawStream.String(), err
-				}
-				if done {
-					return rawStream.String(), nil
-				}
-				return rawStream.String(), &upstreamStreamReadError{err: io.ErrUnexpectedEOF}
-			}
-			return rawStream.String(), &upstreamStreamReadError{err: readErr}
-		}
-	}
-	return rawStream.String(), nil
-}
-
-func proxyOpenAIStream(reader io.Reader, writer io.Writer, flusher http.Flusher, deferUntilSemantic ...bool) (openAIStreamProxyResult, error) {
-	buffered := bufio.NewReader(io.LimitReader(reader, 1<<20+1))
-	var deferred *deferredStreamWriter
-	if len(deferUntilSemantic) > 0 && deferUntilSemantic[0] {
-		deferred = &deferredStreamWriter{writer: writer, flusher: flusher}
-		writer, flusher = deferred, deferred
-	}
-	var rawStream strings.Builder
-	var assistantText strings.Builder
-	promptTokens := 0
-	completionTokens := 0
-	totalTokens := 0
-	sawDone := false
-	sawFinishReason := false
-	var pendingProviderError error
-	var firstTokenAt time.Time
-
-	result := func() openAIStreamProxyResult {
-		return openAIStreamProxyResult{
-			RawStream:        rawStream.String(),
-			AssistantText:    assistantText.String(),
-			PromptTokens:     promptTokens,
-			CompletionTokens: completionTokens,
-			TotalTokens:      totalTokens,
-			SawDone:          sawDone,
-			SawFinishReason:  sawFinishReason,
-			Terminal:         sawDone || sawFinishReason,
-			FirstTokenAt:     firstTokenAt,
-		}
-	}
-
-	for {
-		line, readErr := buffered.ReadString('\n')
-		if rawStream.Len()+len(line) > 1<<20 {
-			readErr = errors.New("provider stream exceeded durable response limit (1 MiB)")
-			line = ""
-		}
-		if line != "" {
-			inspection := inspectStreamLine(
-				line,
-				&assistantText,
-				&promptTokens,
-				&completionTokens,
-				&totalTokens,
-			)
-			sawDone = sawDone || inspection.Done
-			sawFinishReason = sawFinishReason || inspection.Finished
-			if inspection.Semantic && firstTokenAt.IsZero() {
-				firstTokenAt = time.Now()
-			}
-			rawStream.WriteString(line)
-			// A few OpenAI-compatible providers emit chain-of-thought deltas as
-			// `delta.reasoning`. OpenCode and other clients generally consume the
-			// standard `delta.reasoning_content` spelling instead. Keep the
-			// provider payload in the audit stream unchanged, but add the standard
-			// alias on the downstream stream so clients can finish their thinking
-			// state and render the final content.
-			downstreamLine := normalizeOpenAIReasoningDelta(line)
-			// Commit BEFORE writing meaningful data: a single legitimate reasoning
-			// chunk may itself exceed the bounded heartbeat/prelude buffer.
-			if deferred != nil && pendingProviderError == nil && inspection.ProviderError == nil && (inspection.Semantic || inspection.Finished || inspection.Done) {
-				if err := deferred.Commit(); err != nil {
-					return result(), &downstreamStreamWriteError{err: err}
-				}
-			}
-			if _, err := io.WriteString(writer, downstreamLine); err != nil {
-				return result(), &downstreamStreamWriteError{err: err}
-			}
-			flusher.Flush()
-			if inspection.ProviderError != nil {
-				pendingProviderError = inspection.ProviderError
-			}
-			if pendingProviderError != nil && strings.TrimSpace(line) == "" {
-				return result(), pendingProviderError
-			}
-			// DONE is an SSE data line; its following blank line terminates the
-			// frame. Forward that delimiter before returning, without waiting for
-			// the provider to close an otherwise complete stream.
-			if sawDone && strings.TrimSpace(line) == "" {
-				return result(), nil
-			}
-		}
-
-		if readErr != nil {
-			if pendingProviderError != nil {
-				return result(), pendingProviderError
-			}
-			if errors.Is(readErr, io.EOF) {
-				if sawDone || sawFinishReason {
-					return result(), nil
-				}
-				return result(), &upstreamStreamReadError{err: io.ErrUnexpectedEOF}
-			}
-			return result(), &upstreamStreamReadError{err: readErr}
-		}
-	}
-}
-
-// normalizeOpenAIReasoningDelta adds the OpenAI-compatible reasoning_content
-// alias to provider chunks that only expose reasoning. Invalid/non-data SSE
-// lines and chunks that already contain reasoning_content are returned byte
-// for byte unchanged.
-func normalizeOpenAIReasoningDelta(line string) string {
-	trimmed := strings.TrimSpace(line)
-	if !strings.HasPrefix(trimmed, "data:") {
-		return line
-	}
-	payload := strings.TrimSpace(strings.TrimPrefix(trimmed, "data:"))
-	if payload == "" || payload == "[DONE]" || !strings.HasPrefix(payload, "{") {
-		return line
-	}
-
-	var envelope map[string]interface{}
-	if err := json.Unmarshal([]byte(payload), &envelope); err != nil {
-		return line
-	}
-	choices, ok := envelope["choices"].([]interface{})
-	if !ok {
-		return line
-	}
-	changed := false
-	for _, rawChoice := range choices {
-		choice, ok := rawChoice.(map[string]interface{})
-		if !ok {
-			continue
-		}
-		delta, ok := choice["delta"].(map[string]interface{})
-		if !ok {
-			continue
-		}
-		if existing := delta["reasoning_content"]; existing != nil && existing != "" {
-			continue
-		}
-		if reasoning, ok := delta["reasoning"].(string); ok && reasoning != "" {
-			delta["reasoning_content"] = reasoning
-			changed = true
-		}
-	}
-	if !changed {
-		return line
-	}
-
-	encoded, err := json.Marshal(envelope)
-	if err != nil {
-		return line
-	}
-	// Preserve the SSE line ending style expected by the caller.
-	ending := ""
-	if strings.HasSuffix(line, "\r\n") {
-		ending = "\r\n"
-	} else if strings.HasSuffix(line, "\n") {
-		ending = "\n"
-	}
-	return "data: " + string(encoded) + ending
-}
-
-func inspectStreamLine(line string, assistantText *strings.Builder, promptTokens, completionTokens, totalTokens *int) openAIStreamInspection {
-	trimmed := strings.TrimSpace(line)
-	if !strings.HasPrefix(trimmed, "data:") {
-		return openAIStreamInspection{}
-	}
-
-	payload := strings.TrimSpace(strings.TrimPrefix(trimmed, "data:"))
-	if payload == "" {
-		return openAIStreamInspection{}
-	}
-	if payload == "[DONE]" {
-		return openAIStreamInspection{Done: true}
-	}
-
-	var chunk openAIStreamChunk
-	if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
-		return openAIStreamInspection{}
-	}
-	if chunk.Error != nil {
-		message := strings.TrimSpace(chunk.Error.Message)
-		if message == "" {
-			message = "provider returned an error stream event"
-		}
-		return openAIStreamInspection{
-			ProviderError: &upstreamStreamProviderError{message: message},
-		}
-	}
-
-	if chunk.Usage != nil {
-		*promptTokens = chunk.Usage.PromptTokens
-		*completionTokens = chunk.Usage.CompletionTokens
-		*totalTokens = chunk.Usage.TotalTokens
-	}
-
-	finished := false
-	semantic := false
-	for _, choice := range chunk.Choices {
-		content := flattenMessageContent(choice.Delta.Content)
-		if content != "" {
-			assistantText.WriteString(content)
-			semantic = true
-		}
-		if len(choice.Delta.ToolCalls) > 0 {
-			semantic = true
-		}
-		// Reasoning is visible progress, not a heartbeat. Do not append it to
-		// AssistantText: that field represents the final answer, not thinking.
-		for _, value := range []interface{}{choice.Delta.ReasoningContent, choice.Delta.Reasoning, choice.Delta.Refusal} {
-			if text, ok := value.(string); ok && text != "" {
-				semantic = true
-			}
-		}
-		if choice.FinishReason != nil && strings.TrimSpace(*choice.FinishReason) != "" {
-			finished = true
-		}
-	}
-	return openAIStreamInspection{Finished: finished, Semantic: semantic}
-}
-
 func buildProviderRequestBody(req ChatCompletionRequest, model *models.LLMModel) ([]byte, error) {
 	if model == nil {
 		return nil, errors.New("model is not active or does not exist")
@@ -2186,234 +1475,6 @@ func buildProviderRequestBody(req ChatCompletionRequest, model *models.LLMModel)
 	default:
 		return buildOpenAICompatibleRequestBody(req, model)
 	}
-}
-
-func processAnthropicStreamEvent(payload, eventType string, state *anthropicStreamState, w io.Writer, flusher http.Flusher) (bool, error) {
-	if strings.TrimSpace(payload) == "" {
-		return false, nil
-	}
-
-	var event anthropicStreamEvent
-	if err := json.Unmarshal([]byte(payload), &event); err != nil {
-		return false, nil
-	}
-	if strings.TrimSpace(eventType) == "" {
-		eventType = event.Type
-	}
-
-	switch eventType {
-	case "message_start":
-		if event.Message != nil {
-			state.ResponseID = event.Message.ID
-			state.Model = event.Message.Model
-			state.PromptTokens = event.Message.Usage.InputTokens
-		}
-	case "content_block_start":
-		if event.ContentBlock == nil || event.Index == nil {
-			return false, nil
-		}
-		index := *event.Index
-		switch event.ContentBlock.Type {
-		case "text":
-			chunk := openAIStreamResponseChunk{
-				ID:      defaultIfBlank(state.ResponseID, "chatcmpl-anthropic"),
-				Object:  "chat.completion.chunk",
-				Created: state.Created,
-				Model:   state.Model,
-				Choices: []openAIStreamChoice{
-					{
-						Index: 0,
-						Delta: openAIStreamDelta{
-							Role: conditionalAssistantRole(state),
-						},
-					},
-				},
-			}
-			if err := emitOpenAIStreamPayload(w, flusher, chunk); err != nil {
-				return false, err
-			}
-		case "tool_use":
-			if state.FirstTokenAt.IsZero() {
-				state.FirstTokenAt = time.Now()
-			}
-			toolState := &anthropicToolCallState{
-				ID:   defaultIfBlank(event.ContentBlock.ID, fmt.Sprintf("call_%d", index)),
-				Name: strings.TrimSpace(event.ContentBlock.Name),
-			}
-			state.ToolCalls[index] = toolState
-			toolCallIndex := index
-			chunk := openAIStreamResponseChunk{
-				ID:      defaultIfBlank(state.ResponseID, "chatcmpl-anthropic"),
-				Object:  "chat.completion.chunk",
-				Created: state.Created,
-				Model:   state.Model,
-				Choices: []openAIStreamChoice{
-					{
-						Index: 0,
-						Delta: openAIStreamDelta{
-							Role: conditionalAssistantRole(state),
-							ToolCalls: []ToolCall{
-								{
-									ID:    toolState.ID,
-									Type:  "function",
-									Index: &toolCallIndex,
-									Function: &ToolCallFunction{
-										Name:      toolState.Name,
-										Arguments: "",
-									},
-								},
-							},
-						},
-					},
-				},
-			}
-			if err := emitOpenAIStreamPayload(w, flusher, chunk); err != nil {
-				return false, err
-			}
-		}
-	case "content_block_delta":
-		if event.Index == nil || event.Delta == nil {
-			return false, nil
-		}
-		index := *event.Index
-		switch event.Delta.Type {
-		case "text_delta":
-			if event.Delta.Text == "" {
-				return false, nil
-			}
-			state.AssistantText.WriteString(event.Delta.Text)
-			if state.FirstTokenAt.IsZero() {
-				state.FirstTokenAt = time.Now()
-			}
-			chunk := openAIStreamResponseChunk{
-				ID:      defaultIfBlank(state.ResponseID, "chatcmpl-anthropic"),
-				Object:  "chat.completion.chunk",
-				Created: state.Created,
-				Model:   state.Model,
-				Choices: []openAIStreamChoice{
-					{
-						Index: 0,
-						Delta: openAIStreamDelta{
-							Content: event.Delta.Text,
-						},
-					},
-				},
-			}
-			if err := emitOpenAIStreamPayload(w, flusher, chunk); err != nil {
-				return false, err
-			}
-		case "input_json_delta":
-			toolState := state.ToolCalls[index]
-			if toolState == nil {
-				return false, nil
-			}
-			toolState.Arguments.WriteString(event.Delta.PartialJSON)
-			toolCallIndex := index
-			chunk := openAIStreamResponseChunk{
-				ID:      defaultIfBlank(state.ResponseID, "chatcmpl-anthropic"),
-				Object:  "chat.completion.chunk",
-				Created: state.Created,
-				Model:   state.Model,
-				Choices: []openAIStreamChoice{
-					{
-						Index: 0,
-						Delta: openAIStreamDelta{
-							ToolCalls: []ToolCall{
-								{
-									ID:    toolState.ID,
-									Type:  "function",
-									Index: &toolCallIndex,
-									Function: &ToolCallFunction{
-										Arguments: event.Delta.PartialJSON,
-									},
-								},
-							},
-						},
-					},
-				},
-			}
-			if err := emitOpenAIStreamPayload(w, flusher, chunk); err != nil {
-				return false, err
-			}
-		}
-	case "message_delta":
-		if event.Usage != nil {
-			state.CompletionTokens = event.Usage.OutputTokens
-		}
-		if event.Delta != nil {
-			finishReason := normalizeAnthropicStopReason(event.Delta.StopReason)
-			if finishReason != "" {
-				chunk := openAIStreamResponseChunk{
-					ID:      defaultIfBlank(state.ResponseID, "chatcmpl-anthropic"),
-					Object:  "chat.completion.chunk",
-					Created: state.Created,
-					Model:   state.Model,
-					Choices: []openAIStreamChoice{
-						{
-							Index:        0,
-							Delta:        openAIStreamDelta{},
-							FinishReason: &finishReason,
-						},
-					},
-				}
-				if err := emitOpenAIStreamPayload(w, flusher, chunk); err != nil {
-					return false, err
-				}
-			}
-		}
-	case "message_stop":
-		return true, nil
-	case "error":
-		if event.Error != nil && strings.TrimSpace(event.Error.Message) != "" {
-			return false, errors.New(event.Error.Message)
-		}
-	}
-
-	return false, nil
-}
-
-func emitOpenAIStreamPayload(w io.Writer, flusher http.Flusher, payload interface{}) error {
-	data, err := json.Marshal(payload)
-	if err != nil {
-		return err
-	}
-	if _, err := fmt.Fprintf(w, "data: %s\n\n", data); err != nil {
-		return err
-	}
-	flusher.Flush()
-	return nil
-}
-
-func emitOpenAIStreamDone(w io.Writer, flusher http.Flusher) error {
-	if _, err := io.WriteString(w, "data: [DONE]\n\n"); err != nil {
-		return err
-	}
-	flusher.Flush()
-	return nil
-}
-
-func emitOpenAIStreamError(w io.Writer, flusher http.Flusher, traceID string, _ error) error {
-	payload := struct {
-		Error struct {
-			Message string `json:"message"`
-			Type    string `json:"type"`
-			Code    string `json:"code"`
-			TraceID string `json:"trace_id,omitempty"`
-		} `json:"error"`
-	}{}
-	payload.Error.Message = upstreamStreamInterruptedCode + ": upstream model stream ended before a verified terminal event; retry this turn"
-	payload.Error.Type = "upstream_stream_error"
-	payload.Error.Code = upstreamStreamInterruptedCode
-	payload.Error.TraceID = strings.TrimSpace(traceID)
-	return emitOpenAIStreamPayload(w, flusher, payload)
-}
-
-func conditionalAssistantRole(state *anthropicStreamState) string {
-	if state.SentRole {
-		return ""
-	}
-	state.SentRole = true
-	return "assistant"
 }
 
 func buildOpenAICompatibleRequestBody(req ChatCompletionRequest, model *models.LLMModel) ([]byte, error) {
@@ -3116,34 +2177,6 @@ func normalizeAnthropicStopReason(reason string) string {
 	}
 }
 
-func renderAnthropicToolCalls(state *anthropicStreamState) string {
-	if len(state.ToolCalls) == 0 {
-		return ""
-	}
-
-	indexes := make([]int, 0, len(state.ToolCalls))
-	for index := range state.ToolCalls {
-		indexes = append(indexes, index)
-	}
-	sort.Ints(indexes)
-
-	parts := make([]string, 0, len(state.ToolCalls))
-	for _, index := range indexes {
-		toolState := state.ToolCalls[index]
-		if toolState == nil {
-			continue
-		}
-		args := strings.TrimSpace(toolState.Arguments.String())
-		switch {
-		case toolState.Name != "" && args != "":
-			parts = append(parts, fmt.Sprintf("tool_call %s(%s)", toolState.Name, args))
-		case toolState.Name != "":
-			parts = append(parts, "tool_call "+toolState.Name)
-		}
-	}
-	return strings.Join(parts, "\n")
-}
-
 func defaultIfBlank(value, fallback string) string {
 	if strings.TrimSpace(value) == "" {
 		return fallback
@@ -3662,13 +2695,6 @@ func mustJSONString(value interface{}) string {
 	return string(data)
 }
 
-func rawOrJSONRequestPayload(req ChatCompletionRequest) string {
-	if len(req.RawBody) > 0 {
-		return visionSafePayload(req.RawBody)
-	}
-	return visionSafePayload([]byte(mustJSONString(req)))
-}
-
 func cloneProxyHeaders(headers http.Header) http.Header {
 	cloned := make(http.Header)
 	copyProxyHeaders(cloned, headers)
@@ -4121,13 +3147,4 @@ func extractAssistantContent(response ChatCompletionResponse) string {
 		}
 	}
 	return strings.Join(parts, "\n")
-}
-
-// The bounded reader preserves an explicit interrupted/failed execution state.
-func readDurableProviderBody(reader io.Reader) ([]byte, error) {
-	body, err := io.ReadAll(io.LimitReader(reader, 1<<20+1))
-	if len(body) > 1<<20 {
-		return nil, errors.New("provider response exceeded durable response limit (1 MiB); execution may have occurred")
-	}
-	return body, err
 }

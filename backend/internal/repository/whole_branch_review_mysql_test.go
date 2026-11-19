@@ -38,6 +38,53 @@ func (s wholeBranchArchive) Read(ctx context.Context, owner string, raw []byte) 
 	return s.objects.Get(ctx, owner, ref)
 }
 
+func TestTraceFlowInvocationInlineAndArchiveBounds(t *testing.T) {
+	s := auditFullFixture(t)
+	ctx := context.Background()
+	pool := s.Driver().(*sql.DB)
+	objects, err := observability.NewEncryptedObjects(observationObjects{}, bytes.Repeat([]byte{7}, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	history := historymaintenance.New(pool, wholeBranchArchive{objects}, nil)
+	ConfigureHistoryReader(s, history)
+	defer ConfigureHistoryReader(s, nil)
+	at := time.Now().UTC().AddDate(0, 0, -100).Truncate(time.Second)
+	request := `{"messages":[{"role":"user","content":"` + strings.Repeat("界", 400) + `"}]}`
+	response := `{"choices":[{"message":{"role":"assistant","content":"hello"}}]}`
+	if _, err := pool.ExecContext(ctx, `INSERT INTO model_invocations(id,user_id,trace_id,request_id,requested_model,actual_provider_model,provider_type,traffic_class,status,created_at,completed_at,request_payload,response_payload) VALUES (1,1,'trace','request','auto','model','openai','llm','completed',?,?,?,?)`, at, at, request, response); err != nil {
+		t.Fatal(err)
+	}
+	repo := NewModelInvocationRepository(s).(*modelInvocationRepository)
+	check := func(archived bool) {
+		t.Helper()
+		remaining := int64(16)
+		if _, err := repo.TraceFlowInvocation(ctx, "trace", 1, &remaining); !errors.Is(err, ErrTraceFlowBudget) || remaining != 16 {
+			t.Fatalf("oversized invocation consumed budget %d: %v", remaining, err)
+		}
+		remaining = 1 << 20
+		if _, err := repo.TraceFlowInvocation(ctx, "TRACE", 1, &remaining); !errors.Is(err, sql.ErrNoRows) || remaining != 1<<20 {
+			t.Fatalf("wrong trace read invocation, remaining %d: %v", remaining, err)
+		}
+		invocation, err := repo.TraceFlowInvocation(ctx, "trace", 1, &remaining)
+		if err != nil || invocation.RequestPayload == nil || *invocation.RequestPayload != request || invocation.ResponsePayload == nil || *invocation.ResponsePayload != response {
+			t.Fatalf("invocation payload not restored: %v", err)
+		}
+		used := (1 << 20) - remaining
+		if expected := int64(len(request) + len(response)); used < expected || (!archived && used != expected) {
+			t.Fatalf("payload read charged %d of %d bytes", used, expected)
+		}
+	}
+	check(false)
+	if _, n, err := history.Backfill(ctx, "model_invocations", at, at.Add(time.Second), 0, 1); err != nil || n != 1 {
+		t.Fatalf("archive fixture wrote %d records: %v", n, err)
+	}
+	if _, err := pool.ExecContext(ctx, `DELETE FROM model_invocations WHERE id=1`); err != nil {
+		t.Fatal(err)
+	}
+	check(true)
+}
+
 func TestWholeBranchActualArchiveTypedMetadata(t *testing.T) {
 	s := auditFullFixture(t)
 	ctx := context.Background()
@@ -252,6 +299,15 @@ func TestWholeBranchMonthlyServingCutoverRollbackAndLateLegacy(t *testing.T) {
 		got, err := repo.GetByID(v.ID)
 		if err != nil || got == nil || got.TotalTokens != 3 || got.RequestPayload == nil || *got.RequestPayload != body {
 			t.Fatalf("Get bypassed month: %+v %v", got, err)
+		}
+		remaining := int64(1 << 20)
+		preview, err := repo.TraceFlowInvocation(ctx, "monthly-cross", v.ID, &remaining)
+		if err != nil || preview.RequestPayload == nil || *preview.RequestPayload != body || remaining == 1<<20 {
+			t.Fatalf("flow preview bypassed month or budget: %d %v", remaining, err)
+		}
+		remaining = 16
+		if _, err := repo.TraceFlowInvocation(ctx, "monthly-cross", v.ID, &remaining); !errors.Is(err, ErrTraceFlowBudget) || remaining != 16 {
+			t.Fatalf("oversized monthly payload read: remaining %d %v", remaining, err)
 		}
 	}
 	list, err := repo.ListByTraceID("monthly-cross")

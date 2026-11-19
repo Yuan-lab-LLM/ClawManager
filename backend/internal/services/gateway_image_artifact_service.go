@@ -10,14 +10,15 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math"
 	"regexp"
 	"time"
 
 	"github.com/upper/db/v4"
 )
 
-const MaxGatewayImageArtifactBytes = 16 << 20
-const maxStoredImageArtifactBytes = MaxGatewayImageArtifactBytes + 64
+// The stored AES-GCM payload includes a 12-byte nonce and a 16-byte authentication tag.
+const imageArtifactEncryptionOverhead = 12 + 16
 
 var ErrImageArtifactUnavailable = errors.New("image artifact unavailable or expired")
 var imageArtifactIDPattern = regexp.MustCompile(`^img_[a-f0-9]{32}$`)
@@ -76,7 +77,7 @@ func imageArtifactKey(id string) (string, error) {
 }
 
 func (s *gatewayImageArtifactService) Save(ctx context.Context, owner ImageArtifactOwner, modelID int, requestID, media string, data []byte) (string, error) {
-	if owner.UserID <= 0 || modelID <= 0 || len(data) == 0 || len(data) > MaxGatewayImageArtifactBytes {
+	if owner.UserID <= 0 || modelID <= 0 || len(data) == 0 {
 		return "", errors.New("invalid image artifact")
 	}
 	var nonce [16]byte
@@ -136,11 +137,11 @@ func (s *gatewayImageArtifactService) Load(ctx context.Context, owner ImageArtif
 	if err = rows.Scan(&result.ModelID, &result.MediaType, &size, &encryptionKey); err != nil {
 		return nil, err
 	}
-	if size <= 0 || size > MaxGatewayImageArtifactBytes {
+	if size <= 0 || size >= math.MaxInt64-imageArtifactEncryptionOverhead {
 		return nil, ErrImageArtifactUnavailable
 	}
 	rows.Close()
-	ciphertext, err := s.storage.GetObjectLimited(ctx, key, maxStoredImageArtifactBytes)
+	ciphertext, err := s.storage.GetObjectLimited(ctx, key, size+imageArtifactEncryptionOverhead)
 	if err != nil {
 		return nil, ErrImageArtifactUnavailable
 	}

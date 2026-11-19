@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -149,7 +150,7 @@ func (s *objectStorageService) GetObjectLimited(ctx context.Context, key string,
 	if err := validateImageObjectKey(key); err != nil {
 		return nil, err
 	}
-	if limit <= 0 || limit > maxStoredImageArtifactBytes {
+	if limit <= 0 || limit == math.MaxInt64 {
 		return nil, ErrImageArtifactUnavailable
 	}
 	var reader io.ReadCloser

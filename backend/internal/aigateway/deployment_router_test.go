@@ -205,6 +205,28 @@ func TestFailedDispatchedAttemptSettlesTokensAndBudget(t *testing.T) {
 	}
 }
 
+func TestCompletedAttemptDoesNotSettleAgainAfterInterruption(t *testing.T) {
+	costs := &routingCostService{}
+	finalizations := 0
+	prepared := &preparedChatRequest{
+		attemptSucceeded: true, attemptDispatched: true,
+		attemptPromptTokens: 50, attemptCompletionTokens: 10,
+		priorAttemptTokens: 20, priorAttemptCost: 0.1,
+		req: ChatCompletionRequest{UsageFinalizer: func(int) error {
+			finalizations++
+			return nil
+		}},
+	}
+	gateway := &service{deploymentStore: &routingDeploymentStore{}, costRecordService: costs}
+	candidate := &models.LLMModel{ID: 4, ProviderType: models.ProviderTypeOpenAICompatible}
+	gateway.finishDeploymentAttempt(prepared, candidate, nil, time.Second, false, false)
+	gateway.finalizeFailedAttemptAccounting(prepared)
+	if len(costs.records) != 0 || finalizations != 0 || prepared.priorAttemptTokens != 20 {
+		t.Fatalf("completed attempt was accounted again: records=%d finalizations=%d prior=%d",
+			len(costs.records), finalizations, prepared.priorAttemptTokens)
+	}
+}
+
 func TestNeutralClientErrorRecoversCircuitWithoutPollutingPerformance(t *testing.T) {
 	store := &routingDeploymentStore{}
 	gateway := &service{deploymentStore: store}

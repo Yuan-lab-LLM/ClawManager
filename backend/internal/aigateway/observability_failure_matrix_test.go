@@ -16,6 +16,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -342,7 +343,7 @@ func observationMatrixExecutedResult(t *testing.T, stream bool) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err = row.Scan(&count, &originalID, &digest); err != nil || count != 1 || originalID <= 0 || digest != observability.EventDigest(event.Payload) {
+			if err = row.Scan(&count, &originalID, &digest); err != nil || count != 1 || originalID <= 0 || digest != event.ReceiptDigest() {
 				t.Fatalf("replay %d %s receipt cardinality/identity: %d %d %s %v", pass, kind, count, originalID, digest, err)
 			}
 			row, err = sess.SQL().QueryRow("SELECT COUNT(*) FROM "+kind+" WHERE event_uid=? AND id=?", event.UID, originalID)
@@ -384,108 +385,272 @@ func observationMatrixExecutedResult(t *testing.T, stream bool) {
 	}
 }
 
-func TestGatewayObservationMatrixAdmissionFullRejectsBeforeProvider(t *testing.T) {
+func TestGatewayObservationMatrixDiskFullRejectsBeforeProvider(t *testing.T) {
+	base := os.Getenv("CM_OBSERVABILITY_TEST_SMALL_DISK")
+	if base == "" {
+		t.Skip("CM_OBSERVABILITY_TEST_SMALL_DISK requires a disposable 24 MiB filesystem")
+	}
 	sess := observationMatrixMySQL(t)
-	for _, quota := range []string{"owner", "global"} {
-		t.Run(quota, func(t *testing.T) {
-			// One accepted call owns its preallocated completion channel. Owner
-			// exhaustion still has spare global capacity; global uses another user.
-			const reserve = 20 << 20
-			limits := observability.Limits{RequestBytes: reserve, OwnerBytes: reserve, GlobalBytes: 2 * reserve}
-			rejectedOwner := 901
-			if quota == "global" {
-				limits.GlobalBytes = reserve
-				rejectedOwner = 902
+	dir, err := os.MkdirTemp(base, "gateway-matrix-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	const reserve = 20 << 20
+	key := bytes.Repeat([]byte{28}, 32)
+	journal, err := observability.NewJournal(dir, key, observability.Limits{RequestBytes: reserve})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := services.NewObjectStorageService(config.ObjectStorageConfig{LocalFallback: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	objects, err := observability.NewEncryptedObjects(store, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restore := repository.ConfigureObservability(sess, journal, objects)
+	defer restore()
+	entered, release := make(chan struct{}), make(chan struct{})
+	var releaseOnce sync.Once
+	unblock := func() { releaseOnce.Do(func() { close(release) }) }
+	var calls atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if calls.Add(1) == 1 {
+			close(entered)
+		}
+		<-release
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"choices":[{"message":{"role":"assistant","content":"reserved completion"}}],"usage":{"prompt_tokens":3,"completion_tokens":4,"total_tokens":7}}`)
+	}))
+	defer upstream.Close()
+	defer unblock()
+	gateway := observationMatrixGateway(t, sess, upstream)
+	accepted := observationMatrixRequest("accepted-on-small-disk")
+	type outcome struct {
+		response *ProxyResponse
+		err      error
+	}
+	completed := make(chan outcome, 1)
+	go func() {
+		response, _, err := gateway.ChatCompletions(t.Context(), 901, accepted)
+		completed <- outcome{response, err}
+	}()
+	select {
+	case <-entered:
+	case result := <-completed:
+		t.Fatalf("accepted request did not reach provider: %+v", result)
+	case <-time.After(15 * time.Second):
+		t.Fatal("accepted request did not reach provider")
+	}
+	rejectCtx, cancelReject := context.WithTimeout(t.Context(), 5*time.Second)
+	response, _, err := gateway.ChatCompletions(rejectCtx, 901, observationMatrixRequest("rejected-on-full-disk"))
+	if !errors.Is(err, syscall.ENOSPC) || response != nil || calls.Load() != 1 {
+		t.Fatalf("full disk must reject before another HTTP provider call: response=%+v err=%v calls=%d", response, err, calls.Load())
+	}
+	streamRejected := observationMatrixRequest("stream-rejected-on-full-disk")
+	streamRejected.Stream = true
+	response, _, err = observationMatrixCall(t, rejectCtx, gateway, 901, streamRejected)
+	cancelReject()
+	if !errors.Is(err, syscall.ENOSPC) || response != nil || calls.Load() != 1 {
+		t.Fatalf("stream full disk must reject before another HTTP provider call: response=%+v err=%v calls=%d", response, err, calls.Load())
+	}
+	var rejectedAdmissions int
+	row, err := sess.SQL().QueryRow("SELECT COUNT(*) FROM observability_admissions WHERE request_id IN (?,?)", "rejected-on-full-disk", "stream-rejected-on-full-disk")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = row.Scan(&rejectedAdmissions); err != nil || rejectedAdmissions != 0 {
+		t.Fatalf("rejected request acquired durable admission: %d %v", rejectedAdmissions, err)
+	}
+	unblock()
+	select {
+	case result := <-completed:
+		if result.err != nil || result.response == nil || result.response.StatusCode != http.StatusOK || !strings.Contains(string(result.response.Body), "reserved completion") || result.response.Headers.Get("X-ClawManager-Persistence") != "durably-recorded" {
+			t.Fatalf("disk exhaustion consumed accepted completion reserve: %+v", result)
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("accepted request could not finish with a full disk")
+	}
+	for _, table := range []string{"model_invocations", "cost_records"} {
+		var count, tokens int
+		row, err := sess.SQL().QueryRow("SELECT COUNT(*),COALESCE(SUM(total_tokens),0) FROM "+table+" WHERE request_id=?", *accepted.RequestID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = row.Scan(&count, &tokens); err != nil || count != 1 || tokens != 7 {
+			t.Fatalf("accepted %s completion lost: count=%d tokens=%d err=%v", table, count, tokens, err)
+		}
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("provider called %d times", calls.Load())
+	}
+	if _, err = repository.ReplayObservability(t.Context(), 100); err != nil {
+		t.Fatal(err)
+	}
+	response, _, err = gateway.ChatCompletions(t.Context(), 901, observationMatrixRequest("rejected-on-full-disk"))
+	if err != nil || response == nil || response.StatusCode != http.StatusOK || calls.Load() != 2 {
+		t.Fatalf("request rejected before dispatch could not retry after replay released the reservation: response=%+v err=%v calls=%d", response, err, calls.Load())
+	}
+}
+
+func TestGatewayObservationMatrixLongHistoryPreservesOriginalRequest(t *testing.T) {
+	sess := observationMatrixMySQL(t)
+	key := bytes.Repeat([]byte{29}, 32)
+	journal, err := observability.NewJournal(t.TempDir(), key, observability.Limits{RequestBytes: 20 << 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := services.NewObjectStorageService(config.ObjectStorageConfig{LocalFallback: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	objects, err := observability.NewEncryptedObjects(store, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repository.ConfigureObservability(sess, journal, objects)()
+
+	req := observationMatrixRequest("long-history")
+	for i := 0; i < 80; i++ {
+		req.Messages = append(req.Messages, ChatMessage{Role: "assistant", Content: fmt.Sprintf("reply %d", i)}, ChatMessage{Role: "user", Content: fmt.Sprintf("question %d", i)})
+	}
+	longInput := strings.Repeat(" alpha beta gamma delta", 250000)
+	longOutput := strings.Repeat("model output ", 1600000)
+	currentTurnStart := len(req.Messages)
+	req.Messages = append(req.Messages, ChatMessage{Role: "user", Content: longInput})
+	for i := 0; i < 80; i++ {
+		callID := fmt.Sprintf("call-%d", i)
+		req.Messages = append(req.Messages,
+			ChatMessage{Role: "assistant", ToolCalls: []ToolCall{{ID: callID, Type: "function", Function: &ToolCallFunction{Name: "read_result", Arguments: "{}"}}}},
+			ChatMessage{Role: "tool", ToolCallID: callID, Content: fmt.Sprintf("tool result %d", i)},
+		)
+	}
+	var providerMessages atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body ChatCompletionRequest
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Error(err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		if len(body.Messages) != len(req.Messages) || body.Messages[currentTurnStart].Content != longInput {
+			t.Error("provider request lost history or original long content")
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		providerMessages.Store(int32(len(body.Messages)))
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"choices":[{"message":{"role":"assistant","content":%q}}],"usage":{"prompt_tokens":1000000,"completion_tokens":64000,"total_tokens":1064000}}`, longOutput)
+	}))
+	defer upstream.Close()
+	gateway := observationMatrixGateway(t, sess, upstream)
+	response, trace, err := gateway.ChatCompletions(t.Context(), 901, req)
+	if err != nil || response == nil || response.StatusCode != http.StatusOK {
+		t.Fatalf("long history failed: %v", err)
+	}
+	if providerMessages.Load() != int32(len(req.Messages)) {
+		t.Fatal("provider did not receive the entire history")
+	}
+	if !strings.Contains(string(response.Body), longOutput) {
+		t.Fatal("gateway did not return the entire provider response")
+	}
+	for {
+		n, err := repository.ReplayObservability(t.Context(), 500)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n == 0 {
+			break
+		}
+	}
+	var messages int
+	row, err := sess.SQL().QueryRow("SELECT COUNT(*) FROM chat_messages WHERE trace_id=?", trace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = row.Scan(&messages); err != nil || messages != len(req.Messages)-currentTurnStart+1 {
+		t.Fatalf("current turn and tool history were not persisted once: messages=%d err=%v", messages, err)
+	}
+	var invocation models.ModelInvocation
+	if err = sess.Collection("model_invocations").Find(db.Cond{"trace_id": trace, "request_id": *req.RequestID}).One(&invocation); err != nil {
+		t.Fatal(err)
+	}
+	bodyReader := repository.NewModelInvocationRepository(sess).(interface {
+		TraceBody(context.Context, string, string, int, int) (*repository.TraceBodyChunk, error)
+	})
+	var body strings.Builder
+	for offset := 0; ; {
+		chunk, err := bodyReader.TraceBody(t.Context(), trace, "model_invocations", invocation.ID, offset)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body.WriteString(chunk.Data)
+		if chunk.NextOffset == 0 {
+			if body.Len() != chunk.TotalBytes {
+				t.Fatal("Trace body ended before the reported byte count")
 			}
-			key := bytes.Repeat([]byte{28}, 32)
-			journal, err := observability.NewJournal(t.TempDir(), key, limits)
-			if err != nil {
-				t.Fatal(err)
-			}
-			store, err := services.NewObjectStorageService(config.ObjectStorageConfig{LocalFallback: t.TempDir()})
-			if err != nil {
-				t.Fatal(err)
-			}
-			objects, err := observability.NewEncryptedObjects(store, key)
-			if err != nil {
-				t.Fatal(err)
-			}
-			restore := repository.ConfigureObservability(sess, journal, objects)
-			defer restore()
-			entered, release := make(chan struct{}), make(chan struct{})
-			var releaseOnce sync.Once
-			unblock := func() { releaseOnce.Do(func() { close(release) }) }
-			var calls atomic.Int32
-			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-				if calls.Add(1) == 1 {
-					close(entered)
-				}
-				<-release
-				w.Header().Set("Content-Type", "application/json")
-				fmt.Fprint(w, `{"choices":[{"message":{"role":"assistant","content":"reserved completion"}}],"usage":{"prompt_tokens":3,"completion_tokens":4,"total_tokens":7}}`)
-			}))
-			defer upstream.Close()
-			defer unblock()
-			gateway := observationMatrixGateway(t, sess, upstream)
-			accepted := observationMatrixRequest("accepted-" + quota)
-			type outcome struct {
-				response *ProxyResponse
-				err      error
-			}
-			completed := make(chan outcome, 1)
-			go func() {
-				response, _, err := gateway.ChatCompletions(t.Context(), 901, accepted)
-				completed <- outcome{response, err}
-			}()
-			select {
-			case <-entered:
-			case result := <-completed:
-				t.Fatalf("accepted request did not reach provider: %+v", result)
-			case <-time.After(15 * time.Second):
-				t.Fatal("accepted request did not reach provider")
-			}
-			rejectCtx, cancelReject := context.WithTimeout(t.Context(), 5*time.Second)
-			response, _, err := gateway.ChatCompletions(rejectCtx, rejectedOwner, observationMatrixRequest("rejected-"+quota))
-			if !errors.Is(err, observability.ErrOverloaded) || response != nil || calls.Load() != 1 {
-				t.Fatalf("quota must reject before another HTTP provider call: response=%+v err=%v calls=%d", response, err, calls.Load())
-			}
-			streamRejected := observationMatrixRequest("stream-rejected-" + quota)
-			streamRejected.Stream = true
-			response, _, err = observationMatrixCall(t, rejectCtx, gateway, rejectedOwner, streamRejected)
-			cancelReject()
-			if !errors.Is(err, observability.ErrOverloaded) || response != nil || calls.Load() != 1 {
-				t.Fatalf("stream quota must reject before another HTTP provider call: response=%+v err=%v calls=%d", response, err, calls.Load())
-			}
-			var rejectedAdmissions int
-			row, err := sess.SQL().QueryRow("SELECT COUNT(*) FROM observability_admissions WHERE request_id IN (?,?)", "rejected-"+quota, "stream-rejected-"+quota)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err = row.Scan(&rejectedAdmissions); err != nil || rejectedAdmissions != 0 {
-				t.Fatalf("rejected request acquired durable admission: %d %v", rejectedAdmissions, err)
-			}
-			unblock()
-			select {
-			case result := <-completed:
-				if result.err != nil || result.response == nil || result.response.StatusCode != http.StatusOK || !strings.Contains(string(result.response.Body), "reserved completion") || result.response.Headers.Get("X-ClawManager-Persistence") != "durably-recorded" {
-					t.Fatalf("quota exhaustion consumed accepted completion reserve: %+v", result)
-				}
-			case <-time.After(15 * time.Second):
-				t.Fatal("accepted request could not finish with full quota")
-			}
-			for _, table := range []string{"model_invocations", "cost_records"} {
-				var count, tokens int
-				row, err := sess.SQL().QueryRow("SELECT COUNT(*),COALESCE(SUM(total_tokens),0) FROM "+table+" WHERE request_id=?", *accepted.RequestID)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if err = row.Scan(&count, &tokens); err != nil || count != 1 || tokens != 7 {
-					t.Fatalf("accepted %s completion lost: count=%d tokens=%d err=%v", table, count, tokens, err)
-				}
-			}
-			if calls.Load() != 1 {
-				t.Fatalf("provider called %d times", calls.Load())
-			}
-		})
+			break
+		}
+		if chunk.NextOffset <= offset {
+			t.Fatal("Trace body offset did not advance")
+		}
+		offset = chunk.NextOffset
+	}
+	if err = json.Unmarshal([]byte(body.String()), &invocation); err != nil {
+		t.Fatal(err)
+	}
+	if invocation.RequestBodyRef == nil || invocation.ResponseBodyRef == nil ||
+		invocation.RequestPayload == nil || invocation.ResponsePayload == nil ||
+		!strings.Contains(*invocation.RequestPayload, longInput) || !strings.Contains(*invocation.ResponsePayload, longOutput) ||
+		invocation.PromptTokens != 1000000 || invocation.CompletionTokens != 64000 {
+		t.Fatal("Trace lost the original request, response, or token usage")
+	}
+	var costRows, tokens int
+	row, err = sess.SQL().QueryRow("SELECT COUNT(*), COALESCE(SUM(total_tokens), 0) FROM cost_records WHERE request_id=?", *req.RequestID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = row.Scan(&costRows, &tokens); err != nil || costRows != 1 || tokens != 1064000 {
+		t.Fatalf("request token usage was not settled once: rows=%d tokens=%d err=%v", costRows, tokens, err)
+	}
+}
+
+func TestGatewayObservationMatrixLargeProviderErrorPreservesOriginalResponse(t *testing.T) {
+	sess := observationMatrixMySQL(t)
+	key := bytes.Repeat([]byte{30}, 32)
+	journal, err := observability.NewJournal(t.TempDir(), key, observability.Limits{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := services.NewObjectStorageService(config.ObjectStorageConfig{LocalFallback: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	objects, err := observability.NewEncryptedObjects(store, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repository.ConfigureObservability(sess, journal, objects)()
+
+	responseBody := strings.Repeat("Detailed provider error. ", 4000)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = io.WriteString(w, responseBody)
+	}))
+	defer upstream.Close()
+	gateway := observationMatrixGateway(t, sess, upstream)
+	req := observationMatrixRequest("long-provider-error")
+	res, trace, err := gateway.ChatCompletions(t.Context(), 901, req)
+	if err != nil || res == nil || res.StatusCode != http.StatusBadRequest || string(res.Body) != responseBody {
+		t.Fatalf("provider error did not reach client intact: %v", err)
+	}
+	if _, err := repository.ReplayObservability(t.Context(), 500); err != nil {
+		t.Fatalf("large provider error blocked replay: %v", err)
+	}
+	rows, err := repository.NewModelInvocationRepository(sess).ListByTraceID(trace)
+	if err != nil || len(rows) != 1 || rows[0].ResponsePayload == nil || !strings.Contains(*rows[0].ResponsePayload, strings.TrimSpace(responseBody)) {
+		t.Fatalf("failed invocation lost the original provider error: %v", err)
 	}
 }

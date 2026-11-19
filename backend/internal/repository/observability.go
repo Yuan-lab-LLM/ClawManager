@@ -3,10 +3,12 @@ package repository
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"reflect"
 	"strconv"
@@ -22,6 +24,7 @@ import (
 
 type observationRuntime struct {
 	failures sync.Map
+	active   sync.Map
 	sess     db.Session
 	journal  *observability.Journal
 	objects  *observability.EncryptedObjects
@@ -64,21 +67,31 @@ func BeginObservedRequest(ctx context.Context, userID int, requestID string) err
 	if err != db.ErrNoMoreRows {
 		return err
 	}
-	if err = r.journal.Admit(ctx, owner, requestID); err != nil {
+	release, err := r.journal.AdmitActive(ctx, owner, requestID)
+	if err != nil {
 		return err
 	}
 	_, err = r.sess.SQL().ExecContext(ctx, "INSERT INTO observability_admissions(owner,request_id) VALUES(?,?)", owner, requestID)
-	return err
+	if err != nil {
+		release()
+		return err
+	}
+	r.active.Store(owner+"\x00"+requestID, release)
+	return nil
 }
 func FinishObservedRequest(ctx context.Context, userID int, requestID string) error {
 	r := installedObservability.Load()
 	if r == nil {
 		return nil
 	}
+	owner := observationOwner(&userID)
+	if release, ok := r.active.LoadAndDelete(owner + "\x00" + requestID); ok {
+		defer release.(func())()
+	}
 	if e := CheckObservedRequest(ctx, userID, requestID); e != nil {
 		return e
 	}
-	return r.journal.Finish(ctx, observationOwner(&userID), requestID)
+	return r.journal.Finish(ctx, owner, requestID)
 }
 func ReplayObservability(ctx context.Context, limit int) (int, error) {
 	r := installedObservability.Load()
@@ -86,7 +99,18 @@ func ReplayObservability(ctx context.Context, limit int) (int, error) {
 		return 0, nil
 	}
 	return r.journal.ReplayWithTerminal(ctx, limit, r.project, func(ctx context.Context, state observability.RecoveryState) error {
-		_, e := r.sess.SQL().ExecContext(ctx, `UPDATE observability_admissions SET state='terminal',completed_at=UTC_TIMESTAMP(6) WHERE owner=? AND request_id=?`, state.Owner, state.RequestID)
+		var e error
+		if state.State == observability.AdmissionOutcomeUnknown {
+			_, e = r.sess.SQL().ExecContext(ctx, `INSERT INTO observability_admissions(owner,request_id,state,admitted_at,completed_at)
+				VALUES(?,?,?,?,UTC_TIMESTAMP(6)) ON DUPLICATE KEY UPDATE
+				state=IF(state='terminal',state,VALUES(state)),completed_at=COALESCE(completed_at,VALUES(completed_at))`,
+				state.Owner, state.RequestID, state.State, state.AdmittedAt)
+		} else {
+			_, e = r.sess.SQL().ExecContext(ctx, `UPDATE observability_admissions SET state='terminal',completed_at=COALESCE(completed_at,UTC_TIMESTAMP(6)) WHERE owner=? AND request_id=?`, state.Owner, state.RequestID)
+		}
+		if e == nil {
+			r.failures.Delete(state.Owner + "\x00" + state.RequestID)
+		}
 		return e
 	})
 }
@@ -140,6 +164,23 @@ func observationUID(table string, value interface{}) string {
 	return hex.EncodeToString(hash[:])
 }
 
+func makeObservationEvent(table string, value interface{}) (observability.Event, error) {
+	v := reflect.ValueOf(value).Elem()
+	owner, request, uid := observationFields(value)
+	if uid == "" {
+		uid = observationUID(table, value)
+		v.FieldByName("EventUID").Set(reflect.ValueOf(&uid))
+	}
+	if request == "" {
+		request = "event:" + uid
+	}
+	clone := reflect.New(v.Type())
+	clone.Elem().Set(v)
+	clone.Elem().FieldByName("ID").SetInt(0)
+	raw, err := json.Marshal(clone.Interface())
+	return observability.Event{UID: uid, Owner: owner, RequestID: request, Kind: table, Payload: raw}, err
+}
+
 // persistObservation writes the encrypted journal before attempting SQL. Returning
 // nil after a SQL outage means durable pending delivery, never that SQL committed.
 func persistObservation(ctx context.Context, sess db.Session, table string, value interface{}) (bool, error) {
@@ -154,23 +195,11 @@ func persistObservation(ctx context.Context, sess db.Session, table string, valu
 	if r == nil {
 		return false, nil
 	}
-	v := reflect.ValueOf(value).Elem()
-	owner, request, uid := observationFields(value)
-	if uid == "" {
-		uid = observationUID(table, value)
-		v.FieldByName("EventUID").Set(reflect.ValueOf(&uid))
-	}
-	if request == "" {
-		request = "event:" + uid
-	}
-	clone := reflect.New(v.Type())
-	clone.Elem().Set(v)
-	clone.Elem().FieldByName("ID").SetInt(0)
-	raw, e := json.Marshal(clone.Interface())
+	event, e := makeObservationEvent(table, value)
 	if e != nil {
 		return true, e
 	}
-	event := observability.Event{UID: uid, Owner: owner, RequestID: request, Kind: table, Payload: raw}
+	owner, request, uid := event.Owner, event.RequestID, event.UID
 	e = r.journal.Append(ctx, event)
 	standalone := false
 	if errors.Is(e, os.ErrNotExist) {
@@ -178,9 +207,11 @@ func persistObservation(ctx context.Context, sess db.Session, table string, valu
 		event.RequestID = request
 		e = r.journal.Append(ctx, event)
 		if errors.Is(e, os.ErrNotExist) {
-			if e = r.journal.Admit(ctx, owner, request); e != nil {
-				return true, e
+			release, err := r.journal.AdmitActive(ctx, owner, request)
+			if err != nil {
+				return true, err
 			}
+			defer release()
 			standalone = true
 			e = r.journal.Append(ctx, event)
 		}
@@ -317,7 +348,7 @@ func (r *observationRuntime) projectValue(ctx context.Context, sess db.Session, 
 			return err
 		}
 		rv.FieldByName("ID").SetInt(res.ID().(int64))
-		if _, err = tx.SQL().ExecContext(ctx, `INSERT INTO observability_event_receipts(event_uid,source_table,original_id,payload_sha256) VALUES(?,?,?,?)`, event.UID, event.Kind, res.ID().(int64), observability.EventDigest(event.Payload)); err != nil {
+		if _, err = tx.SQL().ExecContext(ctx, `INSERT INTO observability_event_receipts(event_uid,source_table,original_id,payload_sha256) VALUES(?,?,?,?)`, event.UID, event.Kind, res.ID().(int64), event.ReceiptDigest()); err != nil {
 			return err
 		}
 		return maintainObservationSummary(ctx, tx, event.Kind, value)
@@ -530,7 +561,7 @@ func setObservationBodyStatus(v reflect.Value, field, status string) {
 	f.SetMapIndex(reflect.ValueOf(field), reflect.ValueOf(status))
 }
 
-func PreflightObservedRequest(ctx context.Context, userID int, request string) error {
+func PreflightObservedRequest(ctx context.Context, userID int, request string, requestPayloadBytes int64) error {
 	r := installedObservability.Load()
 	if r == nil {
 		return nil
@@ -538,7 +569,13 @@ func PreflightObservedRequest(ctx context.Context, userID int, request string) e
 	if e := CheckObservedRequest(ctx, userID, request); e != nil {
 		return e
 	}
-	return r.journal.CheckCompletionReserve(ctx, observationOwner(&userID), request, 16<<20, 8)
+	const completionReserveBytes = 16 << 20
+	if requestPayloadBytes < 0 || requestPayloadBytes > (math.MaxInt64-completionReserveBytes)/2 {
+		return errors.New("invalid audit request allocation size")
+	}
+	// A failed attempt retains the known request payload in both its invocation
+	// and audit details, in addition to the provider's result and usage.
+	return r.journal.CheckCompletionReserve(ctx, observationOwner(&userID), request, completionReserveBytes+2*requestPayloadBytes, 8)
 }
 
 // HydrateArchivedPayload is called only after the archive reader has authorized
@@ -570,8 +607,80 @@ func observationReceipt(ctx context.Context, sess db.Session, event observabilit
 	if e != nil {
 		return 0, false, e
 	}
-	if receipt.Kind != event.Kind || receipt.Hash != observability.EventDigest(event.Payload) {
+	if receipt.Kind != event.Kind {
 		return 0, false, observability.ErrIdentityConflict
 	}
-	return receipt.ID, true, nil
+	if receipt.Hash == event.ReceiptDigest() {
+		return receipt.ID, true, nil
+	}
+	if event.Kind == "chat_messages" {
+		if receipt.Hash == observability.EventDigest(event.Payload) {
+			return receipt.ID, true, nil
+		}
+		match, err := matchesLegacyChatReceipt(ctx, sess, receipt.ID, receipt.Hash, event)
+		if err != nil {
+			return 0, false, err
+		}
+		if match {
+			return receipt.ID, true, nil
+		}
+	}
+	return 0, false, observability.ErrIdentityConflict
+}
+
+func matchesLegacyChatReceipt(ctx context.Context, sess db.Session, id int, digest string, event observability.Event) (bool, error) {
+	var original models.ChatMessageRecord
+	row, err := sess.SQL().QueryRowContext(ctx, `SELECT request_id,invocation_id FROM chat_messages WHERE id=? AND event_uid=?`, id, event.UID)
+	if err != nil {
+		return false, err
+	}
+	if err = row.Scan(&original.RequestID, &original.InvocationID); errors.Is(err, sql.ErrNoRows) {
+		reader := historyReader(sess)
+		if reader == nil {
+			return false, nil
+		}
+		archived, err := reader.Get(ctx, event.Kind, int64(id), 0, true)
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		if err = json.Unmarshal(archived.Payload, &original); err != nil {
+			return false, err
+		}
+		if original.EventUID == nil || *original.EventUID != event.UID {
+			return false, nil
+		}
+	} else if err != nil {
+		return false, err
+	}
+
+	// Legacy receipts include the first request's attribution. Try only that
+	// attribution and keep every other field covered by the original digest.
+	var payload map[string]json.RawMessage
+	if err = json.Unmarshal(event.Payload, &payload); err != nil {
+		return false, err
+	}
+	if payload == nil {
+		return false, nil
+	}
+	delete(payload, "request_id")
+	if original.RequestID != nil {
+		payload["request_id"], _ = json.Marshal(*original.RequestID)
+	}
+	// The earlier payload may have omitted the invocation or used zero until
+	// projection assigned the persisted ID.
+	zero := 0
+	for _, invocation := range []*int{nil, &zero, original.InvocationID} {
+		delete(payload, "invocation_id")
+		if invocation != nil {
+			payload["invocation_id"], _ = json.Marshal(*invocation)
+		}
+		raw, _ := json.Marshal(payload)
+		if digest == observability.EventDigest(raw) {
+			return true, nil
+		}
+	}
+	return false, nil
 }

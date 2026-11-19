@@ -81,7 +81,7 @@ func TestObservationNativeProofAndExpiredSnapshot(t *testing.T) {
 	encrypted, e := observability.NewEncryptedObjects(fault, key)
 	must(e)
 	journalDir := t.TempDir()
-	journal, e := observability.NewJournal(journalDir, key, observability.Limits{GlobalBytes: 8 << 20, OwnerBytes: 4 << 20, RequestBytes: 1 << 20})
+	journal, e := observability.NewJournal(journalDir, key, observability.Limits{RequestBytes: 1 << 20})
 	must(e)
 	undo := repository.ConfigureObservability(appdb.Session, journal, encrypted)
 	defer undo()

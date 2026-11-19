@@ -58,12 +58,23 @@ func (s *chatMessageService) RecordMessages(traceID, sessionID string, requestID
 	// accepted into the journal even while SQL is unavailable. Source positions
 	// give full-transcript retries and assistant-only completion a stable identity.
 	if repository.ObservabilityEnabled() {
+		records := make([]*models.ChatMessageRecord, 0, len(normalizedMessages))
 		for index, message := range normalizedMessages {
 			sequence := message.SequenceNo
 			if sequence <= 0 {
 				sequence = index + 1
 			}
-			record := &models.ChatMessageRecord{TraceID: traceID, SessionID: sessionID, RequestID: requestID, UserID: userID, InstanceID: instanceID, InvocationID: invocationID, Role: message.Role, Content: message.Content, SequenceNo: sequence}
+			records = append(records, &models.ChatMessageRecord{TraceID: traceID, SessionID: sessionID, RequestID: requestID, UserID: userID, InstanceID: instanceID, InvocationID: invocationID, Role: message.Role, Content: message.Content, SequenceNo: sequence})
+		}
+		if batch, ok := s.repo.(interface {
+			CreateBatch([]*models.ChatMessageRecord) error
+		}); ok && requestID != nil && *requestID != "" && len(records) > 1 {
+			if err := batch.CreateBatch(records); err != nil {
+				return fmt.Errorf("durable chat messages: %w", err)
+			}
+			return nil
+		}
+		for _, record := range records {
 			if err := s.repo.Create(record); err != nil {
 				return fmt.Errorf("durable chat message: %w", err)
 			}

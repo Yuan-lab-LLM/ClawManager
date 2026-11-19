@@ -38,17 +38,6 @@ func configureDatabaseMaintenance(database db.Session, store services.ObjectStor
 	if dir == "" {
 		return nil, errors.New("CLAWMANAGER_OBSERVABILITY_DIR must point to the dedicated durable shared volume")
 	}
-	global, e := observationBytes("CLAWMANAGER_OBSERVABILITY_GLOBAL_BYTES", 64<<30)
-	if e != nil {
-		return nil, e
-	}
-	if global < 64<<30 {
-		return nil, errors.New("observability global durable capacity must be at least 64 GiB")
-	}
-	owner, e := observationBytes("CLAWMANAGER_OBSERVABILITY_OWNER_BYTES", 4<<30)
-	if e != nil {
-		return nil, e
-	}
 	request, e := observationBytes("CLAWMANAGER_OBSERVABILITY_REQUEST_BYTES", 64<<20)
 	if e != nil {
 		return nil, e
@@ -60,7 +49,7 @@ func configureDatabaseMaintenance(database db.Session, store services.ObjectStor
 	if e != nil {
 		return nil, e
 	}
-	journal, e := observability.NewJournal(dir, key, observability.Limits{GlobalBytes: global, OwnerBytes: owner, RequestBytes: request})
+	journal, e := observability.NewJournal(dir, key, observability.Limits{RequestBytes: request})
 	if e != nil {
 		return nil, e
 	}

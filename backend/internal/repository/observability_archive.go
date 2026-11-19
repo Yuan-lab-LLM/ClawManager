@@ -38,7 +38,7 @@ func observationRetentionEligible() string {
 	conditions := []string{
 		"retain_until<UTC_TIMESTAMP(6) AND deleted_at IS NULL AND (recovery_closed_at IS NULL OR recovery_closed_at<retain_until) AND backup_verified_at IS NOT NULL AND restore_verified_at IS NOT NULL",
 		"NOT EXISTS (SELECT 1 FROM observability_body_refs b WHERE b.object_key=" + obj + ".object_key AND b.released_at IS NULL AND b.created_at>UTC_TIMESTAMP(6)-INTERVAL 30 DAY)",
-		"NOT EXISTS (SELECT 1 FROM observability_admissions a WHERE a.owner=" + obj + ".owner AND a.state<>'terminal')",
+		"NOT EXISTS (SELECT 1 FROM observability_admissions a WHERE a.owner=" + obj + ".owner AND a.state NOT IN ('terminal','terminal_unknown'))",
 		"NOT EXISTS (SELECT 1 FROM observability_archive_dependencies d WHERE d.child_key=" + obj + ".object_key)",
 	}
 	for _, table := range []string{"history_archive_records", "team_redis_archive_receipts", "team_redis_dlq_receipts"} {

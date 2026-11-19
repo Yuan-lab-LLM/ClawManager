@@ -17,11 +17,6 @@ import (
 	_ "golang.org/x/image/webp"
 )
 
-// Deliberate gateway limits, not claims about every upstream model's limits.
-const MaxVisionRequestBytes int64 = 32 << 20
-const maxVisionImages = 16
-const maxVisionImageBytes = 5 << 20
-
 // A conservative reservation, not a provider tokenizer. Actual usage wins.
 const visionImageTokenReservation = 8192
 
@@ -40,11 +35,11 @@ func isImageBlock(part map[string]interface{}) bool {
 // NormalizeVisionContent converts image blocks without fetching remote URLs.
 // Opaque provider file IDs must wait for a governed, credential-bound resolver.
 func NormalizeVisionContent(value interface{}) (interface{}, error) {
-	count := 0
-	return normalizeVisionContent(value, &count, 0)
+	foundImage := false
+	return normalizeVisionContent(value, &foundImage, 0)
 }
 
-func normalizeVisionContent(value interface{}, count *int, depth int) (interface{}, error) {
+func normalizeVisionContent(value interface{}, foundImage *bool, depth int) (interface{}, error) {
 	if depth > 32 {
 		return nil, invalidImage("content nesting limit exceeded")
 	}
@@ -52,7 +47,7 @@ func normalizeVisionContent(value interface{}, count *int, depth int) (interface
 	case []interface{}:
 		out := make([]interface{}, len(v))
 		for i, item := range v {
-			normalized, err := normalizeVisionContent(item, count, depth+1)
+			normalized, err := normalizeVisionContent(item, foundImage, depth+1)
 			if err != nil {
 				return nil, err
 			}
@@ -61,10 +56,7 @@ func normalizeVisionContent(value interface{}, count *int, depth int) (interface
 		return out, nil
 	case map[string]interface{}:
 		if isImageBlock(v) {
-			*count++
-			if *count > maxVisionImages {
-				return nil, invalidImage("at most 16 images per request")
-			}
+			*foundImage = true
 			return normalizeImageBlock(v)
 		}
 		out := make(map[string]interface{}, len(v))
@@ -72,7 +64,7 @@ func normalizeVisionContent(value interface{}, count *int, depth int) (interface
 			out[key] = item
 			// Never interpret quoted text or tool/function arguments as images.
 			if key == "content" || key == "input" || key == "messages" {
-				normalized, err := normalizeVisionContent(item, count, depth+1)
+				normalized, err := normalizeVisionContent(item, foundImage, depth+1)
 				if err != nil {
 					return nil, err
 				}
@@ -144,8 +136,8 @@ func normalizeImageBlock(block map[string]interface{}) (interface{}, error) {
 func validateImageReference(reference string) error {
 	if strings.HasPrefix(reference, "data:") {
 		header, data, ok := strings.Cut(reference, ",")
-		if !ok || len(data) > base64.StdEncoding.EncodedLen(maxVisionImageBytes) {
-			return invalidImage("invalid or oversized base64 image (maximum 5 MiB decoded)")
+		if !ok {
+			return invalidImage("invalid base64 image")
 		}
 		formats := map[string]string{"data:image/png;base64": "png", "data:image/jpeg;base64": "jpeg", "data:image/gif;base64": "gif", "data:image/webp;base64": "webp"}
 		format, supported := formats[header]
@@ -153,11 +145,11 @@ func validateImageReference(reference string) error {
 			return invalidImage("inline images support PNG, JPEG, GIF and WebP")
 		}
 		raw, err := base64.StdEncoding.Strict().DecodeString(data)
-		if err != nil || len(raw) == 0 || len(raw) > maxVisionImageBytes {
-			return invalidImage("invalid or oversized base64 image")
+		if err != nil || len(raw) == 0 {
+			return invalidImage("invalid base64 image")
 		}
 		config, actual, err := image.DecodeConfig(bytes.NewReader(raw))
-		if err != nil || actual != format || config.Width <= 0 || config.Height <= 0 || config.Width > 8192 || config.Height > 8192 || int64(config.Width)*int64(config.Height) > 32_000_000 {
+		if err != nil || actual != format || !validInputImageDimensions(config) {
 			return invalidImage("invalid image format or excessive dimensions")
 		}
 		return nil
@@ -176,16 +168,21 @@ func validateImageReference(reference string) error {
 	return nil
 }
 
+func validInputImageDimensions(config image.Config) bool {
+	return config.Width > 0 && config.Height > 0 && config.Width <= 8192 && config.Height <= 8192 &&
+		int64(config.Width)*int64(config.Height) <= 32_000_000
+}
+
 // NormalizeVisionRequest is called before rate limiting and again for internal
 // callers. RawBody is synchronized so proxy extensions cannot undo conversion.
 func NormalizeVisionRequest(req *ChatCompletionRequest) error {
 	if req == nil {
 		return nil
 	}
-	count := 0
+	foundImage := false
 	messages := append([]ChatMessage(nil), req.Messages...)
 	for i := range messages {
-		content, err := normalizeVisionContent(messages[i].Content, &count, 0)
+		content, err := normalizeVisionContent(messages[i].Content, &foundImage, 0)
 		if err != nil {
 			return err
 		}
@@ -194,7 +191,7 @@ func NormalizeVisionRequest(req *ChatCompletionRequest) error {
 		}
 		messages[i].Content = content
 	}
-	if count == 0 {
+	if !foundImage {
 		return nil
 	}
 	req.Messages = messages

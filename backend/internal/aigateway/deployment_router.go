@@ -356,7 +356,8 @@ func (s *service) finishDeploymentAttempt(prepared *preparedChatRequest, candida
 	// Free scarce capacity first; metrics persistence must not keep a finished
 	// request counted as in-flight when Redis is slow.
 	_ = s.deploymentStore.Release(ctx, lease)
-	if !success && prepared.attemptDispatched {
+	// A downstream interruption can arrive after the completed attempt was settled.
+	if !success && !prepared.attemptSucceeded && prepared.attemptDispatched {
 		prepared.priorAttemptTokens += prepared.attemptPromptTokens + prepared.attemptCompletionTokens
 		prepared.priorAttemptCost += calculateEstimatedCost(candidate, prepared.attemptPromptTokens, prepared.attemptCompletionTokens)
 		s.recordFailedAttemptCost(prepared, candidate)
@@ -408,7 +409,7 @@ func (s *service) recordFailedAttemptCost(prepared *preparedChatRequest, candida
 }
 
 func (s *service) finalizeFailedAttemptAccounting(prepared *preparedChatRequest) {
-	if prepared == nil || prepared.priorAttemptTokens <= 0 {
+	if prepared == nil || prepared.attemptSucceeded || prepared.priorAttemptTokens <= 0 {
 		return
 	}
 	if prepared.req.UsageFinalizer != nil {

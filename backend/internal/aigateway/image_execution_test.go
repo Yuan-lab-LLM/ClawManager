@@ -121,6 +121,44 @@ func TestExecuteImageSuccessGovernanceAndRedaction(t *testing.T) {
 	}
 }
 
+func TestExecuteImageAcceptsResponseBeyondSixtyFourMiB(t *testing.T) {
+	png := visionTestPNG(t)
+	s, _, _, attr := imageExecutionGateway(t, func(w http.ResponseWriter, _ *http.Request) {
+		padding := strings.Repeat(" ", 1<<20)
+		for range 64 {
+			if _, err := io.WriteString(w, padding); err != nil {
+				return
+			}
+		}
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"data": []map[string]string{{"b64_json": png}}})
+	})
+	result, err := s.ExecuteImage(t.Context(), 1, imageExecutionRequest(t, ""), attr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Data) != 1 || result.Data[0].Base64 != png || result.Data[0].ArtifactID == "" {
+		t.Fatal("generated image was not preserved and stored")
+	}
+}
+
+func TestExecuteImageAcceptsArtifactBeyondSixteenMiB(t *testing.T) {
+	pixels := visionTestLargePNG(t, 2176)
+	if len(pixels) <= 16<<20 {
+		t.Fatalf("fixture is only %d bytes", len(pixels))
+	}
+	png := base64.StdEncoding.EncodeToString(pixels)
+	s, _, _, attr := imageExecutionGateway(t, func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"data": []map[string]string{{"b64_json": png}}})
+	})
+	result, err := s.ExecuteImage(t.Context(), 1, imageExecutionRequest(t, ""), attr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Data) != 1 || result.Data[0].Base64 != png || result.Data[0].ArtifactID == "" {
+		t.Fatal("large generated image was not preserved and stored")
+	}
+}
+
 func TestExecuteImageRejectsBeforeUpstream(t *testing.T) {
 	for _, name := range []string{"missing-price", "owner", "key-group", "capability", "stream", "url-output", "no-storage", "no-checker", "budget", "risk", "revoked"} {
 		t.Run(name, func(t *testing.T) {

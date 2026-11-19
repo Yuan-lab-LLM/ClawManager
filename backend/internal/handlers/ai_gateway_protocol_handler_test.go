@@ -5,12 +5,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"clawreef/internal/aigateway"
+	"clawreef/internal/models"
 	"clawreef/internal/services"
 	"github.com/gin-gonic/gin"
 )
@@ -255,6 +257,62 @@ func TestWorkspaceInputFilePathAcceptsOnlyCurrentInstanceReferences(t *testing.T
 		if _, err := workspaceInputFilePath(reference, 42); err == nil {
 			t.Fatalf("expected %q to be rejected", reference)
 		}
+	}
+}
+
+type gatewayInputWorkspace struct {
+	services.WorkspaceFileService
+	text   string
+	scopes []services.WorkspaceFileScope
+}
+
+func (s *gatewayInputWorkspace) OpenDownload(_ context.Context, scope services.WorkspaceFileScope, name string) (io.ReadCloser, string, int64, error) {
+	s.scopes = append(s.scopes, scope)
+	return io.NopCloser(strings.NewReader(s.text)), name, int64(len(s.text)), nil
+}
+
+func TestResolveWorkspaceInputFilesAcceptsLargeInputs(t *testing.T) {
+	path := "/instance-workspace"
+	instance := &models.Instance{ID: 7, UserID: 11, WorkspacePath: &path}
+	for _, test := range []struct {
+		name string
+		size int
+		n    int
+	}{
+		{"more than five files", 1, 6},
+		{"more than two MiB per file", (2 << 20) + 1, 1},
+		{"more than eight MiB total", 2 << 20, 5},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			workspace := &gatewayInputWorkspace{text: strings.Repeat("x", test.size)}
+			handler := &AIGatewayHandler{
+				instanceService:      &fakeWorkspaceHandlerInstanceService{instances: map[int]*models.Instance{7: instance}},
+				workspaceFileService: workspace, runtimeWorkspaceFileService: workspace,
+			}
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Set("instanceID", 7)
+			content := make([]interface{}, test.n)
+			for i := range content {
+				content[i] = map[string]interface{}{"type": "input_file", "file_url": "workspace://document.txt"}
+			}
+			input := []interface{}{map[string]interface{}{"role": "user", "content": content}}
+			if _, err := handler.resolveWorkspaceInputFiles(t.Context(), c, input); err != nil {
+				t.Fatal(err)
+			}
+			if len(workspace.scopes) != test.n {
+				t.Fatalf("opened %d files, want %d", len(workspace.scopes), test.n)
+			}
+			for i, item := range content {
+				block := item.(map[string]interface{})
+				if block["type"] != "input_text" || block["text"] != "[Workspace file: document.txt]\n"+workspace.text {
+					t.Fatal("workspace content lost")
+				}
+				scope := workspace.scopes[i]
+				if scope.InstanceID != 7 || scope.UserID != 11 || scope.WorkspacePath != path || scope.AuditActionPrefix != "llm_" {
+					t.Fatalf("unexpected workspace scope %+v", scope)
+				}
+			}
+		})
 	}
 }
 
