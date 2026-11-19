@@ -320,6 +320,7 @@ export interface AuditTraceDetail {
     summary?: string;
     input_payload?: string;
     output_payload?: string;
+    preview_truncated?: boolean;
     created_at: string;
   }>;
   messages: Array<{
@@ -500,6 +501,18 @@ export const adminService = {
       offset = chunk.next_offset;
     } while (offset);
     return JSON.parse(chunks.join('')) as Record<string, unknown>;
+  },
+
+  getAITraceFlow: async (traceId: string, ids: number[], previousId: number | undefined, signal: AbortSignal) => {
+    const response = await api.get(`/admin/ai-audit/${encodeURIComponent(traceId)}`, {
+      params: { flow_ids: ids.join(','), flow_previous_id: previousId },
+      signal,
+    });
+    const flow = response.data.data as { flow_nodes: AuditTraceDetail['flow_nodes']; processed: number; incomplete: boolean } | undefined;
+    if (!flow || !Array.isArray(flow.flow_nodes) || !Number.isInteger(flow.processed) || flow.processed < 1 || flow.processed > ids.length) {
+      throw new Error('Invalid trace flow response');
+    }
+    return flow;
   },
 
   getAITraceDetail: async (traceId: string, cursor?: string): Promise<AuditTraceDetail> => {

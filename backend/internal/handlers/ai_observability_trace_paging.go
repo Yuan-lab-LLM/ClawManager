@@ -4,9 +4,11 @@ import (
 	"clawreef/internal/repository"
 	"clawreef/internal/services"
 	"clawreef/internal/utils"
+	"context"
 	"github.com/gin-gonic/gin"
 	"net/http"
 	"strconv"
+	"strings"
 )
 
 type tracePagingService interface {
@@ -15,6 +17,10 @@ type tracePagingService interface {
 }
 
 func (h *AIObservabilityHandler) tracePagedRequest(c *gin.Context) bool {
+	if raw, present := c.GetQueryArray("flow_ids"); present {
+		h.traceFlowRequest(c, raw)
+		return true
+	}
 	service, ok := h.service.(tracePagingService)
 	if !ok {
 		return false
@@ -57,4 +63,49 @@ func (h *AIObservabilityHandler) tracePagedRequest(c *gin.Context) bool {
 	}
 	utils.Success(c, http.StatusOK, "Trace page", result)
 	return true
+}
+
+func (h *AIObservabilityHandler) traceFlowRequest(c *gin.Context, raw []string) {
+	if len(raw) != 1 || len(raw[0]) > services.TraceFlowBatchLimit*20 {
+		utils.Error(c, http.StatusBadRequest, "Invalid trace flow IDs")
+		return
+	}
+	parts := strings.Split(raw[0], ",")
+	if len(parts) > services.TraceFlowBatchLimit {
+		utils.Error(c, http.StatusBadRequest, "Too many trace flow IDs")
+		return
+	}
+	ids := make([]int, 0, len(parts))
+	seen := make(map[int]bool, len(parts))
+	for _, part := range parts {
+		id, err := strconv.Atoi(part)
+		if err != nil || id < 1 || seen[id] {
+			utils.Error(c, http.StatusBadRequest, "Invalid trace flow IDs")
+			return
+		}
+		ids = append(ids, id)
+		seen[id] = true
+	}
+	previous := 0
+	if values, present := c.GetQueryArray("flow_previous_id"); present {
+		var err error
+		previous, err = strconv.Atoi(values[0])
+		if len(values) != 1 || err != nil || previous < 1 || seen[previous] {
+			utils.Error(c, http.StatusBadRequest, "Invalid previous trace flow ID")
+			return
+		}
+	}
+	service, ok := h.service.(interface {
+		GetTraceFlow(context.Context, string, []int, int) (*services.AuditTraceFlowPreview, error)
+	})
+	if !ok {
+		utils.Error(c, http.StatusServiceUnavailable, "Trace flow preview unavailable")
+		return
+	}
+	result, err := service.GetTraceFlow(c.Request.Context(), c.Param("traceId"), ids, previous)
+	if err != nil {
+		utils.HandleError(c, err)
+		return
+	}
+	utils.Success(c, http.StatusOK, "Trace execution flow", result)
 }

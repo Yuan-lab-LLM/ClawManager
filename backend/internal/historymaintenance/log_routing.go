@@ -299,7 +299,7 @@ func (s *Service) VerifyLogMonth(ctx context.Context, name string, after int64) 
 		if readErr != nil {
 			return after, false, readErr
 		}
-		r, readErr := readMonthlyRecord(ctx, tx, name, kind, id, 0, true)
+		r, readErr := readMonthlyRecord(ctx, tx, name, kind, id, 0, true, "", nil)
 		if readErr != nil {
 			return after, false, readErr
 		}
@@ -359,19 +359,38 @@ func (s *Service) CutoverLogMonth(ctx context.Context, name string) error {
 	return tx.Commit()
 }
 
-func readMonthlyRecord(ctx context.Context, q Queryer, name, kind string, id, owner int64, admin bool) (Record, error) {
+func readMonthlyRecord(ctx context.Context, q Queryer, name, kind string, id, owner int64, admin bool, trace string, remaining *int64) (Record, error) {
 	r := Record{Kind: kind, ID: id, Month: name, Status: "monthly"}
 	var payload, ref []byte
-	query := "SELECT owner_id,instance_id,team_id,trace_id,session_id,created_at,object_ref,payload_sha256,payload_bytes,metadata_json,payload_json FROM `" + name + "` WHERE original_id=?"
-	args := []any{id}
+	projection := "payload_json"
+	args := []any{}
+	var inlineBytes sql.NullInt64
+	if remaining != nil {
+		projection = "IF(OCTET_LENGTH(payload_json)<=?,payload_json,NULL),OCTET_LENGTH(payload_json)"
+		args = append(args, *remaining)
+	}
+	query := "SELECT owner_id,instance_id,team_id,trace_id,session_id,created_at,object_ref,payload_sha256,payload_bytes,metadata_json," + projection + " FROM `" + name + "` WHERE original_id=?"
+	args = append(args, id)
 	if !admin || owner > 0 {
 		query += " AND owner_id=?"
 		args = append(args, owner)
 	}
-	err := q.QueryRowContext(ctx, query, args...).Scan(&r.OwnerID, &r.InstanceID, &r.TeamID, &r.TraceID, &r.SessionID, &r.CreatedAt, &ref, &r.SHA256, &r.Bytes, &r.Metadata, &payload)
+	fields := []any{&r.OwnerID, &r.InstanceID, &r.TeamID, &r.TraceID, &r.SessionID, &r.CreatedAt, &ref, &r.SHA256, &r.Bytes, &r.Metadata, &payload}
+	if remaining != nil {
+		query += " AND BINARY trace_id=BINARY ?"
+		args = append(args, trace)
+		fields = append(fields, &inlineBytes)
+	}
+	err := q.QueryRowContext(ctx, query, args...).Scan(fields...)
 	r.Reference = ref
 	if err != nil {
 		return r, err
+	}
+	if remaining != nil && inlineBytes.Valid {
+		if inlineBytes.Int64 > *remaining {
+			return r, ErrTracePayloadBudget
+		}
+		*remaining -= inlineBytes.Int64
 	}
 	if len(payload) > 0 {
 		err = decodeMonthlyPayload(&r, payload)
@@ -382,6 +401,14 @@ func readMonthlyRecord(ctx context.Context, q Queryer, name, kind string, id, ow
 // MonthlyGet returns handled=true whenever this identity belongs to an active
 // route, including missing/corrupt data: callers must never mask it by fallback.
 func (s *Service) MonthlyGet(ctx context.Context, kind string, id, owner int64, admin bool) (r Record, handled bool, err error) {
+	return s.monthlyGet(ctx, kind, id, owner, admin, "", nil)
+}
+
+func (s *Service) MonthlyTracePayload(ctx context.Context, kind string, id int64, trace string, remaining *int64) (Record, bool, error) {
+	return s.monthlyGet(ctx, kind, id, 0, true, trace, remaining)
+}
+
+func (s *Service) monthlyGet(ctx context.Context, kind string, id, owner int64, admin bool, trace string, remaining *int64) (r Record, handled bool, err error) {
 	if !LogKind(kind) {
 		return r, false, nil
 	}
@@ -393,10 +420,10 @@ func (s *Service) MonthlyGet(ctx context.Context, kind string, id, owner int64, 
 		return r, false, err
 	}
 	defer tx.Rollback()
-	return s.monthlyGetSnapshot(ctx, tx, kind, id, owner, admin)
+	return s.monthlyGetSnapshot(ctx, tx, kind, id, owner, admin, trace, remaining)
 }
 
-func (s *Service) monthlyGetSnapshot(ctx context.Context, tx *sql.Tx, kind string, id, owner int64, admin bool) (r Record, handled bool, err error) {
+func (s *Service) monthlyGetSnapshot(ctx context.Context, tx *sql.Tx, kind string, id, owner int64, admin bool, trace string, remaining *int64) (r Record, handled bool, err error) {
 	var name, route string
 	err = tx.QueryRowContext(ctx, `SELECT c.table_name,c.read_route FROM history_log_locations l JOIN history_month_catalog c ON c.table_name=l.month_table WHERE l.kind=? AND l.original_id=?`, kind, id).Scan(&name, &route)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -417,12 +444,16 @@ func (s *Service) monthlyGetSnapshot(ctx context.Context, tx *sql.Tx, kind strin
 	if err = checkMonthlyPending(ctx, tx, kind, name); err != nil {
 		return r, true, err
 	}
-	r, err = readMonthlyRecord(ctx, tx, name, kind, id, owner, admin)
+	r, err = readMonthlyRecord(ctx, tx, name, kind, id, owner, admin, trace, remaining)
 	if err != nil {
 		return r, true, err
 	}
 	if len(r.Payload) == 0 {
-		r.Payload, err = s.readPayload(ctx, r)
+		if remaining != nil {
+			r.Payload, err = s.readTraceArchivePayload(ctx, r, trace, remaining)
+		} else {
+			r.Payload, err = s.readPayload(ctx, r)
+		}
 	}
 	return r, true, err
 }
@@ -494,7 +525,7 @@ func (s *Service) LogDetails(ctx context.Context, kind, trace, session string, o
 	out := make([]Record, 0, len(ids))
 	size := 0
 	for _, id := range ids {
-		r, handled, e := s.monthlyGetSnapshot(ctx, tx, kind, id, owner, true)
+		r, handled, e := s.monthlyGetSnapshot(ctx, tx, kind, id, owner, true, "", nil)
 		if e != nil {
 			return nil, e
 		}

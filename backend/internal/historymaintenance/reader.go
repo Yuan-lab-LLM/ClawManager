@@ -15,6 +15,8 @@ import (
 const MaxPageBytes = 8 << 20
 const recordColumns = `kind,original_id,owner_id,instance_id,team_id,trace_id,session_id,created_at,month_table,object_ref,payload_sha256,payload_bytes,archived_at,readback_verified_at,restore_verified_at,restore_sha256,restore_receipt,source_deleted_at,metadata_json,summary_verified_at,summary_sha256`
 
+var ErrTracePayloadBudget = errors.New("trace payload exceeds preview budget")
+
 type scanner interface{ Scan(...any) error }
 
 func scanRecord(row scanner, extra ...any) (r Record, err error) {
@@ -71,6 +73,32 @@ func (s *Service) Get(ctx context.Context, kind string, id, owner int64, admin b
 	}
 	r.Payload, err = s.readPayload(ctx, r)
 	return r, err
+}
+
+// GetTracePayload resolves archived data within a trace and a shared byte budget.
+func (s *Service) GetTracePayload(ctx context.Context, kind string, id int64, trace string, remaining *int64) (Record, error) {
+	if r, handled, err := s.MonthlyTracePayload(ctx, kind, id, trace, remaining); handled || err != nil {
+		return r, err
+	}
+	r, err := s.metadata(ctx, kind, id, 0, true)
+	if err != nil {
+		return r, err
+	}
+	r.Payload, err = s.readTraceArchivePayload(ctx, r, trace, remaining)
+	return r, err
+}
+
+func (s *Service) readTraceArchivePayload(ctx context.Context, r Record, trace string, remaining *int64) ([]byte, error) {
+	if r.TraceID != trace {
+		return nil, sql.ErrNoRows
+	}
+	if r.Bytes > *remaining {
+		return nil, ErrTracePayloadBudget
+	}
+	if r.Bytes > 0 {
+		*remaining -= r.Bytes
+	}
+	return s.readPayload(ctx, r)
 }
 
 type Query struct {

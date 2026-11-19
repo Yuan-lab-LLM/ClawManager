@@ -78,17 +78,18 @@ type AuditTraceDetail struct {
 
 // AuditFlowNode is a synthesized node in a trace flow visualization.
 type AuditFlowNode struct {
-	ID            string    `json:"id"`
-	Kind          string    `json:"kind"`
-	Title         string    `json:"title"`
-	RequestID     string    `json:"request_id,omitempty"`
-	InvocationID  *int      `json:"invocation_id,omitempty"`
-	Model         string    `json:"model,omitempty"`
-	Status        string    `json:"status,omitempty"`
-	Summary       string    `json:"summary,omitempty"`
-	InputPayload  string    `json:"input_payload,omitempty"`
-	OutputPayload string    `json:"output_payload,omitempty"`
-	CreatedAt     time.Time `json:"created_at"`
+	ID               string    `json:"id"`
+	Kind             string    `json:"kind"`
+	Title            string    `json:"title"`
+	RequestID        string    `json:"request_id,omitempty"`
+	InvocationID     *int      `json:"invocation_id,omitempty"`
+	Model            string    `json:"model,omitempty"`
+	Status           string    `json:"status,omitempty"`
+	Summary          string    `json:"summary,omitempty"`
+	InputPayload     string    `json:"input_payload,omitempty"`
+	OutputPayload    string    `json:"output_payload,omitempty"`
+	CreatedAt        time.Time `json:"created_at"`
+	PreviewTruncated bool      `json:"preview_truncated,omitempty"`
 }
 
 // CostOverview contains a compact cost summary for admin reporting.
@@ -1491,17 +1492,27 @@ func buildAuditFlowNodes(invocations []models.ModelInvocation) []AuditFlowNode {
 	nodes := make([]AuditFlowNode, 0, len(ordered)*3)
 	transcript := make([]auditPayloadMessage, 0)
 	for _, invocation := range ordered {
-		requestMessages := parseAuditRequestMessages(invocation.RequestPayload)
-		newMessages := diffAuditMessages(transcript, requestMessages)
-		nodes = append(nodes, buildRequestMessageNodes(newMessages, invocation)...)
-		nodes = append(nodes, buildInvocationNode(invocation, sanitizeAuditRequestPayload(invocation.RequestPayload)))
-
-		responseMessages := parseAuditResponseMessages(invocation.ResponsePayload)
-		nodes = append(nodes, buildResponseMessageNodes(responseMessages, invocation)...)
-		transcript = append(cloneAuditMessages(requestMessages), cloneAuditMessages(responseMessages)...)
+		var invocationNodes []AuditFlowNode
+		invocationNodes, transcript = buildAuditInvocationFlow(invocation, transcript, true)
+		nodes = append(nodes, invocationNodes...)
 	}
 
 	return nodes
+}
+
+func buildAuditInvocationFlow(invocation models.ModelInvocation, transcript []auditPayloadMessage, includeRaw bool) ([]AuditFlowNode, []auditPayloadMessage) {
+	requestMessages := parseAuditRequestMessages(invocation.RequestPayload)
+	responseMessages := parseAuditResponseMessages(invocation.ResponsePayload)
+	nodes := buildRequestMessageNodes(diffAuditMessages(transcript, requestMessages), invocation)
+	llm := buildInvocationNode(invocation, "")
+	if includeRaw {
+		llm.InputPayload = sanitizeAuditRequestPayload(invocation.RequestPayload)
+	} else {
+		llm.OutputPayload = ""
+	}
+	nodes = append(nodes, llm)
+	nodes = append(nodes, buildResponseMessageNodes(responseMessages, invocation)...)
+	return nodes, append(cloneAuditMessages(requestMessages), cloneAuditMessages(responseMessages)...)
 }
 
 func parseAuditRequestMessages(payload *string) []auditPayloadMessage {
@@ -1794,6 +1805,10 @@ func mergeAuditToolCalls(target *[]auditToolCall, incoming []auditToolCall) {
 		index := len(*target)
 		if item.Index != nil && *item.Index >= 0 {
 			index = *item.Index
+			// Sparse indexes from a provider must not cause unbounded allocation.
+			if index >= 1024 {
+				continue
+			}
 		}
 		for len(*target) <= index {
 			*target = append(*target, auditToolCall{})

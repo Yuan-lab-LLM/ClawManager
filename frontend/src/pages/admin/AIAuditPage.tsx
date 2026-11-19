@@ -1,13 +1,25 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import AdminLayout from '../../components/AdminLayout';
-import ArchiveHistoryExport from '../../components/ArchiveHistoryExport';
 import {
   adminService,
   type AIAuditListResponse,
   type AuditTraceDetail,
 } from '../../services/adminService';
 import { useI18n } from '../../contexts/I18nContext';
+
+type TraceBody = Record<string, unknown>;
+type TraceBodyState =
+  | { status: 'loading' | 'error' }
+  | { status: 'loaded'; body: TraceBody; open: boolean };
+
+type TraceFlowProgress = { processed: number; status: 'idle' | 'loading' | 'error'; incomplete: boolean };
+const emptyTraceFlow: TraceFlowProgress = { processed: 0, status: 'idle', incomplete: false };
+const traceFlowBatchSize = 8;
+
+function bodyText(value: unknown) {
+  return typeof value === 'string' && value.trim() ? value : undefined;
+}
 
 const jsonTokenClassMap: Record<string, string> = {
   key: 'text-[#f5c07a]',
@@ -356,8 +368,10 @@ const AIAuditPage: React.FC = () => {
   const [selectedTrace, setSelectedTrace] = useState<AuditTraceDetail | null>(null);
   const [traceCursors, setTraceCursors] = useState<string[]>(['']);
   const [tracePageIndex, setTracePageIndex] = useState(0);
-  const [bodyLoading, setBodyLoading] = useState<string | null>(null);
-  const [bodyStatuses, setBodyStatuses] = useState<Record<string, string>>({});
+  const [traceBodies, setTraceBodies] = useState<Record<string, TraceBodyState>>({});
+  const [traceFlow, setTraceFlow] = useState<TraceFlowProgress>(emptyTraceFlow);
+  const bodyLoading = Object.values(traceBodies).some(body => body.status === 'loading');
+  const bodyKeys = useMemo(() => new Set(selectedTrace?.body_records?.map(record => `${record.kind}:${record.id}`)), [selectedTrace?.body_records]);
   const [loading, setLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -382,6 +396,7 @@ const AIAuditPage: React.FC = () => {
   const syncedTraceRef = useRef<string | null>(null);
   const closingTraceRef = useRef(false);
   const detailRequestRef = useRef(0);
+  const flowRequestRef = useRef<AbortController | null>(null);
   const flowNodeRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const minimapScrollRef = useRef<HTMLDivElement | null>(null);
   const minimapItemRefs = useRef<Record<string, HTMLButtonElement | null>>({});
@@ -397,6 +412,8 @@ const AIAuditPage: React.FC = () => {
     return selectedTrace.messages[0]?.session_id ?? '';
   }, [selectedTrace]);
   const traceQuery = searchParams.get('trace')?.trim() || '';
+
+  useEffect(() => () => flowRequestRef.current?.abort(), []);
 
   useEffect(() => {
     void loadAudit();
@@ -470,6 +487,9 @@ const AIAuditPage: React.FC = () => {
     try {
       closingTraceRef.current = false;
       setDetailLoading(true);
+      setTraceBodies({});
+      flowRequestRef.current?.abort();
+      setTraceFlow(current => current.status === 'loading' ? { ...current, status: 'idle' } : current);
       setLoadingTraceId(traceId);
       syncedTraceRef.current = traceId;
       setError(null);
@@ -480,6 +500,7 @@ const AIAuditPage: React.FC = () => {
       setSelectedTrace(detail);
       setTraceCursors(['']);
       setTracePageIndex(0);
+      void loadTraceFlow(detail, emptyTraceFlow, requestId);
       if (searchParams.get('trace') !== traceId) {
         setSearchParams((current) => {
           const next = new URLSearchParams(current);
@@ -504,17 +525,21 @@ const AIAuditPage: React.FC = () => {
   };
 
   const loadTracePage = async (index: number, cursor: string) => {
-    if (!selectedTrace || detailLoading) return;
+    if (!selectedTrace || detailLoading || bodyLoading) return;
     const trace = selectedTrace.trace_id;
     const request = ++detailRequestRef.current;
+    flowRequestRef.current?.abort();
+    setTraceFlow(current => current.status === 'loading' ? { ...current, status: 'idle' } : current);
     setDetailLoading(true);
     setError(null);
     try {
       const detail = await adminService.getAITraceDetail(trace, cursor);
       if (request !== detailRequestRef.current || closingTraceRef.current) return;
       setSelectedTrace(detail);
+      setTraceBodies({});
       setTraceCursors(current => [...current.slice(0, index), cursor]);
       setTracePageIndex(index);
+      void loadTraceFlow(detail, emptyTraceFlow, request);
     } catch (err) {
       if (request === detailRequestRef.current) setError(err instanceof Error ? err.message : t('aiAuditPage.detailLoadFailed'));
     } finally {
@@ -522,28 +547,63 @@ const AIAuditPage: React.FC = () => {
     }
   };
 
+  const loadTraceFlow = async (detail: AuditTraceDetail, progress: TraceFlowProgress, request: number) => {
+    if (!detail.body_records?.some(record => record.kind === 'model_invocations')) {
+      setTraceFlow({ ...emptyTraceFlow, processed: detail.invocations.length });
+      return;
+    }
+    const from = progress.processed;
+    const ids = detail.invocations.slice(from, from + traceFlowBatchSize).map(invocation => invocation.id);
+    if (ids.length === 0) {
+      setTraceFlow(emptyTraceFlow);
+      return;
+    }
+
+    flowRequestRef.current?.abort();
+    const controller = new AbortController();
+    flowRequestRef.current = controller;
+    setTraceFlow({ ...progress, status: 'loading' });
+    try {
+      const flow = await adminService.getAITraceFlow(detail.trace_id, ids, detail.invocations[from - 1]?.id, controller.signal);
+      if (request !== detailRequestRef.current || controller.signal.aborted) return;
+
+      const byInvocation = new Map<number, AuditTraceDetail['flow_nodes']>();
+      const processed = new Set(ids.slice(0, flow.processed));
+      for (const node of flow.flow_nodes) {
+        if (node.invocation_id == null || !processed.has(node.invocation_id)) continue;
+        const group = byInvocation.get(node.invocation_id);
+        if (group) group.push(node);
+        else byInvocation.set(node.invocation_id, [node]);
+      }
+      setSelectedTrace(current => current?.trace_id === detail.trace_id ? {
+        ...current,
+        flow_nodes: current.flow_nodes.flatMap(node => node.kind === 'llm_call' && node.invocation_id != null
+          ? byInvocation.get(node.invocation_id) ?? [node]
+          : [node]),
+      } : current);
+      setTraceFlow({ processed: from + flow.processed, incomplete: progress.incomplete || flow.incomplete, status: 'idle' });
+    } catch {
+      if (request !== detailRequestRef.current || controller.signal.aborted) return;
+      setTraceFlow({ ...progress, status: 'error' });
+    } finally {
+      if (flowRequestRef.current === controller) flowRequestRef.current = null;
+    }
+  };
+
   const loadTraceBody = async (kind: string, id: number) => {
-    if (!selectedTrace || bodyLoading) return;
+    if (!selectedTrace || detailLoading || bodyLoading) return;
     const trace = selectedTrace.trace_id;
     const request = detailRequestRef.current;
-    setBodyLoading(`${kind}:${id}`);
-    setError(null);
+    const key = `${kind}:${id}`;
+    setTraceBodies(current => ({ ...current, [key]: { status: 'loading' } }));
     try {
       const body = await adminService.getAITraceBody(trace, kind, id);
       if (request !== detailRequestRef.current || closingTraceRef.current) return;
-      const statuses = body.body_status && typeof body.body_status === 'object' ? Object.values(body.body_status).map(String).join(', ') : 'available';
-      setBodyStatuses(current => ({ ...current, [`${trace}:${kind}:${id}`]: statuses }));
-      const fields: Record<string, 'invocations' | 'audit_events' | 'cost_records' | 'risk_hits' | 'messages'> = { model_invocations: 'invocations', audit_events: 'audit_events', cost_records: 'cost_records', risk_hits: 'risk_hits', chat_messages: 'messages' };
-      const field = fields[kind];
-      if (!field) return;
-      setSelectedTrace(current => current?.trace_id === trace ? {
-        ...current,
-        [field]: current[field].map(item => item.id === id ? { ...item, ...body } : item),
-        flow_nodes: current.flow_nodes.map(node => kind === 'model_invocations' && node.invocation_id === id ? { ...node, input_payload: typeof body.request_payload === 'string' ? body.request_payload : node.input_payload, output_payload: typeof body.response_payload === 'string' ? body.response_payload : node.output_payload } : node),
-      } : current);
-    } catch (err) {
-      if (request === detailRequestRef.current) setError(err instanceof Error ? err.message : t('aiAuditPage.detailLoadFailed'));
-    } finally { setBodyLoading(null); }
+      setTraceBodies(current => ({ ...current, [key]: { status: 'loaded', body, open: true } }));
+    } catch {
+      if (request !== detailRequestRef.current || closingTraceRef.current) return;
+      setTraceBodies(current => ({ ...current, [key]: { status: 'error' } }));
+    }
   };
 
   const totalPages = useMemo(() => {
@@ -667,7 +727,10 @@ const AIAuditPage: React.FC = () => {
   const clearSelectedTrace = () => {
     closingTraceRef.current = true;
     detailRequestRef.current += 1;
+    flowRequestRef.current?.abort();
     setSelectedTrace(null);
+    setTraceBodies({});
+    setTraceFlow(emptyTraceFlow);
     setDetailLoading(false);
     setLoadingTraceId(null);
     syncedTraceRef.current = null;
@@ -807,6 +870,72 @@ const AIAuditPage: React.FC = () => {
     )
   );
 
+  const renderBodyPanel = (kind: string, id: number, renderContent: (body: TraceBody) => React.ReactNode) => {
+    const key = `${kind}:${id}`;
+    if (!bodyKeys.has(key)) return renderContent({});
+
+    const state = traceBodies[key];
+    const loaded = state?.status === 'loaded' ? state : undefined;
+    const reading = state?.status === 'loading';
+    const failed = state?.status === 'error';
+    const open = loaded?.open ?? Boolean(state);
+    const panelId = `trace-body-${kind}-${id}`;
+    const content = loaded?.open ? renderContent(loaded.body) : null;
+    const bodyStatus = loaded?.body.body_status;
+    const expired = bodyStatus != null && typeof bodyStatus === 'object' && Object.values(bodyStatus).includes('expired');
+
+    return (
+      <div className="mt-3">
+        <button
+          type="button"
+          className="app-button-secondary"
+          aria-controls={panelId}
+          aria-expanded={open}
+          aria-disabled={reading || undefined}
+          disabled={detailLoading || (bodyLoading && !reading && !loaded)}
+          onClick={() => {
+            if (loaded) {
+              setTraceBodies(current => ({ ...current, [key]: { ...loaded, open: !loaded.open } }));
+            } else {
+              void loadTraceBody(kind, id);
+            }
+          }}
+        >
+          {reading ? t('common.loading') : failed ? t('common.retry') : open ? t('aiAuditPage.hideBody') : t('aiAuditPage.loadBody')}
+        </button>
+        <div id={panelId} hidden={!open} aria-busy={reading || undefined}>
+          {failed && <p role="alert" className="mt-2 text-sm text-[var(--cm-error)]">{t('aiAuditPage.bodyLoadFailed')}</p>}
+          {loaded?.open && (
+            <>
+              {content}
+              {(expired || !content) && <p role="status" className="mt-2 text-sm text-[var(--cm-muted)]">{t(expired ? (content ? 'aiAuditPage.bodyPartlyExpired' : 'aiAuditPage.bodyExpired') : 'aiAuditPage.bodyEmpty')}</p>}
+            </>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const renderPayloadPanes = (input?: string, output?: string) => {
+    if (!input && !output) return null;
+    return (
+      <div className="mt-4 grid gap-4 xl:grid-cols-2">
+        {input && (
+          <div className="min-w-0 rounded-lg border border-[var(--cm-border)] bg-white p-4">
+            <div className="mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-[var(--cm-muted)]">{t('aiAuditPage.nodeInput')}</div>
+            <pre className="max-h-80 overflow-auto rounded-lg bg-[#171212] p-3 text-xs leading-5 text-[#abb2bf]">{renderCodeBlock(input)}</pre>
+          </div>
+        )}
+        {output && (
+          <div className="min-w-0 rounded-lg border border-[var(--cm-border)] bg-white p-4">
+            <div className="mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-[var(--cm-muted)]">{t('aiAuditPage.nodeOutput')}</div>
+            <pre className="max-h-80 overflow-auto rounded-lg bg-[#171212] p-3 text-xs leading-5 text-[#abb2bf]">{renderCodeBlock(output)}</pre>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   const renderTraceDetailContent = () => {
     if (!selectedTrace || !traceSummary) {
       return null;
@@ -817,24 +946,10 @@ const AIAuditPage: React.FC = () => {
         <div className="flex flex-wrap items-center justify-between gap-3" aria-live="polite">
           <p className="text-sm text-[var(--cm-muted)]">{t('aiAuditPage.metadataPage')} {tracePageIndex + 1}</p>
           <div className="flex gap-2">
-            <button type="button" className="app-button-secondary" disabled={detailLoading || bodyLoading !== null || tracePageIndex === 0} onClick={() => void loadTracePage(tracePageIndex - 1, traceCursors[tracePageIndex - 1])}>{t('admin.prev')}</button>
-            <button type="button" className="app-button-secondary" disabled={detailLoading || bodyLoading !== null || !selectedTrace.next_cursor} onClick={() => void loadTracePage(tracePageIndex + 1, selectedTrace.next_cursor!)}>{detailLoading ? t('common.loading') : t('admin.nextPage')}</button>
+            <button type="button" className="app-button-secondary" disabled={detailLoading || bodyLoading || tracePageIndex === 0} onClick={() => void loadTracePage(tracePageIndex - 1, traceCursors[tracePageIndex - 1])}>{t('admin.prev')}</button>
+            <button type="button" className="app-button-secondary" disabled={detailLoading || bodyLoading || !selectedTrace.next_cursor} onClick={() => void loadTracePage(tracePageIndex + 1, selectedTrace.next_cursor!)}>{detailLoading ? t('common.loading') : t('admin.nextPage')}</button>
           </div>
         </div>
-        {!!selectedTrace.body_records?.length && <details className="rounded-lg border border-[var(--cm-border)] p-4">
-          <summary className="cursor-pointer text-sm font-medium">{t('aiAuditPage.loadBodies')}</summary>
-          <p className="my-3 text-sm text-[var(--cm-muted)]">{t('aiAuditPage.bodyOnDemand')}</p>
-          <ul className="max-h-64 space-y-2 overflow-auto">
-            {selectedTrace.body_records.map(record => <li key={`${record.kind}:${record.id}`} className="flex flex-wrap items-center justify-between gap-2 text-sm">
-              <span>{record.kind} #{record.id} {bodyStatuses[`${selectedTrace.trace_id}:${record.kind}:${record.id}`] && <span role="status">· {bodyStatuses[`${selectedTrace.trace_id}:${record.kind}:${record.id}`]}</span>}</span>
-              <button type="button" className="app-button-secondary" disabled={bodyLoading !== null || detailLoading} onClick={() => void loadTraceBody(record.kind, record.id)}>{bodyLoading === `${record.kind}:${record.id}` ? t('common.loading') : t('aiAuditPage.loadBody')}</button>
-            </li>)}
-          </ul>
-          {selectedTrace.invocations.filter(record => record.error_message).map(record => <div key={`error-${record.id}`} className="mt-3 text-sm">
-            <p className="font-medium">{t('aiAuditPage.failureReason')} #{record.id}</p>
-            <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded border border-[var(--cm-border)] p-3">{record.error_message}</pre>
-          </div>)}
-        </details>}
         <div className="overflow-hidden rounded-lg border border-[var(--cm-border)] bg-[var(--cm-subtle)] shadow-sm">
           <div className="border-b border-[var(--cm-border)] px-5 py-5 sm:px-6">
             <div className="flex flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
@@ -917,12 +1032,20 @@ const AIAuditPage: React.FC = () => {
               {selectedTrace.audit_events.filter((event) => event.event_type === 'gateway.routing.selected' || event.event_type === 'gateway.routing.rejected').map((event) => (
                 <details key={event.id} className={`rounded-xl border p-4 ${event.severity === 'warn' ? 'border-amber-300 bg-amber-50' : 'border-gray-200 bg-white'}`}>
                   <summary className="cursor-pointer text-sm font-medium text-gray-800">
-                    {event.message}
+                    {event.message || event.event_type}
                     <span className="ml-3 text-xs font-normal text-gray-500">{formatRelativeTimestamp(event.created_at, locale)}</span>
                   </summary>
-                  <div className="mt-3 max-h-96 overflow-auto rounded-lg bg-[#171c25] p-4 font-mono text-xs">
-                    {renderCodeBlock(event.details)}
-                  </div>
+                  {renderBodyPanel('audit_events', event.id, body => {
+                    const message = bodyText(body.message);
+                    const details = bodyText(body.details) ?? event.details;
+                    if (!message && !details) return null;
+                    return (
+                      <>
+                        {message && message !== event.message && <p className="mt-3 break-words text-sm text-[var(--cm-text)]">{message}</p>}
+                        {details && <pre className="mt-3 max-h-96 overflow-auto rounded-lg bg-[#171c25] p-4 font-mono text-xs">{renderCodeBlock(details)}</pre>}
+                      </>
+                    );
+                  })}
                 </details>
               ))}
             </div>
@@ -1050,34 +1173,44 @@ const AIAuditPage: React.FC = () => {
                         </div>
                       </div>
 
-                      {(node.input_payload || node.output_payload) && (
-                        <div className="mt-4 grid gap-4 xl:grid-cols-2">
-                          {node.input_payload && (
-                            <div className="rounded-2xl border border-[var(--cm-border)] bg-white p-4">
-                              <div className="mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-[var(--cm-muted)]">
-                                {t('aiAuditPage.nodeInput')}
-                              </div>
-                              <pre className="max-h-80 overflow-auto rounded-xl bg-[#171212] p-3 text-xs leading-5 text-[#abb2bf]">
-                                {renderCodeBlock(node.input_payload)}
-                              </pre>
-                            </div>
-                          )}
-                          {node.output_payload && (
-                            <div className="rounded-2xl border border-[var(--cm-border)] bg-white p-4">
-                              <div className="mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-[var(--cm-muted)]">
-                                {t('aiAuditPage.nodeOutput')}
-                              </div>
-                              <pre className="max-h-80 overflow-auto rounded-xl bg-[#171212] p-3 text-xs leading-5 text-[#abb2bf]">
-                                {renderCodeBlock(node.output_payload)}
-                              </pre>
-                            </div>
-                          )}
-                        </div>
-                      )}
+                      {node.kind === 'llm_call' && node.invocation_id != null
+                        ? renderBodyPanel('model_invocations', node.invocation_id, body => {
+                            const panes = renderPayloadPanes(bodyText(body.request_payload) ?? node.input_payload, bodyText(body.response_payload) ?? node.output_payload);
+                            const failure = bodyText(body.error_message);
+                            if (!failure) return panes;
+                            return (
+                              <>
+                                {panes}
+                                <div className="mt-3 text-sm">
+                                  <p className="font-medium">{t('aiAuditPage.failureReason')}</p>
+                                  <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded border border-[var(--cm-border)] p-3">{failure}</pre>
+                                </div>
+                              </>
+                            );
+                          })
+                        : renderPayloadPanes(node.input_payload, node.output_payload)}
+                      {node.preview_truncated && <p className="mt-2 text-sm text-[var(--cm-muted)]">{t('aiAuditPage.flowPreviewTruncated')}</p>}
                     </div>
                   </div>
                 ))}
               </div>
+            </div>
+          )}
+          {(traceFlow.processed < selectedTrace.invocations.length || traceFlow.incomplete) && (
+            <div className="mt-4 flex flex-wrap items-center gap-3">
+              {traceFlow.status === 'loading' && <p role="status" className="text-sm text-[var(--cm-muted)]">{t('aiAuditPage.flowLoading')}</p>}
+              {traceFlow.status === 'error' && <p role="alert" className="text-sm text-[var(--cm-error)]">{t('aiAuditPage.flowLoadFailed')}</p>}
+              {traceFlow.incomplete && <p className="text-sm text-[var(--cm-muted)]">{t('aiAuditPage.flowIncomplete')}</p>}
+              {traceFlow.processed < selectedTrace.invocations.length && traceFlow.status !== 'loading' && (
+                <button
+                  type="button"
+                  className="app-button-secondary"
+                  disabled={detailLoading}
+                  onClick={() => void loadTraceFlow(selectedTrace, traceFlow, detailRequestRef.current)}
+                >
+                  {traceFlow.status === 'error' ? t('common.retry') : t('aiAuditPage.flowLoadMore')}
+                </button>
+              )}
             </div>
           )}
         </TraceSection>
@@ -1158,7 +1291,10 @@ const AIAuditPage: React.FC = () => {
                         <MetaPill tone="info">{hit.action}</MetaPill>
                       </div>
                       <div className="mt-3 text-base font-semibold text-[var(--cm-ink)]">{hit.rule_name}</div>
-                      <div className="mt-2 text-sm leading-6 text-[var(--cm-text)]">{hit.match_summary}</div>
+                      {renderBodyPanel('risk_hits', hit.id, body => {
+                        const summary = bodyText(body.match_summary) ?? hit.match_summary;
+                        return summary ? <p className="mt-2 break-words text-sm leading-6 text-[var(--cm-text)]">{summary}</p> : null;
+                      })}
                     </div>
                     <div className="sm:w-[220px]">
                       <TimestampStack value={hit.created_at} locale={locale} align="right" />
@@ -1177,7 +1313,6 @@ const AIAuditPage: React.FC = () => {
   return (
     <AdminLayout title={t('nav.aiAudit')}>
       <div className="space-y-6">
-        <ArchiveHistoryExport admin />
         <section className={`app-panel p-6 ${isSplitView ? 'overflow-visible' : ''}`}>
 
 

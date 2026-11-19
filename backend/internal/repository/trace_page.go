@@ -3,6 +3,7 @@ package repository
 import (
 	"clawreef/internal/historymaintenance"
 	"clawreef/internal/models"
+	"clawreef/internal/observability"
 	"context"
 	"database/sql"
 	"encoding/base64"
@@ -204,6 +205,8 @@ type TraceBodyChunk struct {
 	TotalBytes int    `json:"total_bytes"`
 }
 
+var ErrTraceFlowBudget = historymaintenance.ErrTracePayloadBudget
+
 func (r *modelInvocationRepository) TraceBody(ctx context.Context, trace, kind string, id, offset int) (*TraceBodyChunk, error) {
 	if traceColumns(kind) == nil || id < 1 || offset < 0 {
 		return nil, fmt.Errorf("invalid trace body request")
@@ -221,45 +224,10 @@ func (r *modelInvocationRepository) TraceBody(ctx context.Context, trace, kind s
 	case "chat_messages":
 		value = &models.ChatMessageRecord{}
 	}
-	var e error
-	monthly := false
-	if reader := historyReader(r.sess); reader != nil {
-		record, handled, err := reader.MonthlyGet(ctx, kind, int64(id), 0, true)
-		if err != nil {
-			return nil, err
-		}
-		if handled {
-			monthly = true
-			if record.TraceID != trace {
-				return nil, sql.ErrNoRows
-			}
-			e = json.Unmarshal(record.Payload, value)
-		}
-	}
-	if !monthly {
-		e = r.sess.WithContext(ctx).Collection(kind).Find(db.Cond{"id": id, "trace_id": trace}).One(value)
-	}
-	if e == db.ErrNoMoreRows && kind != "cost_records" {
-		reader := historyReader(r.sess)
-		if reader == nil {
-			return nil, sql.ErrNoRows
-		}
-		record, err := reader.Get(ctx, kind, int64(id), 0, true)
-		if err != nil {
-			return nil, err
-		}
-		var scope struct {
-			Trace string `json:"trace_id"`
-		}
-		if err = json.Unmarshal(record.Payload, &scope); err != nil || scope.Trace != trace {
-			return nil, sql.ErrNoRows
-		}
-		e = json.Unmarshal(record.Payload, value)
-	}
-	if e != nil {
+	if e := r.readTraceRecord(ctx, trace, kind, id, value, nil); e != nil {
 		return nil, e
 	}
-	if e = hydrateObservation(ctx, value); e != nil {
+	if e := hydrateObservation(ctx, value); e != nil {
 		return nil, e
 	}
 	raw, e := json.Marshal(value)
@@ -284,4 +252,107 @@ func (r *modelInvocationRepository) TraceBody(ctx context.Context, trace, kind s
 		next = end
 	}
 	return &TraceBodyChunk{Data: string(raw[offset:end]), NextOffset: next, TotalBytes: len(raw)}, nil
+}
+
+func (r *modelInvocationRepository) readTraceRecord(ctx context.Context, trace, kind string, id int, value any, remaining *int64) error {
+	var e error
+	monthly := false
+	reader := historyReader(r.sess)
+	if reader != nil {
+		var record historymaintenance.Record
+		var handled bool
+		var err error
+		if remaining == nil {
+			record, handled, err = reader.MonthlyGet(ctx, kind, int64(id), 0, true)
+		} else {
+			record, handled, err = reader.MonthlyTracePayload(ctx, kind, int64(id), trace, remaining)
+		}
+		if err != nil {
+			return err
+		}
+		if handled {
+			monthly = true
+			if record.TraceID != trace {
+				return sql.ErrNoRows
+			}
+			e = json.Unmarshal(record.Payload, value)
+		}
+	}
+	if !monthly {
+		if remaining == nil {
+			e = r.sess.WithContext(ctx).Collection(kind).Find(db.Cond{"id": id, "trace_id": trace}).One(value)
+		} else {
+			e = r.readHotTraceFlowInvocation(ctx, trace, id, value.(*models.ModelInvocation), remaining)
+		}
+	}
+	if (e == db.ErrNoMoreRows || errors.Is(e, sql.ErrNoRows)) && kind != "cost_records" {
+		if reader == nil {
+			return sql.ErrNoRows
+		}
+		var record historymaintenance.Record
+		var err error
+		if remaining == nil {
+			record, err = reader.Get(ctx, kind, int64(id), 0, true)
+		} else {
+			record, err = reader.GetTracePayload(ctx, kind, int64(id), trace, remaining)
+		}
+		if err != nil {
+			return err
+		}
+		var scope struct {
+			Trace string `json:"trace_id"`
+		}
+		if err = json.Unmarshal(record.Payload, &scope); err != nil || scope.Trace != trace {
+			return sql.ErrNoRows
+		}
+		e = json.Unmarshal(record.Payload, value)
+	}
+	return e
+}
+
+// TraceFlowInvocation shares the raw body's lookup and hydration without
+// serializing full records or reading payloads beyond the request's allowance.
+func (r *modelInvocationRepository) TraceFlowInvocation(ctx context.Context, trace string, id int, remaining *int64) (models.ModelInvocation, error) {
+	var invocation models.ModelInvocation
+	if err := r.readTraceRecord(ctx, trace, "model_invocations", id, &invocation, remaining); err != nil {
+		return invocation, err
+	}
+	var refBytes int64
+	for _, encoded := range []*string{invocation.RequestBodyRef, invocation.ResponseBodyRef} {
+		if encoded == nil {
+			continue
+		}
+		var ref observability.BodyRef
+		if err := json.Unmarshal([]byte(*encoded), &ref); err != nil {
+			return invocation, err
+		}
+		if ref.ByteLength < 0 || ref.ByteLength > *remaining-refBytes {
+			return invocation, ErrTraceFlowBudget
+		}
+		refBytes += ref.ByteLength
+	}
+	*remaining -= refBytes
+	err := hydrateObservation(ctx, &invocation)
+	return invocation, err
+}
+
+func (r *modelInvocationRepository) readHotTraceFlowInvocation(ctx context.Context, trace string, id int, invocation *models.ModelInvocation, remaining *int64) error {
+	const inlineBytes = `COALESCE(OCTET_LENGTH(request_payload),0)+COALESCE(OCTET_LENGTH(response_payload),0)`
+	row, err := r.sess.SQL().QueryRowContext(ctx, `SELECT id,trace_id,request_id,user_id,event_uid,request_body_ref,response_body_ref,requested_model,actual_provider_model,status,created_at,completed_at,`+
+		`IF(`+inlineBytes+`<=?,request_payload,NULL),IF(`+inlineBytes+`<=?,response_payload,NULL),`+inlineBytes+
+		` FROM model_invocations WHERE id=? AND BINARY trace_id=BINARY ?`, *remaining, *remaining, id, trace)
+	if err != nil {
+		return err
+	}
+	var bytes int64
+	if err = row.Scan(&invocation.ID, &invocation.TraceID, &invocation.RequestID, &invocation.UserID, &invocation.EventUID, &invocation.RequestBodyRef,
+		&invocation.ResponseBodyRef, &invocation.RequestedModel, &invocation.ActualProviderModel, &invocation.Status, &invocation.CreatedAt,
+		&invocation.CompletedAt, &invocation.RequestPayload, &invocation.ResponsePayload, &bytes); err != nil {
+		return err
+	}
+	if bytes > *remaining {
+		return ErrTraceFlowBudget
+	}
+	*remaining -= bytes
+	return nil
 }
