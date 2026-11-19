@@ -25,7 +25,7 @@ function AgentTypeIcon({ type }: { type: string }) {
  return typeof logo === 'string' ? <img src={logo} alt="" width={32} height={32} className="ws-agent-logo" /> : <Monitor size={32} className="ws-agent-logo" aria-hidden="true" />;
 }
 
-function Workspace({ userID, username }: { userID: number; username: string }) {
+function Workspace({ userID }: { userID: number }) {
  const { locale } = useI18n();
  const text = workspaceText(locale);
  const [group, setGroup] = useState('operations');
@@ -77,7 +77,6 @@ function Workspace({ userID, username }: { userID: number; username: string }) {
  const selectedCounts = selectedDay && data ? activityCounts(selectedDay, data.coverage.activity) : null;
  return <UserLayout title="Workspace" fillHeight>
   <div className={`ws-dashboard ${hidden ? 'ws-paused' : ''}`}>
-   <header className="ws-toolbar"><div className="ws-welcome"><span className="ws-avatar" aria-hidden="true">{username.slice(0, 2).toLocaleUpperCase(locale)}</span><div><h1 title={`${text.welcome} ${username}`}><span className="ws-greeting">{text.welcome}</span> <strong>{username}</strong></h1></div></div></header>
    <nav className="ws-groups" aria-label={text.selectGroup}>{(['work', 'operations', 'activity'] as const).map(value => <button key={value} aria-pressed={group === value} onClick={() => setGroup(value)}>{text[value]}</button>)}</nav>
    {query.isError && <div role="alert" className="ws-error">{data ? text.stale : text.error}<button onClick={() => void query.refetch()}>{text.retry}</button></div>}
    <div className="ws-grid" data-group={group} aria-busy={query.isFetching}>
@@ -142,5 +141,5 @@ function ObservationDetails({data, locale, tab}: {data: Dashboard; locale: strin
 export default function UserDashboard() {
  const { user } = useAuth();
  // Remount account preferences, dialogs and local view state synchronously on identity changes.
- return user ? <Workspace key={user.id} userID={Number(user.id)} username={String(user.username || '')} /> : null;
+ return user ? <Workspace key={user.id} userID={Number(user.id)} /> : null;
 }

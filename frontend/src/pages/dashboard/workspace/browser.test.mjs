@@ -63,6 +63,10 @@ try {
  });
  await page.goto(`${base}/dashboard`);
  await page.locator('.ws-grid[aria-busy="false"]').waitFor();
+ assert.equal(await page.locator('.ws-dashboard > header').count(),0,'Workspace should begin with its overview without a welcome banner');
+ assert.equal(await page.locator('.ws-dashboard').getByText('Welcome back,',{exact:true}).count(),0);
+ const overviewTop=(await page.locator('.ws-grid').boundingBox()).y;
+ assert.equal(overviewTop,(await page.locator('.ws-dashboard').boundingBox()).y,'Removed heading must leave no vertical gap');
  assert.equal(await page.locator('.ws-operations .ws-panel').count(),3,'three independent metric panels must be present simultaneously');
  assert.equal(await page.locator('.ws-recent-list a').first().getAttribute('href'),'/instances/44','Continue working must show recent Agents rather than task rows');
  if(process.env.WORKSPACE_USAGE_REVIEW_ONLY==='1') {
@@ -70,9 +74,6 @@ try {
   assert.equal(await page.locator('.ws-usage-panel select[aria-label="Chart metric"]').count(),0,'Tokens and cost no longer require metric switching');
   assert.equal(await page.locator('.ws-usage-panel path.ws-chart-line').count(),4,'two smooth series retain their missing-data gaps');
   assert.equal(await page.locator('.ws-usage-panel .ws-chart-axis-right').count()>0,true);
-  const username=page.locator('.ws-welcome h1 strong');await username.waitFor();
-  assert.notEqual(await username.evaluate(e=>getComputedStyle(e).color),await page.locator('.ws-greeting').evaluate(e=>getComputedStyle(e).color));
-  assert.equal(await page.locator('.ws-welcome p').count(),0);
   assert.equal(await page.locator('.ws-grid .ws-coverage').count(),0);
   await page.locator('.ws-task-summary summary').click();
   const retained=await page.locator('.ws-resume').elementHandle(),ring=await page.locator('.ws-ring').elementHandle(),heat=await page.locator('.ws-heat').elementHandle();
@@ -97,7 +98,7 @@ try {
   await page.emulateMedia({reducedMotion:'reduce'});
   assert.equal(await page.locator('.ws-usage-stage').evaluate(e=>getComputedStyle(e).transitionDuration),'0s');
   assert.deepEqual(writes,[]);assert.deepEqual(errors,[]);
-  console.log('PASS usage-only query/loading/error/rapid switching, retained dashboard DOM/task expansion, dual axes/smooth gap-preserving series, username hierarchy and reduced motion');
+  console.log('PASS usage-only query/loading/error/rapid switching, retained dashboard DOM/task expansion, dual axes/smooth gap-preserving series and reduced motion');
  } else if(process.env.WORKSPACE_REVIEW_ONLY==='1') {
   const failures=[];
   const verify=async(name,run)=>{try{mode='normal';delay=0;await page.goto(`${base}/dashboard`);await page.locator('.ws-grid[aria-busy="false"]').waitFor();await run();console.log('PASS '+name);}catch(error){failures.push(`${name}: ${error.message}`);console.error('FAIL '+name+': '+error.message);}finally{delay=0;}};
