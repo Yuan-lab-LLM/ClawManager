@@ -6,6 +6,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"clawreef/internal/models"
 	"clawreef/internal/workbench"
@@ -62,7 +63,7 @@ func TestWorkbenchResolvesOwnerAndCurrentGenerationBeforeExecution(t *testing.T)
 		t.Fatalf("stale request allowed: %v", err)
 	}
 	instance.Status = "sleeping"
-	if _, err := service.Execute(ctx, 7, false, 42, 3, "git", nil); !errors.Is(err, ErrWorkbenchUnavailable) {
+	if _, err := service.Execute(ctx, 7, false, 42, 3, "git", nil); !errors.Is(err, ErrWorkbenchStopped) {
 		t.Fatalf("sleeping instance allowed: %v", err)
 	}
 	instance.Status = "running"
@@ -85,6 +86,33 @@ func TestWorkbenchResolvesOwnerAndCurrentGenerationBeforeExecution(t *testing.T)
 	}
 	if agent.requests[1].UserID != 7 {
 		t.Fatal("admin identity substituted for business owner")
+	}
+}
+
+type deadlineWorkbenchAgent struct {
+	budget time.Duration
+}
+
+func (a *deadlineWorkbenchAgent) Workbench(ctx context.Context, _ string, _ WorkbenchRequest) (json.RawMessage, error) {
+	deadline, _ := ctx.Deadline()
+	a.budget = time.Until(deadline)
+	if a.budget > 5*time.Second {
+		return nil, nil
+	}
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func TestWorkbenchCapabilitiesDeadlineDoesNotShortenTerminalOperations(t *testing.T) {
+	agent := &deadlineWorkbenchAgent{}
+	service := &InstanceWorkbenchService{agent: agent}
+	started := time.Now()
+	_, err := service.executeAgent(context.Background(), workbenchTarget{}, "capabilities", nil)
+	if !errors.Is(err, ErrWorkbenchTimeout) || time.Since(started) > 5*time.Second {
+		t.Fatalf("capability probe did not return an early timeout: %v", err)
+	}
+	if _, err := service.executeAgent(context.Background(), workbenchTarget{}, "terminal.create", nil); err != nil || agent.budget < 120*time.Second {
+		t.Fatalf("terminal execution budget changed: %s, %v", agent.budget, err)
 	}
 }
 

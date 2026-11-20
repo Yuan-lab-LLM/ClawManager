@@ -61,6 +61,18 @@ func (r *OwnerTeamRepository) PendingMutation(teamID int) (bool, error) {
 	return n > 0, err
 }
 
+// Background retries may continue an already authorized whole-Team deletion;
+// they cannot create an individual member deletion intent through this path.
+func (r *OwnerTeamRepository) PendingMemberDeletion(teamID, instanceID int) (bool, error) {
+	var count int
+	row, err := r.sess.SQL().QueryRow(`SELECT COUNT(*) FROM teams t JOIN team_members m ON m.team_id=t.id JOIN instances i ON i.id=m.instance_id WHERE t.id=? AND i.id=? AND t.status='deleting' AND m.status='deleting' AND i.status='deleting'`, teamID, instanceID)
+	if err != nil {
+		return false, err
+	}
+	err = row.Scan(&count)
+	return count == 1, err
+}
+
 func ownerTeamCondition(userID int, owner string) (db.Cond, error) {
 	normalized, err := models.NormalizeTeamOwner(owner)
 	if err != nil {

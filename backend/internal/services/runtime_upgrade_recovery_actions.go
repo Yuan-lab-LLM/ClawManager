@@ -96,7 +96,7 @@ func (s *RuntimeUpgradeService) RecoveryInfo(ctx context.Context, id int) (*Runt
 		return info, nil
 	}
 	recoveredCreating := false
-	if status == "creating" && info.Isolated {
+	if status == "creating" && (info.Isolated || details.Rollout.Status == "error") {
 		binding, err := s.bindings.GetByInstanceID(ctx, id)
 		if err != nil {
 			return nil, err
@@ -106,6 +106,8 @@ func (s *RuntimeUpgradeService) RecoveryInfo(ctx context.Context, id int) (*Runt
 			if proofErr == nil && s.verifyRecoverySourceStopped(ctx, prior) == nil {
 				recoveredCreating = true
 			}
+		} else if s.verifiedPendingUpgradeRecovery(ctx, details, id, info.Generation, binding) == nil {
+			recoveredCreating = true
 		}
 	}
 	if status != "error" && status != "running" && status != "stopped" && !recoveredCreating {

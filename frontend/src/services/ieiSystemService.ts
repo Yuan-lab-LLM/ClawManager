@@ -3,6 +3,7 @@ import axios from "axios";
 import {isOwnerSessionEndpoint,isOwnerSessionFailure,OWNER_SESSION_INVALID} from "../lib/ownerReadNotice";
 import type { WorkspaceFileOperations } from "../components/WorkspaceFileManager";
 import type { WorkspaceEntry, WorkspacePreview, WorkspaceSearchResponse } from "../types/workspace";
+import { createWorkbenchService } from "./instanceWorkbenchService";
 
 export interface IEISystemSession {
   owner: string;
@@ -32,6 +33,8 @@ export interface OwnerGrowth {as_of?:string;xp:number;level:number;level_start:n
 export interface OwnerReport {comparison?:Record<string,{status:string;current:number;previous:number;percent:number|null}>;kind:'week'|'month';start:string;end:string;as_of:string;ongoing:boolean;counts:Record<string,number>;previous:Record<string,number>;days:UsageDay[];runtime:{runtime:string;tokens:number;questions:number}[];active_days:number;observed_days:number;instances:number;used_sessions:number;revision:number;saved_revisions:number[];note:string}
 
 export interface IEISystemInstance {
+	runtime_generation?: number;
+	team_id?: number;
 	workspace_available?: boolean;
 	workspace_root?: string;
   id: number;
@@ -129,13 +132,13 @@ export const ieiSystemService = {
     await ieiAPI.delete("/session");
   },
 
-  async listInstances(page = 1, limit = 100): Promise<IEISystemInstanceList> {
-    const response = await ieiAPI.get("/instances", { params: { page, limit } });
+  async listInstances(page = 1, limit = 100, signal?: AbortSignal): Promise<IEISystemInstanceList> {
+    const response = await ieiAPI.get("/instances", { params: { page, limit }, signal });
     return response.data.data;
   },
 
-  async getInstance(id: number): Promise<IEISystemInstance> {
-    const response = await ieiAPI.get(`/instances/${id}`);
+  async getInstance(id: number, signal?: AbortSignal): Promise<IEISystemInstance> {
+    const response = await ieiAPI.get(`/instances/${id}`, { signal });
     return response.data.data.instance;
   },
 
@@ -146,6 +149,10 @@ export const ieiSystemService = {
       { headers: { "Idempotency-Key": idempotencyKey } },
     );
     return response.data.data.operation;
+  },
+
+  async startInstance(id: number): Promise<void> {
+    await ieiAPI.post(`/instances/${id}/start`, {}, { headers: { 'X-Owner-Action': '1' } });
   },
 
   async resetInstance(id: number, idempotencyKey = lifecycleIdempotencyKey()): Promise<IEISystemLifecycleOperation> {
@@ -245,3 +252,4 @@ export const ieiSystemWorkspaceService: WorkspaceFileOperations = {
     });
   },
 };
+export const ownerWorkbenchService = createWorkbenchService(ieiAPI, id => `/instances/${id}/workbench`, { "X-Owner-Action": "1" });

@@ -291,13 +291,7 @@ func (c *teamLifecycleCoordinator) execute(ctx context.Context, op *models.TeamL
 			if e != nil {
 				return e
 			}
-			alreadyStarting := b != nil && b.Generation == i.RuntimeGeneration && (b.State == "creating" || b.State == "starting" || b.State == "running")
-			if i.Status != "running" && !alreadyStarting {
-				if e = c.instances.startInstance(i.ID); e != nil {
-					return e
-				}
-			}
-			return nil
+			return c.startMember(i, b)
 		})
 		release()
 		if err != nil {
@@ -351,6 +345,19 @@ func (c *teamLifecycleCoordinator) execute(ctx context.Context, op *models.TeamL
 		}
 	}
 	return complete, nil
+}
+
+// A failed pending reservation is not a live start. Explicit Team continuation
+// must enter the existing instance retry, which proves publication/stop identity
+// before conditionally resuming the same generation. Live starts keep waiting.
+func (c *teamLifecycleCoordinator) startMember(i *models.Instance, b *models.InstanceRuntimeBinding) error {
+	if i.Status == "running" {
+		return nil
+	}
+	if i.Status == "creating" && b != nil && b.Generation == i.RuntimeGeneration && (b.State == "creating" || b.State == "starting" || b.State == "running") {
+		return nil
+	}
+	return c.instances.startInstance(i.ID)
 }
 
 // Only an existing original-source durable stop can keep the Team operation

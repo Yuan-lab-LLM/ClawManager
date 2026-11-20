@@ -22,6 +22,16 @@ func TestOrphanControllerRetirementPreservesUIDAndTerminalBarrier(t *testing.T) 
 	client := fake.NewSimpleClientset(d, rs, p)
 	svc := &runtimeDeploymentService{client: client}
 	source := &RuntimeOrphanSource{Namespace: "ns", PodName: "old", PodUID: "uid", DeploymentName: d.Name, DeploymentUID: "dep", ReplicaSetName: rs.Name, ReplicaSetUID: "rs", NodeName: "node"}
+	source.SourcePod = &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{RuntimeFaultSandboxProfileAnnotation: RuntimeNFSRootlessProfile}}}
+	if _, err := svc.RetireRuntimeOrphanController(ctx, source, "operation"); err == nil || err.Error() != "orphan recovery sandbox profile changed" {
+		t.Fatalf("accepted changed recovery profile: %v", err)
+	}
+	for _, action := range client.Actions() {
+		if action.GetVerb() == "update" || action.GetVerb() == "patch" || action.GetVerb() == "delete" {
+			t.Fatalf("changed profile caused a write: %s", action.GetVerb())
+		}
+	}
+	source.SourcePod = nil
 	terminal, e := svc.RetireRuntimeOrphanController(ctx, source, "operation")
 	if !errors.Is(e, ErrRuntimeFaultEvictionPending) || terminal {
 		t.Fatalf("unproved terminal accepted %v %v", terminal, e)

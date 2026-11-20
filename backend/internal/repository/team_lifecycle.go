@@ -25,13 +25,13 @@ func ensureTeamLifecycle(ctx context.Context, s db.Session, id int) error {
 	return err
 }
 func readTeamLifecycle(ctx context.Context, s db.Session, id int, lock bool) (*models.TeamLifecycleOperation, error) {
-	q := `SELECT team_id,state,operation_id,desired_state,reason,COALESCE(members_json,JSON_ARRAY()),progress,attempts,error_message,started_at,stopped_at FROM team_runtime_lifecycle WHERE team_id=?`
+	q := `SELECT team_id,state,operation_id,desired_state,reason,COALESCE(members_json,JSON_ARRAY()),progress,attempts,error_message,started_at,stopped_at,fault_recovery_operation_id FROM team_runtime_lifecycle WHERE team_id=?`
 	if lock {
 		q += " FOR UPDATE"
 	}
 	v := &models.TeamLifecycleOperation{}
 	var raw []byte
-	err := teamQueryRow(ctx, s, q, id).Scan(&v.TeamID, &v.State, &v.OperationID, &v.DesiredState, &v.Reason, &raw, &v.Progress, &v.Attempts, &v.Error, &v.StartedAt, &v.StoppedAt)
+	err := teamQueryRow(ctx, s, q, id).Scan(&v.TeamID, &v.State, &v.OperationID, &v.DesiredState, &v.Reason, &raw, &v.Progress, &v.Attempts, &v.Error, &v.StartedAt, &v.StoppedAt, &v.FaultRecoveryOperationID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -50,6 +50,12 @@ func (r *TeamLifecycleRepository) Get(ctx context.Context, id int) (*models.Team
 	v, err := readTeamLifecycle(ctx, r.sess, id, false)
 	if err != nil || v == nil || v.State != "running" {
 		return v, err
+	}
+	if v.FaultRecoveryOperationID != "" {
+		v.State = "recovery_required"
+		v.Error = "正在核实成员的旧运行环境并恢复服务"
+		v.CanStart, v.CanStop = false, false
+		return v, nil
 	}
 	// Completed Start is historical evidence, not permanent member readiness.
 	// Keep the operation ledger unchanged; expose a repair action for explicit
@@ -77,7 +83,7 @@ func RequireTeamRunning(ctx context.Context, s db.Session, id int) error {
 	if err != nil {
 		return err
 	}
-	if v == nil || v.State != "running" {
+	if v == nil || v.State != "running" || v.FaultRecoveryOperationID != "" {
 		return ErrTeamNotRunning
 	}
 	return nil
@@ -246,7 +252,12 @@ func (r *TeamLifecycleRepository) RequestForTimeout(ctx context.Context, id int,
 	if reason == "idle_timeout" && timeout < time.Second {
 		return nil, fmt.Errorf("idle timeout must be at least one second")
 	}
-	err := r.sess.Tx(func(s db.Session) error {
+	err := r.sess.Tx(func(s db.Session) (requestErr error) {
+		defer func() {
+			if requestErr == nil && target == "running" && reason == "manual" {
+				requestErr = publishExplicitTeamStartIntent(ctx, s, id)
+			}
+		}()
 		// Lock instance rows first, matching model admission's lock order.
 		rows, e := s.SQL().QueryContext(ctx, `SELECT i.id FROM instances i JOIN team_members m ON m.instance_id=i.id WHERE m.team_id=? ORDER BY i.id FOR UPDATE`, id)
 		if e != nil {
@@ -273,6 +284,9 @@ func (r *TeamLifecycleRepository) RequestForTimeout(ctx context.Context, id int,
 		}
 		if v == nil {
 			return fmt.Errorf("Team not found")
+		}
+		if v.FaultRecoveryOperationID != "" {
+			return fmt.Errorf("团队正在恢复异常成员，请等待原操作完成")
 		}
 		var teamStatus string
 		if e = teamQueryRow(ctx, s, `SELECT status FROM teams WHERE id=? FOR UPDATE`, id).Scan(&teamStatus); e != nil {

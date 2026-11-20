@@ -35,7 +35,7 @@ func (s *instanceService) resumeUnpublishedV2Start(ctx context.Context, instance
 	if pod == nil || pod.State != "ready" || pod.Draining || pod.RuntimeType != runtimeType || strings.TrimSpace(stringValue(pod.AgentEndpoint)) == "" || strings.TrimSpace(stringValue(pod.PodUID)) == "" {
 		return false, nil
 	}
-	if err := client.canRetryPendingGateway(ctx, *pod.AgentEndpoint, RuntimeAgentCreateGatewayRequest{InstanceID: instance.ID, UserID: instance.UserID, Generation: instance.RuntimeGeneration, AgentType: runtimeType, PodUID: *pod.PodUID}); err != nil {
+	if err := client.canRetryPendingGateway(ctx, *pod.AgentEndpoint, RuntimeAgentCreateGatewayRequest{InstanceID: instance.ID, UserID: instance.UserID, Generation: instance.RuntimeGeneration, AgentType: runtimeType, PodUID: *pod.PodUID, GatewayPort: binding.GatewayPort}); err != nil {
 		// Published or uncertain starts retain the existing confirmed teardown
 		// path; a failed proof never permits discarding the pending binding.
 		return false, nil

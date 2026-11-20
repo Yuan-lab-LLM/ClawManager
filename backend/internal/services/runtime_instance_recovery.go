@@ -94,6 +94,10 @@ func (s *RuntimeScheduler) reconcileInstanceRecoveryLocked(ctx context.Context, 
 		return true, nil
 	}
 	reason, failed := runtimeRecoveryFailureReason(instance, binding)
+	pendingRecovery := binding != nil && ownsPendingStartRecovery(instance, *binding, state)
+	if pendingRecovery {
+		reason, failed = repository.PendingPublishedStartRecoveryReason, true
+	}
 	if !failed {
 		verified, verifyErr := s.nativeRecoveryCandidate(ctx, instance, binding, state)
 		if verifyErr != nil {
@@ -142,7 +146,17 @@ func (s *RuntimeScheduler) reconcileInstanceRecoveryLocked(ctx context.Context, 
 		return true, nil
 	}
 	if binding != nil {
-		if err = s.confirmRecoverySourceStopped(ctx, instance, binding); err != nil {
+		if pendingRecovery {
+			var verified bool
+			verified, err = s.verifyPendingPublishedFailure(ctx, instance, *binding, true)
+			if err == nil && !verified {
+				err = fmt.Errorf("published startup failure is no longer verified")
+			}
+		}
+		if err == nil {
+			err = s.confirmRecoverySourceStopped(ctx, instance, binding)
+		}
+		if err != nil {
 			if errors.Is(err, errRuntimeRecoveryPermanentFailure) {
 				next.Reason = runtimeRecoveryPermanentReason
 				next.NextRetryAt = nil
@@ -223,7 +237,7 @@ func (s *RuntimeScheduler) confirmRecoverySourceStopped(ctx context.Context, ins
 	}
 	if reader, ok := s.agentClient.(interface {
 		GatewayState(context.Context, string, string) (*RuntimeAgentGatewayState, error)
-	}); ok && !legacyNativeReset {
+	}); ok && !legacyNativeReset && !pendingPublishedStart(instance, binding) {
 		fresh, readErr := reader.GatewayState(ctx, strings.TrimSpace(*pod.AgentEndpoint), binding.GatewayID)
 		if readErr != nil && !errors.Is(readErr, ErrRuntimeAgentNotFound) && !errors.Is(readErr, ErrRuntimeAgentUnsupported) {
 			return fmt.Errorf("recovery source state is unreadable: %w", readErr)

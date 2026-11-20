@@ -1,4 +1,5 @@
 import React, { lazy, Suspense } from 'react';
+import NorthboundPortalTheme from '../components/NorthboundPortalTheme';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from '../contexts/AuthContext';
 import { useI18n } from '../contexts/I18nContext';
@@ -163,9 +164,13 @@ function AppRoutes() {
         }
       />
       <Route path="/share/:code" element={<SharedInstancePage />} />
-      <Route path="/ieisystem/list-instances" element={<IEISystemListInstancesPage />} />
-      <Route path="/ieisystem/instances/:id" element={<IEISystemInstancePage />} />
-      <Route path="/ieisystem/teams/:id" element={<IEISystemTeamPage />} />
+      <Route element={<NorthboundPortalTheme />}>
+        <Route element={<IEISystemListInstancesPage />}>
+          <Route path="/ieisystem/list-instances" element={null} />
+          <Route path="/ieisystem/instances/:id" element={<IEISystemInstancePage />} />
+          <Route path="/ieisystem/teams/:id" element={<IEISystemTeamPage />} />
+        </Route>
+      </Route>
 
       {/* User Routes */}
       <Route

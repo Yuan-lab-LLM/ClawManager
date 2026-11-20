@@ -9,7 +9,7 @@ import (
 )
 
 func TestStoppedRecoveryCalicoRequiresUniqueRetainedHostAllocation(t *testing.T) {
-	for _, change := range []string{"none", "overlap", "deleted", "deleting", "new-era", "pending", "node", "name", "cidr", "uid", "type"} {
+	for _, change := range []string{"none", "legacy-no-type", "empty-type", "overlap", "deleted", "deleting", "new-era", "pending", "node", "name", "cidr", "uid", "type"} {
 		t.Run(change, func(t *testing.T) {
 			ip, node := "10.244.235.238", "k8s-master"
 			source := models.RuntimePod{PodIP: &ip, NodeName: &node, CreatedAt: time.Now().Add(-time.Minute)}
@@ -18,7 +18,8 @@ func TestStoppedRecoveryCalicoRequiresUniqueRetainedHostAllocation(t *testing.T)
 			block.Spec.Node = node
 			block.Spec.State = "confirmed"
 			block.Spec.Deleted = "false"
-			block.Spec.Type = "host"
+			host := "host"
+			block.Spec.Type = &host
 			switch change {
 			case "deleted":
 				block.Spec.Deleted = "true"
@@ -37,15 +38,21 @@ func TestStoppedRecoveryCalicoRequiresUniqueRetainedHostAllocation(t *testing.T)
 				block.Spec.CIDR = "10.244.235.200/26"
 			case "uid":
 				block.UID = ""
+			case "legacy-no-type":
+				block.Spec.Type = nil
+			case "empty-type":
+				empty := ""
+				block.Spec.Type = &empty
 			case "type":
-				block.Spec.Type = "virtual"
+				virtual := "virtual"
+				block.Spec.Type = &virtual
 			}
 			blocks := []recoveryCalicoAffinity{block}
 			if change == "overlap" {
 				blocks = append(blocks, block)
 			}
 			n, identity, err := resolveCalicoRecoveryNode(source, []corev1.Node{{ObjectMeta: metav1.ObjectMeta{Name: node, UID: "node-uid"}}}, blocks)
-			if change == "none" {
+			if change == "none" || change == "legacy-no-type" {
 				if err != nil || n == nil || identity == "" {
 					t.Fatalf("valid allocation rejected: %v", err)
 				}

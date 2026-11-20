@@ -1,10 +1,13 @@
 import { allowBrowserInstance } from "../../lib/browserOrigin";
 import axios from "axios";
-import { ArrowLeft, Maximize2, Minimize2, PanelRightClose, PanelRightOpen, RefreshCw, RotateCw, ShieldAlert } from "lucide-react";
+import { Maximize2, Minimize2, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Power, RefreshCw, RotateCw, ShieldAlert } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useLocation, useParams } from "react-router-dom";
-import { ownerOverviewURL, ownerTeamOverviewURL } from "../../lib/ownerPortalNavigation";
-import { WorkspaceFileManager } from "../../components/WorkspaceFileManager";
+import { useLocation, useNavigate, useOutletContext, useParams } from "react-router-dom";
+import { connectOwnerInstance } from "../../lib/ownerInstanceStart";
+import type { OwnerWorkspaceOutlet } from "../../lib/ownerPortalNavigation";
+import ConfirmDialog from "../../components/ConfirmDialog";
+import { ScopedInstanceWorkbench } from "../../components/workbench/ScopedInstanceWorkbench";
+import "../../components/teams/team-workspace-tools.css";
 import { useExpiringResourceRenewal } from "../../hooks/useExpiringResourceRenewal";
 import { useOwnerActivity } from "../../hooks/useOwnerActivity";
 import { useRuntimeCertificateTrust } from "../../hooks/useRuntimeCertificateTrust";
@@ -14,6 +17,7 @@ import { prepareOpenClawControlUIStorage } from "../../lib/openclawControlStorag
 import {
   ieiSystemService,
   ieiSystemWorkspaceService,
+  ownerWorkbenchService,
   type IEISystemInstance,
   type IEISystemInstanceAccess,
 } from "../../services/ieiSystemService";
@@ -54,11 +58,19 @@ function instanceDisplayName(instance: IEISystemInstance) {
 
 export default function IEISystemInstancePage() {
   const { id = "" } = useParams<{ id: string }>();
-  const instanceID = Number(id);
+  return <OwnerInstanceWorkspace key={id} instanceID={Number(id)} />;
+}
+
+function OwnerInstanceWorkspace({ instanceID }: { instanceID: number }) {
   const location = useLocation();
-  const returnSearch = location.state?.portalReturnSearch;
-  const returnTeamID = Number(location.state?.portalReturnTeamID);
-  const listReturnURL = Number.isSafeInteger(returnTeamID) && returnTeamID>0 ? ownerTeamOverviewURL(returnTeamID,typeof returnSearch==='string'?returnSearch:'') : ownerOverviewURL(instanceID,typeof returnSearch==='string'?returnSearch:'');
+  const navigate = useNavigate();
+  const { reportInstance } = useOutletContext<OwnerWorkspaceOutlet>();
+  const startRequested = location.state?.startStopped === true;
+  const startIntentRef = useRef(false);
+  const firstOpen = useRef(true);
+  const clearStartIntentRef = useRef(() => {});
+  clearStartIntentRef.current = () => navigate(location.pathname + location.search, { replace: true, state: { ...location.state, startStopped: false } });
+  const [startInProgress, setStartInProgress] = useState(false);
   const frameContainerRef = useRef<HTMLElement | null>(null);
   const [instance, setInstance] = useState<IEISystemInstance | null>(null);
   const [access, setAccess] = useState<IEISystemInstanceAccess | null>(null);
@@ -67,8 +79,14 @@ export default function IEISystemInstancePage() {
   const [runtimeError, setRuntimeError] = useState<string | null>(null);
   const requestRef = useRef(0);
   const [frameVersion, setFrameVersion] = useState(0);
-  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [nativeFullscreen, setNativeFullscreen] = useState(false);
+  const [layoutFullscreen, setLayoutFullscreen] = useState(false);
+  const [directoryVisible, setDirectoryVisible] = useState(true);
   const [workspaceVisible, setWorkspaceVisible] = useState(true);
+  const forcedFullscreen = nativeFullscreen || layoutFullscreen;
+  const directoryShown = directoryVisible && !forcedFullscreen;
+  const workspaceShown = workspaceVisible && !forcedFullscreen;
+  const isFullscreen = !directoryShown && !workspaceShown;
   const recoveryAttempts = useRef(0);
   const recoveryInFlight = useRef(false);
   const recoveryTimer = useRef<number | null>(null);
@@ -78,7 +96,7 @@ export default function IEISystemInstancePage() {
   const [restartNotice, setRestartNotice] = useState<string | null>(null);
   const [restartError, setRestartError] = useState<string | null>(null);
   const mountedRef = useRef(true);
-  const {onFrameLoad,activityNote}=useOwnerActivity(instanceID,instance?.status==='running'&&!restartInProgress);
+  const {onFrameLoad}=useOwnerActivity(instanceID,instance?.status==='running'&&!restartInProgress&&!startInProgress);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -109,8 +127,14 @@ export default function IEISystemInstancePage() {
       if (request !== requestRef.current || !mountedRef.current) return;
       setInstance(nextInstance);
       setAccess(null);
+      const requestStart = startIntentRef.current;
       try {
-        const nextAccess = await ieiSystemService.generateAccess(instanceID);
+        startIntentRef.current = false;
+        if (requestStart) clearStartIntentRef.current();
+        setStartInProgress(requestStart || nextInstance.status === 'creating');
+        const nextAccess = await connectOwnerInstance(nextInstance, requestStart, ieiSystemService,
+          observed => setInstance(observed),
+          () => request === requestRef.current && mountedRef.current);
         if (request !== requestRef.current || !mountedRef.current) return;
         setAccess(nextAccess);
         setFrameVersion((version) => version + 1);
@@ -123,7 +147,7 @@ export default function IEISystemInstancePage() {
           const accessCode = axios.isAxiosError(accessError) ? accessError.response?.data?.error_code : undefined;
           setRuntimeError(accessCode === "runtime_access_not_configured"
             ? "OpenCode 访问入口尚未正确配置，请联系管理员。无需重启实例。"
-            : nextInstance.status === "stopped" ? "实例已停止，运行界面暂不可用。" : nextInstance.status === "error" ? "实例运行异常，暂时无法连接运行界面。" : "暂时无法连接运行界面，请稍后重新连接。");
+            : requestStart || nextInstance.status === 'creating' ? errorMessage(accessError, '实例启动未完成，请稍后刷新查看。') : nextInstance.status === "stopped" ? "实例已停止，可点击“启动实例”恢复使用，原会话和文件已保留。" : nextInstance.status === "error" ? "实例运行异常，暂时无法连接运行界面。" : "暂时无法连接运行界面，请稍后重新连接。");
         }
       }
     } catch (openError) {
@@ -132,7 +156,7 @@ export default function IEISystemInstancePage() {
       setAccess(null);
       setError(errorMessage(openError));
     } finally {
-      if (request === requestRef.current && mountedRef.current) setLoading(false);
+      if (request === requestRef.current && mountedRef.current) { setLoading(false); setStartInProgress(false); }
     }
   }, [instanceID]);
 
@@ -176,17 +200,25 @@ export default function IEISystemInstancePage() {
   }, [recoverRuntimeConnection]);
 
   useEffect(() => {
+    if (instance?.id === instanceID) reportInstance(instance);
+  }, [instance, instanceID, reportInstance]);
+
+  useEffect(() => {
+    if (!firstOpen.current && !startRequested) return;
     const timer = window.setTimeout(() => {
+      firstOpen.current = false;
+      if (startRequested) startIntentRef.current = true;
       void openInstance();
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [openInstance]);
+  }, [openInstance, startRequested]);
 
   const renewAccess = useCallback(async () => {
+    const request = requestRef.current;
     await ieiSystemService.refreshSession();
     const nextAccess = await ieiSystemService.generateAccess(instanceID);
     await refreshDedicatedRuntimeCookie(resolveEmbedUrl(nextAccess.access_url));
-    if (!mountedRef.current) return;
+    if (!mountedRef.current || request !== requestRef.current) return;
     // Updating the iframe URL would reload the running agent UI. The fresh
     // cookie is installed in the background, so keep the existing src while
     // advancing the local expiry and access metadata.
@@ -216,7 +248,7 @@ export default function IEISystemInstancePage() {
   }, []);
 
   useEffect(() => {
-    const handleFullscreen = () => setIsFullscreen(document.fullscreenElement === frameContainerRef.current);
+    const handleFullscreen = () => setNativeFullscreen(!!frameContainerRef.current && document.fullscreenElement === frameContainerRef.current);
     document.addEventListener("fullscreenchange", handleFullscreen);
     return () => document.removeEventListener("fullscreenchange", handleFullscreen);
   }, []);
@@ -242,11 +274,27 @@ export default function IEISystemInstancePage() {
     requiresRuntimeCertificateTrust,
   );
 
-  const handleFullscreen = () => {
+  const handleFullscreen = async () => {
     const element = frameContainerRef.current;
     if (!element) return;
-    if (document.fullscreenElement === element) void document.exitFullscreen();
-    else void element.requestFullscreen().catch(() => undefined);
+    if (document.fullscreenElement === element) {
+      await document.exitFullscreen();
+    } else if (layoutFullscreen) {
+      setLayoutFullscreen(false);
+    } else if (isFullscreen) {
+      setDirectoryVisible(true);
+      setWorkspaceVisible(true);
+    } else {
+      try {
+        if (document.fullscreenEnabled && element.requestFullscreen) {
+          await element.requestFullscreen();
+          return;
+        }
+      } catch {
+        // A browser can deny native fullscreen while still allowing the workspace to fill the page.
+      }
+      setLayoutFullscreen(true);
+    }
   };
 
   const waitForRestartRecovery = useCallback(async (operationID: string) => {
@@ -303,7 +351,7 @@ export default function IEISystemInstancePage() {
 
   if (loading && (!instance || instance.id !== instanceID)) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-slate-100 text-sm text-slate-600">
+      <main className="portal-unified-route-state flex items-center justify-center bg-slate-100 text-sm text-slate-600">
         <RefreshCw className="mr-2 h-5 w-5 animate-spin" />
         正在验证并进入实例…
       </main>
@@ -312,14 +360,11 @@ export default function IEISystemInstancePage() {
 
   if (!instance || instance.id !== instanceID || error) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-slate-100 p-6">
+      <main className="portal-unified-route-state flex items-center justify-center bg-slate-100 p-6">
         <section className="w-full max-w-md rounded-xl border border-red-200 bg-white p-6 text-center shadow-sm">
           <h1 className="text-lg font-semibold text-slate-950">实例不可访问</h1>
           <p className="mt-2 text-sm leading-6 text-slate-600">{error ?? "访问验证未通过。"}</p>
           <div className="mt-5 flex justify-center gap-2">
-            <Link className="app-button-secondary" to={listReturnURL}>
-              <ArrowLeft className="h-4 w-4" /> 返回我的总览
-            </Link>
             <button type="button" className="app-button-primary" onClick={() => void openInstance()}>
               <RefreshCw className="h-4 w-4" /> 重试
             </button>
@@ -333,73 +378,61 @@ export default function IEISystemInstancePage() {
   const isWorkBuddyLite = instance.type.trim().toLowerCase() === "workbuddy" && instance.runtime_type === "gateway";
 
   return (
-    <main className="flex h-screen min-h-[560px] flex-col overflow-hidden bg-slate-100">
-      <header className="flex h-14 shrink-0 items-center justify-between gap-4 border-b border-slate-200 bg-white px-4">
-        <div className="flex min-w-0 items-center gap-3">
-          <Link className="cm-icon-button shrink-0" aria-label="返回我的总览" title="返回我的总览" to={listReturnURL}>
-            <ArrowLeft className="h-4 w-4" />
-          </Link>
-          <div className="min-w-0">
-            <h1 className="truncate text-base font-semibold text-slate-950">{instanceDisplayName(instance)}</h1>
-            <p className="truncate text-[10px] text-slate-500" title={activityNote}>浪潮信息安全访问 · {instance.owner} · {activityNote}</p>
-          </div>
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
-          <button
-            type="button"
-            className="app-button-secondary"
-            disabled={restartInProgress || loading || !["running", "error"].includes(instance.status.trim().toLowerCase())}
-            onClick={() => {
-              setRestartError(null);
-              setRestartDialogOpen(true);
-            }}
-          >
-            <RotateCw className={`h-4 w-4 ${restartInProgress ? "animate-spin" : ""}`} />
-            {restartInProgress ? "正在重启" : "重启实例"}
-          </button>
-          <span className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700">
-            <span className="h-2 w-2 rounded-full bg-emerald-400" />
-            已验证
-          </span>
-        </div>
-      </header>
-
-      {(restartNotice || restartError) && (
-        <div
-          className={`shrink-0 border-b px-4 py-2 text-sm ${
-            restartError
-              ? "border-red-200 bg-red-50 text-red-700"
-              : "border-amber-200 bg-amber-50 text-amber-800"
-          }`}
-          role="status"
-        >
-          <div className="flex items-center gap-2">
-            <RotateCw className={`h-4 w-4 shrink-0 ${restartInProgress ? "animate-spin" : ""}`} />
-            <span>{restartError ?? restartNotice}</span>
-          </div>
-        </div>
-      )}
-
-      <section className={`grid min-h-0 flex-1 gap-4 p-4 ${workspaceVisible ? 'max-xl:grid-rows-[minmax(420px,1fr)_minmax(360px,0.8fr)] xl:grid-cols-[minmax(0,1fr)_minmax(360px,28rem)]' : 'grid-cols-1'}`}>
+    <main className="portal-unified-instance flex min-h-0 flex-col overflow-hidden" data-directory-collapsed={!directoryShown}>
+      <section className="portal-unified-instance-panes" data-tools={workspaceShown}>
         <section
           ref={frameContainerRef}
           className="cm-surface relative flex min-h-0 min-w-0 flex-col overflow-hidden bg-white"
-          style={isFullscreen ? { height: "100vh", width: "100vw", borderRadius: 0 } : undefined}
+          style={nativeFullscreen ? { height: "100dvh", width: "100vw", borderRadius: 0 } : undefined}
         >
-          <div className="flex h-12 shrink-0 items-center justify-between border-b border-slate-200 px-3">
-            <span className="min-w-0 truncate text-sm font-medium text-slate-950">{instanceDisplayName(instance)}</span>
-            <div className="flex shrink-0 items-center gap-2">
-              <button type="button" className="cm-icon-button" title={workspaceVisible ? '收起文件区' : '展开文件区'} aria-expanded={workspaceVisible} aria-controls="iei-instance-workspace" onClick={() => setWorkspaceVisible(value => !value)}>
-                {workspaceVisible ? <PanelRightClose className="h-4 w-4"/> : <PanelRightOpen className="h-4 w-4"/>}
+          <header className="portal-instance-toolbar">
+            <div className="portal-instance-toolbar-title">
+              <button type="button" className="cm-icon-button portal-instance-pane-toggle" title={directoryShown ? "收起左侧工作区" : "展开左侧工作区"} aria-expanded={directoryShown} aria-controls="owner-workspace-rail" disabled={forcedFullscreen} onClick={() => setDirectoryVisible(value => !value)}>
+                {directoryShown ? <PanelLeftClose className="h-4 w-4" /> : <PanelLeftOpen className="h-4 w-4" />}
               </button>
-              <button type="button" className="cm-icon-button" title="刷新访问" onClick={() => void openInstance()}>
+              <h1 className="min-w-0 truncate text-sm font-semibold" title={instanceDisplayName(instance)}>{instanceDisplayName(instance)}</h1>
+            </div>
+            <div className="portal-instance-toolbar-actions">
+              <button type="button" className="cm-icon-button" title="刷新访问" aria-label="刷新访问" disabled={startInProgress || restartInProgress} onClick={() => void openInstance()}>
                 <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
               </button>
-              <button type="button" className="cm-icon-button" title={isFullscreen ? "退出全屏" : "全屏"} onClick={handleFullscreen}>
+              <button
+                type="button"
+                className="cm-icon-button portal-instance-restart"
+                title={restartInProgress ? "正在重启" : "重启实例"}
+                aria-label={restartInProgress ? "正在重启" : "重启实例"}
+                aria-haspopup="dialog"
+                disabled={restartInProgress || loading || !["running", "error"].includes(instance.status.trim().toLowerCase())}
+                onClick={() => {
+                  setRestartError(null);
+                  setRestartDialogOpen(true);
+                }}
+              >
+                <Power className="h-4 w-4" />
+              </button>
+              <button type="button" className="cm-icon-button" title={isFullscreen ? "退出全屏" : "全屏"} aria-pressed={isFullscreen} onClick={() => void handleFullscreen()}>
                 {isFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
               </button>
+              <button type="button" className="cm-icon-button portal-instance-pane-toggle" title={workspaceShown ? "收起文件区" : "展开文件区"} aria-expanded={workspaceShown} aria-controls="iei-instance-workspace" disabled={forcedFullscreen} onClick={() => setWorkspaceVisible(value => !value)}>
+                {workspaceShown ? <PanelRightClose className="h-4 w-4" /> : <PanelRightOpen className="h-4 w-4" />}
+              </button>
             </div>
-          </div>
+          </header>
+          {(restartNotice || restartError) && (
+            <div
+              className={`shrink-0 border-b px-4 py-2 text-sm ${
+                restartError
+                  ? "border-red-200 bg-red-50 text-red-700"
+                  : "border-amber-200 bg-amber-50 text-amber-800"
+              }`}
+              role="status"
+            >
+              <div className="flex items-center gap-2">
+                <RotateCw className={`h-4 w-4 shrink-0 ${restartInProgress ? "animate-spin" : ""}`} />
+                <span>{restartError ?? restartNotice}</span>
+              </div>
+            </div>
+          )}
           {restartInProgress && (
             <div className="absolute inset-x-0 bottom-0 top-12 z-20 flex items-center justify-center bg-white/95 px-6 text-center backdrop-blur-sm">
               <div>
@@ -409,11 +442,18 @@ export default function IEISystemInstancePage() {
               </div>
             </div>
           )}
-          {runtimeError ? (
+          {startInProgress ? (
+            <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center" role="status">
+              <RefreshCw className="h-8 w-8 animate-spin text-blue-600" />
+              <p className="font-semibold">实例正在启动…</p>
+              <p className="text-sm text-slate-600">就绪后会自动连接，原会话和文件保留。</p>
+            </div>
+          ) : runtimeError ? (
             <div className="flex flex-1 flex-col items-center justify-center gap-4 p-6 text-center" role="status">
               <ShieldAlert className="h-9 w-9 text-amber-500" />
               <p className="text-base font-semibold text-slate-900">{runtimeError}</p>
               <p className="max-w-md text-sm leading-6 text-slate-600">工作区独立于运行界面加载。可在右侧检查并修改文件；保存后如需生效，请确认配置并手动重启。</p>
+              {instance.status === 'stopped' && !instance.team_id && <button className="app-button-primary" disabled={loading || startInProgress} onClick={() => { startIntentRef.current = true; void openInstance(); }}>启动实例</button>}
               <button className="app-button-secondary" disabled={loading} onClick={() => void openInstance()}>重新连接</button>
             </div>
           ) : frameSrc && allowBrowserInstance(instanceID, access ?? undefined) ? (
@@ -452,19 +492,33 @@ export default function IEISystemInstancePage() {
               {checkingCertificate ? "正在检查 HTTPS 证书…" : "正在进入实例…"}
             </div>
           )}
+          <ConfirmDialog
+            open={restartDialogOpen}
+            title="确认重启实例？"
+            message={`将重启“${instanceDisplayName(instance)}”。当前连接和运行中的任务可能中断，已保存的工作区及持久化数据会保留。`}
+            confirmLabel="确认重启"
+            cancelLabel="取消"
+            destructive
+            onConfirm={() => void handleRestart()}
+            onCancel={() => setRestartDialogOpen(false)}
+          />
         </section>
 
-        <div id="iei-instance-workspace" className={workspaceVisible ? 'min-h-0 min-w-0' : 'hidden'}>
+        <div id="iei-instance-workspace" className={workspaceShown ? 'min-h-0 min-w-0' : 'hidden'}>
         {canShowWorkspace ? (
-          <div className="min-h-0 min-w-0">
-            <WorkspaceFileManager
+          <div className="owner-instance-workbench h-full min-h-[360px] min-w-0">
+            <ScopedInstanceWorkbench
               instanceId={instance.id}
-              key={instance.id}
+              key={`iei:${instance.owner}:${instance.id}`}
+              scope={`iei:${instance.owner}`}
+              runtimeGeneration={instance.runtime_generation ?? 0}
+              isRunning={instance.status === "running" && !restartInProgress && !startInProgress}
+              visible={workspaceShown}
+              presentation="portal"
               initialPath={isWorkBuddyLite ? "/home" : (instance.workspace_root ?? access?.workspace_root) === "/config" ? "/config" : undefined}
-              service={isWorkBuddyLite ? workBuddyWorkspaceService : ieiSystemWorkspaceService}
-              workspaceKey={`iei:${instance.owner}:${instance.id}`}
+              workspace={isWorkBuddyLite ? workBuddyWorkspaceService : ieiSystemWorkspaceService}
+              service={ownerWorkbenchService}
               canWrite={!restartInProgress && !["creating", "deleting"].includes(instance.status)}
-              localeOverride="zh"
             />
           </div>
         ) : (
@@ -475,29 +529,6 @@ export default function IEISystemInstancePage() {
         </div>
       </section>
 
-      {restartDialogOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4" role="presentation">
-          <section
-            className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-6 shadow-2xl"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="iei-restart-title"
-          >
-            <h2 id="iei-restart-title" className="text-lg font-semibold text-slate-950">确认重启实例？</h2>
-            <p className="mt-3 text-sm leading-6 text-slate-600">
-              重启期间实例会暂时不可访问，当前运行中的任务和会话可能中断；工作区及持久化数据不会删除。
-            </p>
-            <div className="mt-6 flex justify-end gap-2">
-              <button type="button" className="app-button-secondary" onClick={() => setRestartDialogOpen(false)}>
-                取消
-              </button>
-              <button type="button" className="app-button-primary" onClick={() => void handleRestart()}>
-                <RotateCw className="h-4 w-4" /> 确认重启
-              </button>
-            </div>
-          </section>
-        </div>
-      )}
     </main>
   );
 }

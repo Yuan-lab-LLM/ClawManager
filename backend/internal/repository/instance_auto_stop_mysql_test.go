@@ -97,6 +97,13 @@ func idleStopMySQL(t *testing.T) db.Session {
 			}
 		}
 	}
+	faultGuard, e := os.ReadFile("../db/migrations/112_add_team_fault_recovery_guard.sql")
+	if e != nil {
+		t.Fatal(e)
+	}
+	if _, e = s.SQL().Exec(string(faultGuard)); e != nil {
+		t.Fatal(e)
+	}
 	raw, err := os.ReadFile("../db/migrations/096_add_instance_auto_stop.sql")
 	extra, extraErr := os.ReadFile("../db/migrations/097_add_instance_auto_stop_scan.sql")
 	if extraErr != nil {

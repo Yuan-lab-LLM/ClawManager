@@ -73,7 +73,7 @@ export function MemberInfoDialog({ member, team, renderDetails, onClose }: { mem
     dialog?.showModal();
     return () => { dialog?.close(); if (trigger?.isConnected && trigger.getClientRects().length) trigger.focus(); };
   }, []);
-  return createPortal(<dialog ref={ref} className="team-member-dialog" data-team-member-dialog aria-labelledby={titleId} onCancel={onClose} onKeyDown={event => {
+  return createPortal(<dialog ref={ref} className="team-member-dialog team-classic-surface" data-team-member-dialog aria-labelledby={titleId} onCancel={onClose} onKeyDown={event => {
     if (event.key !== "Tab") return;
     const controls = [...event.currentTarget.querySelectorAll<HTMLElement>('a[href], button:not([disabled]), input, textarea, select, summary')].filter(node => node.getClientRects().length);
     const first = controls[0], last = controls[controls.length - 1];

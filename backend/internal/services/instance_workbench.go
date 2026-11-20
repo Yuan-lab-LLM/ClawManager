@@ -16,8 +16,12 @@ import (
 var (
 	ErrWorkbenchDenied      = errors.New("workbench access denied")
 	ErrWorkbenchStale       = errors.New("instance environment changed; refresh the workbench")
-	ErrWorkbenchUnavailable = errors.New("start the instance to use the workbench")
+	ErrWorkbenchUnavailable = errors.New("runtime workbench is temporarily unavailable")
+	ErrWorkbenchStopped     = errors.New("start the instance to use the workbench")
+	ErrWorkbenchTimeout     = errors.New("runtime workbench did not respond before the deadline")
 )
+
+const workbenchCapabilitiesBudget = 4 * time.Second
 
 type WorkbenchRequest struct {
 	workbench.PreviewScope
@@ -68,6 +72,9 @@ func (s *InstanceWorkbenchService) resolve(ctx context.Context, userID int, admi
 		return target, ErrWorkbenchDenied
 	}
 	if instance.Status != "running" {
+		if instance.Status == "stopped" || instance.Status == "sleeping" {
+			return target, ErrWorkbenchStopped
+		}
 		return target, ErrWorkbenchUnavailable
 	}
 	if generation != 0 && generation != instance.RuntimeGeneration {
@@ -113,9 +120,17 @@ func (s *InstanceWorkbenchService) executeAgent(ctx context.Context, target work
 	if s.agent == nil {
 		return nil, ErrRuntimeAgentUnsupported
 	}
-	ctx, cancel := context.WithTimeout(ctx, 125*time.Second)
+	budget := 125 * time.Second
+	if operation == "capabilities" {
+		budget = workbenchCapabilitiesBudget
+	}
+	ctx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
-	return s.agent.Workbench(ctx, target.endpoint, WorkbenchRequest{PreviewScope: target.scope, Operation: operation, Data: data})
+	result, err := s.agent.Workbench(ctx, target.endpoint, WorkbenchRequest{PreviewScope: target.scope, Operation: operation, Data: data})
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) || errors.Is(err, context.DeadlineExceeded) {
+		return nil, ErrWorkbenchTimeout
+	}
+	return result, err
 }
 func (s *InstanceWorkbenchService) Capabilities(ctx context.Context, userID int, admin bool, instanceID int) (map[string]any, error) {
 	target, err := s.resolve(ctx, userID, admin, instanceID, 0)
@@ -141,7 +156,9 @@ func (s *InstanceWorkbenchService) Capabilities(ctx context.Context, userID int,
 }
 func (s *InstanceWorkbenchService) SetSharedPreviewAccess(access interface {
 	ResolveShortLink(context.Context, string) (*models.InstanceExternalAccess, error)
-}) { s.sharedPreviewAccess = access }
+}) {
+	s.sharedPreviewAccess = access
+}
 func (s *InstanceWorkbenchService) CreatePreview(ctx context.Context, userID int, admin bool, instanceID, generation int, rawURL string) (map[string]any, error) {
 	return s.createPreview(ctx, userID, admin, instanceID, generation, rawURL, nil)
 }

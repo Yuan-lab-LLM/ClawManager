@@ -23,8 +23,19 @@ func (s *RuntimeScheduler) schedulingHeartbeatCutoff() time.Time {
 // Selecting new work is deliberately stricter than destructive heartbeat
 // failover. Never wait for that longer grace period to stop using a dead Pod.
 func (s *RuntimeScheduler) currentOrdinaryRuntimePods(pods, inventory []models.RuntimePod) []models.RuntimePod {
+	return s.currentRuntimePodsForInstance(pods, inventory, 0)
+}
+
+func (s *RuntimeScheduler) currentRuntimePodsForInstance(pods, inventory []models.RuntimePod, instanceID int) []models.RuntimePod {
 	result := make([]models.RuntimePod, 0, len(pods))
 	cutoff := s.schedulingHeartbeatCutoff()
+	scoped := false
+	for _, live := range inventory {
+		if freshRuntimePoolForInstance(live, instanceID) && live.SchedulingEnabled != nil && *live.SchedulingEnabled {
+			scoped = true
+			break
+		}
+	}
 	for _, reported := range pods {
 		// Native slot agents must authenticate the registered Pod identity;
 		// live inventory cannot supply an identity missing from its report.
@@ -43,7 +54,7 @@ func (s *RuntimeScheduler) currentOrdinaryRuntimePods(pods, inventory []models.R
 			reported.KubernetesPodUID, reported.KubernetesReady = live.PodUID, live.KubernetesReady
 			reported.ReadyGatewayPorts = live.ReadyGatewayPorts
 			reported.WorkspaceStorageIdentity = live.WorkspaceStorageIdentity
-			if runtimePodEligibleForOrdinaryScheduling(reported) {
+			if scoped && freshRuntimePoolForInstance(reported, instanceID) && reported.SchedulingEnabled != nil && *reported.SchedulingEnabled || !scoped && runtimePodEligibleForOrdinaryScheduling(reported) {
 				result = append(result, reported)
 			}
 			break
@@ -70,6 +81,10 @@ func ordinaryRuntimeIdentityMatches(reported, live models.RuntimePod) bool {
 }
 
 func (s *RuntimeScheduler) verifyOrdinaryRuntimePod(ctx context.Context, pod models.RuntimePod) error {
+	return s.verifyRuntimePodForInstance(ctx, pod, 0)
+}
+
+func (s *RuntimeScheduler) verifyRuntimePodForInstance(ctx context.Context, pod models.RuntimePod, instanceID int) error {
 	if s.deployments == nil {
 		if requiresConfirmedGatewayStop(s.agentClient) {
 			return fmt.Errorf("%w: slot scheduling requires live Kubernetes Pod inventory", errRuntimeControlPlanePending)
@@ -83,7 +98,7 @@ func (s *RuntimeScheduler) verifyOrdinaryRuntimePod(ctx context.Context, pod mod
 	if latest == nil || !ordinaryRuntimeIdentityMatches(pod, *latest) {
 		return fmt.Errorf("%w: selected Runtime registration changed", errRuntimeControlPlanePending)
 	}
-	current, err := s.verifiedOrdinaryRuntimePods(ctx, pod.RuntimeType, []models.RuntimePod{*latest})
+	current, err := s.verifiedRuntimePodsForInstance(ctx, pod.RuntimeType, []models.RuntimePod{*latest}, instanceID)
 	if err != nil {
 		return fmt.Errorf("%w: verify runtime identity: %v", errRuntimeControlPlanePending, err)
 	}
@@ -94,6 +109,10 @@ func (s *RuntimeScheduler) verifyOrdinaryRuntimePod(ctx context.Context, pod mod
 }
 
 func (s *RuntimeScheduler) verifiedOrdinaryRuntimePods(ctx context.Context, runtimeType string, pods []models.RuntimePod) ([]models.RuntimePod, error) {
+	return s.verifiedRuntimePodsForInstance(ctx, runtimeType, pods, 0)
+}
+
+func (s *RuntimeScheduler) verifiedRuntimePodsForInstance(ctx context.Context, runtimeType string, pods []models.RuntimePod, instanceID int) ([]models.RuntimePod, error) {
 	if s.deployments == nil {
 		if requiresConfirmedGatewayStop(s.agentClient) {
 			return nil, fmt.Errorf("slot scheduling requires live Kubernetes Pod inventory")
@@ -104,7 +123,7 @@ func (s *RuntimeScheduler) verifiedOrdinaryRuntimePods(ctx context.Context, runt
 	if err != nil {
 		return nil, err
 	}
-	return s.currentOrdinaryRuntimePods(pods, inventory), nil
+	return s.currentRuntimePodsForInstance(pods, inventory, instanceID), nil
 }
 
 type freshRuntimePodClaimer interface {

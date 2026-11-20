@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -32,11 +33,14 @@ func (c *runtimeAgentHTTPClient) Workbench(ctx context.Context, endpoint string,
 	client.Timeout = 125 * time.Second
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, ErrWorkbenchUnavailable
+		return nil, workbenchTransportError(err)
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, (2<<20)+1))
-	if err != nil || len(body) > 2<<20 {
+	if err != nil {
+		return nil, workbenchTransportError(err)
+	}
+	if len(body) > 2<<20 {
 		return nil, ErrWorkbenchUnavailable
 	}
 	if resp.StatusCode == 404 || resp.StatusCode == 405 || resp.StatusCode == 501 {
@@ -58,4 +62,12 @@ func (c *runtimeAgentHTTPClient) Workbench(ctx context.Context, endpoint string,
 		return nil, ErrWorkbenchUnavailable
 	}
 	return json.RawMessage(body), nil
+}
+
+func workbenchTransportError(err error) error {
+	var timeout net.Error
+	if errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &timeout) && timeout.Timeout()) {
+		return ErrWorkbenchTimeout
+	}
+	return ErrWorkbenchUnavailable
 }

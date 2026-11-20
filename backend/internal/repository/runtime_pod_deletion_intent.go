@@ -176,5 +176,20 @@ func CheckRuntimePodBindingAdmission(ctx context.Context, tx db.Session, podID i
 	if err := CheckRuntimePodScaleInAdmission(ctx, tx, podID); err != nil {
 		return err
 	}
+	var inPlaceRollouts int
+	row, err = tx.SQL().QueryRowContext(ctx, `
+SELECT COUNT(*) FROM runtime_pods p
+JOIN runtime_rollouts r ON r.runtime_type=p.runtime_type
+WHERE p.id=? AND p.runtime_type IN ('hermes','deepseek-harness')
+  AND r.status IN ('pending','running')`, podID)
+	if err == nil {
+		err = row.Scan(&inPlaceRollouts)
+	}
+	if err != nil {
+		return err
+	}
+	if inPlaceRollouts > 0 {
+		return fmt.Errorf("Runtime binding is fenced during an in-place image rollout")
+	}
 	return CheckRuntimePodDeletionIntent(ctx, tx, namespace, name)
 }

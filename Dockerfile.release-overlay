@@ -22,6 +22,7 @@ COPY --chmod=755 --from=release-binaries /merged-system-backup-controller /usr/l
 COPY --chmod=755 --from=release-binaries /merged-system-backup-artifact /usr/local/bin/system-backup-artifact
 COPY --chmod=755 --from=release-binaries /merged-runtime-eviction-helper /usr/local/bin/runtime-eviction-helper
 COPY --chmod=755 --from=release-binaries /cm-runtime-template-hash-v1.35 /usr/local/bin/cm-runtime-template-hash-v1.35
+COPY --chmod=755 --from=release-binaries /cm-runtime-template-hash-v1.31.14 /usr/local/bin/cm-runtime-template-hash-v1.31.14
 # Clear the previous bundle so missing chunks fail rather than loading stale JS.
 RUN rm -rf /usr/share/nginx/html/*
 COPY --from=release-assets / /usr/share/nginx/html/

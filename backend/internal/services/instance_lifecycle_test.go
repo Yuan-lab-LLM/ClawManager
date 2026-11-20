@@ -27,10 +27,11 @@ func TestLifecycleRejectsConflictingOperationsBeforeReadingOrSaving(t *testing.T
 	defer release()
 	// The nil repository would panic if any conflicting operation reached it.
 	for name, call := range map[string]func() error{
-		"start":       func() error { return s.Start(91234) },
-		"stop":        func() error { return s.Stop(91234) },
-		"restart":     func() error { return s.Restart(91234) },
-		"restart-env": func() error { return s.RestartWithEnvironment(91234, map[string]string{"TEST": "value"}, nil) },
+		"start":         func() error { return s.Start(91234) },
+		"start-stopped": func() error { return s.StartStopped(91234) },
+		"stop":          func() error { return s.Stop(91234) },
+		"restart":       func() error { return s.Restart(91234) },
+		"restart-env":   func() error { return s.RestartWithEnvironment(91234, map[string]string{"TEST": "value"}, nil) },
 	} {
 		t.Run(name, func(t *testing.T) {
 			if err := call(); !errors.Is(err, models.ErrInstanceOperationInProgress) {

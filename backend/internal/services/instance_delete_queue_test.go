@@ -276,8 +276,24 @@ func TestTeamDeleteRetainsSharedResourcesUntilNativeProof(t *testing.T) {
 	repo := &teamRepositoryStub{teamsByID: map[int]*models.Team{team.ID: team}, membersByID: map[int]*models.TeamMember{member.ID: member}}
 	service := &teamService{repo: repo, instanceService: lifecycle}
 	// Nil shared-resource services also prove the failure cannot reach removal.
-	if err := service.DeleteTeam(1, team.ID); err == nil || agent.forced != 1 {
-		t.Fatalf("Team deletion ignored native proof failure: forced=%d err=%v", agent.forced, err)
+	if err := service.DeleteTeam(1, team.ID); err == nil {
+		t.Fatal("Team deletion ignored pending native proof")
+	}
+	deadline := time.Now().Add(time.Second)
+	for {
+		lifecycle.deletionMu.Lock()
+		_, active := lifecycle.deletionsInFlight[instanceID]
+		lifecycle.deletionMu.Unlock()
+		if !active {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("queued member deletion did not finish its proof attempt")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if agent.forced != 1 {
+		t.Fatalf("Team cleanup did not use exactly one native force attempt: %d", agent.forced)
 	}
 	if team.Status != models.TeamStatusDeleting || repo.updatedMember == nil || repo.updatedMember.InstanceID == nil || *repo.updatedMember.InstanceID != instanceID || repo.updatedMember.Status != models.TeamMemberStatusDeleting || instances.byID[instanceID] == nil || bindings.bindings[instanceID] == nil {
 		t.Fatal("Team cleared its member/shared state before confirmed native deletion")
@@ -294,5 +310,44 @@ func TestQueueDeleteRejectsLegacyRuntimeBeforePersistingIntent(t *testing.T) {
 	}
 	if status := repo.byID[77].Status; status != "running" {
 		t.Fatalf("rejected deletion persisted status %q", status)
+	}
+}
+
+type queuedTeamDeletionService struct {
+	teamDeletionInstanceServiceStub
+	queued []int
+}
+
+func (s *queuedTeamDeletionService) QueueDeleteForOwnerTeam(_ int, id int) error {
+	s.queued = append(s.queued, id)
+	return nil
+}
+
+func (s *queuedTeamDeletionService) GetByID(id int) (*models.Instance, error) {
+	return &models.Instance{ID: id, Status: "deleting"}, nil
+}
+
+func TestTeamDeletionQueuesEveryMemberBeforeWaitingForNativeProof(t *testing.T) {
+	first, second := 91786, 91787
+	team := &models.Team{ID: 91786, UserID: 1, Status: models.TeamStatusRunning, ResourceScope: models.TeamScopeCM}
+	members := map[int]*models.TeamMember{
+		1: {ID: 1, TeamID: team.ID, UserID: 1, MemberKey: "leader", InstanceID: &first, Status: models.TeamMemberStatusIdle},
+		2: {ID: 2, TeamID: team.ID, UserID: 1, MemberKey: "worker", InstanceID: &second, Status: models.TeamMemberStatusIdle},
+	}
+	repo := &teamRepositoryStub{teamsByID: map[int]*models.Team{team.ID: team}, membersByID: members}
+	instances := &queuedTeamDeletionService{teamDeletionInstanceServiceStub: teamDeletionInstanceServiceStub{deleteErr: errors.New("termination proof pending")}}
+	service := &teamService{repo: repo, instanceService: instances}
+	if err := service.DeleteTeam(1, team.ID); err == nil {
+		t.Fatal("Team shared resources were released before native proof")
+	}
+	seen := map[int]bool{}
+	for _, id := range instances.queued {
+		seen[id] = true
+	}
+	if !seen[first] || !seen[second] || len(instances.queued) != 2 {
+		t.Fatalf("slow first member prevented peer delete intent: %v", instances.queued)
+	}
+	if team.Status != models.TeamStatusDeleting || len(instances.deleteCalls) != 0 {
+		t.Fatal("unexpected shared cleanup or lost Team deletion fence")
 	}
 }

@@ -754,7 +754,7 @@ func (s *RuntimeUpgradeService) ValidateTargetRuntime(ctx context.Context, rollo
 				return err
 			}
 			endpoint := stringValue(targetPods[index%len(targetPods)].AgentEndpoint)
-			request := RuntimeAgentWorkspaceRequest{RolloutID: strconv.FormatInt(rollout.ID, 10), UserID: candidate.UserID, InstanceID: item.InstanceID, Generation: candidate.Generation, UID: RuntimeLinuxID(item.InstanceID), GID: RuntimeLinuxID(item.InstanceID), RecoveryMode: runtimeUpgradeScopeFromRollout(rollout).RecoveryMode}
+			request := runtimeCompatibilityRequest(rollout, item.InstanceID, candidate.UserID, candidate.Generation)
 			compatibility, err := upgradeAgent.PreflightUpgradeCompatibility(ctx, endpoint, request)
 			if err != nil {
 				return fmt.Errorf("compatibility preflight instance %d: %w", item.InstanceID, err)
@@ -1289,7 +1289,7 @@ func (s *RuntimeUpgradeService) migrateUpgradeItem(ctx context.Context, rollout 
 		state = "quiescing"
 	}
 	if state == "quiescing" {
-		stopped, stopErr := s.stopCandidateGateway(ctx, candidate)
+		stopped, stopErr := s.stopUpgradeMigrationSource(ctx, rollout, candidate)
 		if stopErr != nil {
 			retryState := "compatibility_checked"
 			if stopped {
@@ -1430,7 +1430,8 @@ func (s *RuntimeUpgradeService) candidateForUpgradeItemMode(ctx context.Context,
 	}
 	if binding == nil {
 		recoveryStopped := false
-		if instanceStatus != "stopped" {
+		ownStoppedGeneration := item.SourceGeneration != nil && *item.SourceGeneration == generation && upgradeItemOwnsConfirmedStoppedGateway(item)
+		if instanceStatus != "stopped" && !ownStoppedGeneration {
 			scope := s.upgradeItemRecovery(ctx, item)
 			if scope.allowsRecovery(item.InstanceID) && scope.RecoveryParentID > 0 {
 				prior, err := s.recoveryStoppedSource(ctx, scope.RecoveryParentID, item.InstanceID, generation)
@@ -1478,7 +1479,8 @@ func (s *RuntimeUpgradeService) candidateForUpgradeItemMode(ctx context.Context,
 		}
 		return candidate, nil
 	}
-	if requireStable && instanceStatus != "running" && instanceStatus != "stopped" && !(instanceStatus == "error" && s.upgradeItemRecovery(ctx, item).allowsRecovery(item.InstanceID)) {
+	stablePendingRecovery := instanceStatus == "creating" && s.verifiedPendingUpgradeRecoveryScope(ctx, s.upgradeItemRecovery(ctx, item), item.InstanceID, generation, binding) == nil
+	if requireStable && instanceStatus != "running" && instanceStatus != "stopped" && !(instanceStatus == "error" && s.upgradeItemRecovery(ctx, item).allowsRecovery(item.InstanceID)) && !stablePendingRecovery {
 		return runtimeUpgradeCandidate{}, fmt.Errorf("instance %d runtime state %s is not stable for migration", item.InstanceID, instanceStatus)
 	}
 	candidate.RuntimePodID = &binding.RuntimePodID
@@ -2123,6 +2125,18 @@ func runtimeDeploymentPodsFor(ctx context.Context, provider RuntimeDeploymentInv
 }
 
 func (s *RuntimeUpgradeService) InstanceBlocked(ctx context.Context, runtimeType string, instanceID int) bool {
+	if s != nil && s.sess != nil {
+		if rt, ok := NormalizeV2RuntimeType(runtimeType); ok {
+			var count int
+			row, err := s.sess.SQL().QueryRowContext(ctx, `SELECT COUNT(*) FROM runtime_rollouts r WHERE r.runtime_type=? AND r.phase=? AND (r.status IN ('pending','running') OR (r.status='error' AND NOT EXISTS (SELECT 1 FROM runtime_rollouts newer WHERE newer.runtime_type=r.runtime_type AND newer.status='finished' AND newer.id>r.id)))`, rt, RuntimeEmptyPoolRecoveryPhase)
+			if err != nil {
+				return true
+			}
+			if err = row.Scan(&count); err != nil || count != 0 {
+				return true
+			}
+		}
+	}
 	if runtimeType == RuntimeTypeOpenCode {
 		if s == nil || s.sess == nil {
 			return true
@@ -2196,7 +2210,7 @@ func activeOpenClawRolloutBlocksInstance(phase, rollbackStatus, preflightJSON st
 		return true
 	}
 	switch phase {
-	case RuntimeUpgradePhaseEmptyPoolReset, "maintenance", "image_rollout", "compatibility_check", "session_migration", "postflight", "rollback_restore":
+	case RuntimeUpgradePhaseEmptyPoolReset, RuntimeEmptyPoolRecoveryPhase, "maintenance", "image_rollout", "compatibility_check", "session_migration", "postflight", "rollback_restore":
 		return true
 	case "gateway_restart":
 		// The upgrade reconciler owns restart_ready placement and targets the
@@ -2405,7 +2419,15 @@ func (s *RuntimeUpgradeService) inspectCandidates(ctx context.Context, scope run
 				}
 			}
 		}
-		if podID.Valid && candidate.InstanceStatus != "running" && candidate.InstanceStatus != "stopped" && !(candidate.InstanceStatus == "error" && scope.allowsRecovery(instanceID)) {
+		stablePendingRecovery := false
+		if podID.Valid && candidate.InstanceStatus == "creating" && scope.allowsRecovery(instanceID) && scope.RecoveryParentID > 0 {
+			binding, e := s.bindings.GetByInstanceID(ctx, instanceID)
+			if e != nil {
+				return nil, nil, nil, nil, e
+			}
+			stablePendingRecovery = s.verifiedPendingUpgradeRecoveryScope(ctx, scope, instanceID, runtimeGeneration, binding) == nil
+		}
+		if podID.Valid && candidate.InstanceStatus != "running" && candidate.InstanceStatus != "stopped" && !(candidate.InstanceStatus == "error" && scope.allowsRecovery(instanceID)) && !stablePendingRecovery {
 			blockers = append(blockers, fmt.Sprintf("instance %d runtime state %s is not stable for upgrade", instanceID, candidate.InstanceStatus))
 		}
 		if memberID.Valid {
@@ -2650,6 +2672,9 @@ func (s *RuntimeUpgradeService) inspectTeamConsistency(ctx context.Context, team
 // fails: that instance must be recreated, while an unconfirmed stop must not
 // risk a second writer.
 func (s *RuntimeUpgradeService) stopCandidateGateway(ctx context.Context, candidate runtimeUpgradeCandidate) (bool, error) {
+	if requiresConfirmedGatewayStop(s.agent) && candidate.GatewayID == fmt.Sprintf("pending-%d-%d", candidate.InstanceID, candidate.Generation) {
+		return s.retireUnpublishedUpgradeReservation(ctx, candidate)
+	}
 	if candidate.GatewayID == "" {
 		if requiresConfirmedGatewayStop(s.agent) && (candidate.RuntimePodID != nil || strings.TrimSpace(candidate.BindingState) != "") {
 			return false, fmt.Errorf("bound runtime gateway identity is required to confirm source stop")

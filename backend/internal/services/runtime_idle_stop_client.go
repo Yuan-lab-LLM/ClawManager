@@ -2,6 +2,8 @@ package services
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -57,11 +59,42 @@ func (c *slotRuntimeAgentClient) verifyIdleTarget(ctx context.Context, endpoint,
 	return nil
 }
 func (c *slotRuntimeAgentClient) IdlePreflight(ctx context.Context, endpoint, gatewayID string, req RuntimeIdleStopRequest) (*RuntimeIdlePreflight, error) {
+	// A lost create reply can leave SQL's pending identity after the immutable
+	// assignment was published. Resolve it for observation only; normal stop
+	// execution still requires its own matching teardown and writer proof.
+	pending := gatewayID == fmt.Sprintf("pending-%d-%d", req.InstanceID, req.Generation)
+	if pending {
+		if c.assignments == nil {
+			return nil, ErrRuntimeAgentUnsupported
+		}
+		resolved, err := c.assignments.ResolvePendingGatewayID(ctx, endpoint, gatewayID)
+		if err != nil {
+			return nil, err
+		}
+		gatewayID = resolved
+		a, _, _, _, err := c.assignments.ReadContainerStop(ctx, endpoint, gatewayID)
+		if err != nil {
+			return nil, err
+		}
+		var original RuntimeAgentCreateGatewayRequest
+		if json.Unmarshal(a.Request, &original) != nil || a.PodUID != req.PodUID || original.InstanceID != req.InstanceID || original.UserID != a.UserID || original.Generation != req.Generation || original.PodUID != req.PodUID || original.AgentType != a.RuntimeType {
+			return nil, fmt.Errorf("pending idle observation identity changed")
+		}
+	}
 	if err := c.verifyIdleTarget(ctx, endpoint, gatewayID, req); err != nil {
 		return nil, err
 	}
 	var result RuntimeIdlePreflight
 	if err := c.do(ctx, http.MethodPost, endpoint, "/v1/gateways/"+url.PathEscape(gatewayID)+"/idle-preflight", req, &result); err != nil {
+		if pending && errors.Is(err, ErrRuntimeAgentConflict) {
+			// The pool cannot run an execution preflight before a slot owns the
+			// published request. Report an explicit unknown observation, never
+			// idle or stopped. Only an explicit failed-start stop can proceed;
+			// its normal DELETE/cancel still needs a positive teardown receipt.
+			if _, observed := c.GatewayState(ctx, endpoint, gatewayID); errors.Is(observed, ErrRuntimeAgentNotFound) {
+				return &RuntimeIdlePreflight{GatewayID: gatewayID, InstanceID: req.InstanceID, Generation: req.Generation, PodUID: req.PodUID, ExecutionState: "unknown", Blocker: "published start has no confirmed execution"}, nil
+			}
+		}
 		return nil, err
 	}
 	if result.GatewayID != gatewayID || result.InstanceID != req.InstanceID || result.Generation != req.Generation || result.PodUID != req.PodUID {

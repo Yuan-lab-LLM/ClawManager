@@ -76,9 +76,9 @@ type podLedgerSnapshot struct {
 	record ledger
 }
 
-func readPodLedger(p, name, runtimeType string) (ledger, error) {
+func readPodLedger(p, name, runtimeType string, ownerUID int) (ledger, error) {
 	var l ledger
-	b, e := readTrusted(p)
+	b, e := readTrustedOwnedBy(p, ownerUID)
 	if e != nil {
 		return l, e
 	}
@@ -93,7 +93,7 @@ func readPodLedger(p, name, runtimeType string) (ledger, error) {
 	}
 	return l, nil
 }
-func podLedgerSnapshots(dir, runtimeType string) ([]podLedgerSnapshot, error) {
+func podLedgerSnapshots(dir, runtimeType string, ownerUID int) ([]podLedgerSnapshot, error) {
 	entries, e := os.ReadDir(dir)
 	if e != nil {
 		return nil, e
@@ -115,7 +115,7 @@ func podLedgerSnapshots(dir, runtimeType string) ([]podLedgerSnapshot, error) {
 				return nil, fmt.Errorf("invalid protected ledger filename")
 			}
 		}
-		l, e := readPodLedger(filepath.Join(dir, name), name, runtimeType)
+		l, e := readPodLedger(filepath.Join(dir, name), name, runtimeType, ownerUID)
 		if e != nil {
 			return nil, e
 		}
@@ -231,7 +231,7 @@ func RunPod(ctx context.Context, s PodScope, cri CRIRuntime, workspaceRoot, boot
 	if e != nil {
 		return nil, e
 	}
-	snapshots, e := podLedgerSnapshots(dir, s.RuntimeType)
+	snapshots, e := podLedgerSnapshots(dir, s.RuntimeType, os.Geteuid())
 	if e != nil {
 		return nil, e
 	}
@@ -246,7 +246,7 @@ func RunPod(ctx context.Context, s PodScope, cri CRIRuntime, workspaceRoot, boot
 		if e != nil {
 			return nil, e
 		}
-		current, e := readPodLedger(lp, snapshot.name, s.RuntimeType)
+		current, e := readPodLedger(lp, snapshot.name, s.RuntimeType, os.Geteuid())
 		if e != nil {
 			lease.Close()
 			return nil, e
@@ -302,19 +302,25 @@ type PodLedgerOwner struct {
 }
 
 func InspectPodLedgerOwners(root, runtimeType, podUID string) ([]PodLedgerOwner, error) {
+	return InspectPodLedgerOwnersOwnedBy(root, runtimeType, podUID, os.Geteuid())
+}
+
+// InspectPodLedgerOwnersOwnedBy inspects the protected store read-only. The
+// caller must derive ownerUID from the verified source storage profile.
+func InspectPodLedgerOwnersOwnedBy(root, runtimeType, podUID string, ownerUID int) ([]PodLedgerOwner, error) {
 	if !filepath.IsAbs(root) || filepath.Clean(root) != root || root == "/" || len(root) > 4096 || strings.ContainsAny(root, "\x00\r\n") || runtimeType == "" || len(runtimeType) > 256 || strings.TrimSpace(runtimeType) != runtimeType || strings.ContainsAny(runtimeType, "/\\.\x00\r\n") || podUID == "" || len(podUID) > 256 || strings.TrimSpace(podUID) != podUID || strings.ContainsAny(podUID, "\x00\r\n") {
 		return nil, fmt.Errorf("invalid source ledger identity")
 	}
-	if e := trustedDirectory(root); e != nil {
+	if e := trustedDirectoryOwnedBy(root, ownerUID); e != nil {
 		return nil, e
 	}
 	dir := filepath.Join(root, ".clawmanager-slot-locks")
-	if e := trustedDirectory(dir); os.IsNotExist(e) {
+	if e := trustedDirectoryOwnedBy(dir, ownerUID); os.IsNotExist(e) {
 		return nil, nil
 	} else if e != nil {
 		return nil, e
 	}
-	snapshots, e := podLedgerSnapshots(dir, runtimeType)
+	snapshots, e := podLedgerSnapshots(dir, runtimeType, ownerUID)
 	if e != nil {
 		return nil, e
 	}

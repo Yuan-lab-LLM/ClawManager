@@ -186,3 +186,10 @@ export function getIEIRuntimePresentation(type: string): IEIRuntimePresentation 
     name: type.trim() || fallbackRuntime.name,
   };
 }
+export const ownerRuntimeLogos: Readonly<Record<string, string>> = {
+  openclaw: '/openclaw.png',
+  hermes: '/hermes-card.png',
+  opencode: '/opencode-card.svg',
+  'deepseek-harness': '/deepseek-harness.svg',
+  workbuddy: '/workbuddy.png',
+};

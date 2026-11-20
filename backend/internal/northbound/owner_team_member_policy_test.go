@@ -96,5 +96,26 @@ func TestOwnerTeamMemberRemovalPolicyMySQL(t *testing.T) {
 		if err := api.GuardInstanceMutation(i.ID, "delete", tm.ID); err != nil {
 			t.Fatalf("%s whole-Team cleanup blocked: %v", scope, err)
 		}
+		tm.Status = models.TeamStatusDeleting
+		if err := repo.UpdateTeam(tm); err != nil {
+			t.Fatal(err)
+		}
+		m.Status = models.TeamMemberStatusDeleting
+		if err := repo.UpdateMember(m); err != nil {
+			t.Fatal(err)
+		}
+		if err := api.GuardInstanceMutation(i.ID, "delete", 0); err == nil {
+			t.Fatal("background retry created a member delete intent")
+		}
+		i.Status = "deleting"
+		if err := instances.Update(i); err != nil {
+			t.Fatal(err)
+		}
+		if err := api.GuardInstanceMutation(i.ID, "delete", 0); err != nil {
+			t.Fatalf("durable whole-Team deletion cannot resume: %v", err)
+		}
+		if err := api.GuardInstanceMutation(i.ID, "reset", 0); err == nil {
+			t.Fatal("deletion intent authorized an unrelated reset")
+		}
 	}
 }

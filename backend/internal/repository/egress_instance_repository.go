@@ -20,7 +20,9 @@ func NewEgressInstanceRepository(sess db.Session) EgressInstanceRepository {
 
 func (r *instanceRepository) GetByIDContext(ctx context.Context, id int) (*models.Instance, error) {
 	var instance models.Instance
+	trace := runtimeQueryTrace(ctx, r.sess, "sql.instance")
 	err := r.sess.WithContext(ctx).Collection("instances").Find(db.Cond{"id": id}).One(&instance)
+	trace(err)
 	if err == db.ErrNoMoreRows {
 		return nil, nil
 	}

@@ -1,0 +1,1307 @@
+/* Northbound portal palette, restored from the reviewed 32443 personal baseline (5c17782a).
+Only color declarations are carried over; current layouts, typography and behavior stay in their component sheets.
+The route marker also covers body-mounted dialogs/popovers and is removed when leaving the portal. */
+
+body[data-northbound-portal] {
+  --cm-primary: #0759c5;
+  --cm-primary-hover: #064daf;
+  --cm-primary-pressed: #04418f;
+  --cm-selected: #eef5ff;
+  --cm-ink: #173255;
+  --cm-text: #30425e;
+  --cm-muted: #697d9d;
+  --cm-canvas: #f4f7fb;
+  --cm-subtle: #f4f7fc;
+  --cm-border: #dce5f2;
+  --cm-border-subtle: #e6edf6;
+  --cm-success: #008966;
+  --cm-error: #c43d48;
+  --cm-warning: #92651b;
+  --cm-success-background: #edf9f3;
+  --cm-error-background: #fff2f2;
+  --cm-warning-background: #fff8e9;
+}
+
+/* styles/owner-dashboard.css */
+
+body[data-northbound-portal] .owner-bookmarks [role=tab] {
+  border: 1px solid #e2e8f0;
+  background: #edf2f8;
+  color: #64748b;
+}
+
+body[data-northbound-portal] .owner-bookmarks [role=tab][aria-selected=true] {
+  color: #2563eb;
+}
+
+body[data-northbound-portal] .owner-panel {
+  border: 1px solid #e2e8f0;
+}
+
+body[data-northbound-portal] .owner-alert {
+  background: #fffbeb;
+  color: #92400e;
+}
+
+body[data-northbound-portal] .owner-summary {
+  border: 1px solid #e2e8f0;
+}
+
+body[data-northbound-portal] .owner-growth-summary {
+  border: 1px solid #e2e8f0;
+}
+
+body[data-northbound-portal] .owner-welcome {
+  background: radial-gradient(ellipse at top left,#e6f0ff 0%,#f7fbff 60%,white 100%);
+}
+
+body[data-northbound-portal] .owner-title-badge {
+  color: #2563eb;
+  background: #eaf2ff;
+}
+
+body[data-northbound-portal] .owner-progress p {
+  color: #64748b;
+}
+
+body[data-northbound-portal] .owner-growth-stat p:first-child {
+  color: #64748b;
+}
+
+body[data-northbound-portal] .owner-growth-stat small {
+  color: #64748b;
+}
+
+body[data-northbound-portal] .owner-metric {
+  border-top: 1px solid #edf2f7;
+}
+
+body[data-northbound-portal] .owner-metric-label {
+  color: #64748b;
+}
+
+body[data-northbound-portal] .owner-metric-note,
+body[data-northbound-portal] .owner-comparison {
+  color: #64748b;
+}
+
+body[data-northbound-portal] .owner-chart-card {
+  border: 1px solid #e2e8f0;
+}
+
+body[data-northbound-portal] .owner-chart-caption {
+  color: #64748b;
+}
+
+body[data-northbound-portal] .owner-continue {
+  border: 1px solid #e2e8f0;
+}
+
+body[data-northbound-portal] .owner-continue-head nav {
+  color: #64748b;
+}
+
+body[data-northbound-portal] .owner-continue-head nav button {
+  border: 1px solid #e2e8f0;
+}
+
+body[data-northbound-portal] .owner-continue-list>button {
+  border: 1px solid #e5edf7;
+}
+
+body[data-northbound-portal] .owner-continue-type {
+  color: #64748b;
+}
+
+body[data-northbound-portal] .owner-work-question {
+  background: #eef3f9aa;
+}
+
+body[data-northbound-portal] .owner-work-question>span:first-child {
+  color: #64748b;
+}
+
+body[data-northbound-portal] .owner-work-empty {
+  color: #94a3b8;
+}
+
+body[data-northbound-portal] .owner-work-footer {
+  color: #64748b;
+}
+
+body[data-northbound-portal] .owner-work-footer>span {
+  color: #2563eb;
+}
+
+body[data-northbound-portal] .owner-continue-list>button:hover {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+}
+
+body[data-northbound-portal] .owner-task-panel {
+  border: 1px solid #e2e8f0;
+}
+
+body[data-northbound-portal] .owner-task-tabs button[aria-pressed=true] {
+  background: #eff6ff;
+  color: #2563eb;
+}
+
+body[data-northbound-portal] .owner-task {
+  border: 1px solid #edf2f7;
+}
+
+body[data-northbound-portal] .owner-pager {
+  color: #64748b;
+}
+
+body[data-northbound-portal] .owner-pager button {
+  border: 1px solid #e2e8f0;
+}
+
+body[data-northbound-portal] .owner-growth-footer {
+  color: #64748b;
+}
+
+body[data-northbound-portal] .owner-report-tools button,
+body[data-northbound-portal] .owner-report-tools input,
+body[data-northbound-portal] .owner-report-tools select {
+  border: 1px solid #e2e8f0;
+}
+
+body[data-northbound-portal] .owner-report-summary {
+  border: 1px solid #e2e8f0;
+}
+
+body[data-northbound-portal] .owner-report-runtime {
+  border: 1px solid #e2e8f0;
+}
+
+body[data-northbound-portal] .owner-report-footer {
+  color: #475569;
+}
+
+body[data-northbound-portal] .owner-modal {
+  color: #0f172a;
+}
+
+body[data-northbound-portal] .owner-modal::backdrop {
+  background: #0f172a40;
+}
+
+body[data-northbound-portal] .owner-modal header {
+  border-bottom: 1px solid #e2e8f0;
+}
+
+@media (max-width:1199px),(max-height:759px) {
+
+  body[data-northbound-portal] .owner-bookmarks [role=tab] {
+    border: 1px solid #e2e8f0;
+  }
+}
+
+body[data-northbound-portal] .owner-task-group-heading>span {
+  color: #64748b;
+}
+
+body[data-northbound-portal] .owner-task-track {
+  background: #e8eef6;
+}
+
+body[data-northbound-portal] .owner-task-track>div {
+  background: #3b82f6;
+}
+
+body[data-northbound-portal] .owner-task-nodes {
+  color: #64748b;
+}
+
+body[data-northbound-portal] .owner-task-nodes .awarded {
+  color: #0d9488;
+}
+
+body[data-northbound-portal] .owner-task small {
+  color: #64748b;
+}
+
+body[data-northbound-portal] .owner-rule-scheduled {
+  color: #1d4ed8;
+  background: #eff6ff;
+}
+
+body[data-northbound-portal] .owner-growth-path {
+  border: 1px solid #e2e8f0;
+}
+
+body[data-northbound-portal] .owner-growth-path header span {
+  color: #64748b;
+}
+
+body[data-northbound-portal] .owner-path-stage.current {
+  background: #edf5ff;
+  border-color: #bfdbfe;
+}
+
+body[data-northbound-portal] .owner-path-stage-label span {
+  color: #64748b;
+}
+
+body[data-northbound-portal] .owner-path-nodes::before {
+  background: #dbe5f3;
+}
+
+body[data-northbound-portal] .owner-path-nodes button {
+  color: #64748b;
+}
+
+body[data-northbound-portal] .owner-path-nodes button.reached>span {
+  background: #dbeafe;
+  border-color: #93c5fd;
+  color: #1d4ed8;
+}
+
+body[data-northbound-portal] .owner-path-nodes button.current>span {
+  background: #2563eb;
+  border-color: #2563eb;
+}
+
+body[data-northbound-portal] .owner-path-nodes button.current::after {
+  border-bottom: 4px solid #2563eb;
+}
+
+body[data-northbound-portal] .owner-path-nodes [role=tooltip] {
+  background: #0f172a;
+}
+
+body[data-northbound-portal] .owner-path-nodes::before {
+  background: #cbd9eb;
+}
+
+body[data-northbound-portal] .owner-path-nodes button>span {
+  background: #bdcadb;
+}
+
+body[data-northbound-portal] .owner-path-nodes button.reached>span {
+  background: #60a5fa;
+}
+
+body[data-northbound-portal] .owner-path-nodes button.current>span {
+  background: #2563eb;
+}
+
+body[data-northbound-portal] .owner-path-locate {
+  color: #2563eb;
+}
+
+body[data-northbound-portal] .owner-axis-label {
+  color: #64748b;
+}
+
+body[data-northbound-portal] .owner-path-axis::before {
+  background: #e5edf8;
+}
+
+body[data-northbound-portal] .owner-path-axis::after {
+  background: linear-gradient(90deg,#3b82f6,#22c6d7);
+}
+
+body[data-northbound-portal] .owner-path-axis button>span {
+  background: #b8c8dc;
+}
+
+body[data-northbound-portal] .owner-path-axis button.reached>span {
+  background: #60a5fa;
+}
+
+body[data-northbound-portal] .owner-path-axis button.major>span {
+  background: #b9cde4;
+}
+
+body[data-northbound-portal] .owner-path-axis button.major.reached>span {
+  background: #38bdf8;
+}
+
+body[data-northbound-portal] .owner-path-axis button.current>span {
+  background: #2563eb;
+}
+
+body[data-northbound-portal] .owner-path-axis .owner-path-locate {
+  background: #2563eb;
+  color: #fff;
+}
+
+body[data-northbound-portal] .owner-path-locate::after {
+  border-top: 4px solid #2563eb;
+}
+
+body[data-northbound-portal] .owner-axis-label {
+  background: #f1f5fa;
+  color: #71839a;
+}
+
+body[data-northbound-portal] .owner-path-axis .reached .owner-axis-label,
+body[data-northbound-portal] .owner-path-axis .current .owner-axis-label {
+  color: #2563eb;
+  background: #eaf3ff;
+}
+
+body[data-northbound-portal] .owner-task-condition {
+  color: #64748b;
+}
+
+/* styles/owner-instance-card.css */
+
+body[data-northbound-portal] .portal-runtime-card {
+  --instance-accent: #526071;
+  --instance-edge: #c4ccd5;
+  color: #14213a;
+}
+
+body[data-northbound-portal] .portal-runtime-card[data-runtime=openclaw] {
+  --instance-accent: #cb526c;
+  --instance-edge: #ebd5dc;
+  --instance-soft: #fdf3f5;
+}
+
+body[data-northbound-portal] .portal-runtime-card[data-runtime=hermes] {
+  --instance-accent: #8854ca;
+  --instance-edge: #e0d7f1;
+  --instance-soft: #f7f3fc;
+}
+
+body[data-northbound-portal] .portal-runtime-card[data-runtime=opencode] {
+  --instance-accent: #3267c8;
+  --instance-edge: #d1def7;
+  --instance-soft: #f1f5fe;
+}
+
+body[data-northbound-portal] .instance-meta {
+  color: #75849d;
+}
+
+body[data-northbound-portal] .instance-status.running {
+  color: #00996b;
+}
+
+body[data-northbound-portal] .instance-status.error {
+  color: #c34050;
+}
+
+body[data-northbound-portal] .instance-more {
+  color: #71809a;
+}
+
+body[data-northbound-portal] .instance-menu {
+  border: 1px solid #e2e8f0;
+}
+
+body[data-northbound-portal] .instance-menu .danger {
+  color: #dc3851;
+}
+
+/* components/teams/owner-team-workspace.css */
+
+body[data-northbound-portal] .ot-workspace,
+body[data-northbound-portal] .ot-sidebar,
+body[data-northbound-portal] .ot-modal {
+  --ot-blue: #0759c5;
+  --ot-border: #dce5f2;
+  --ot-muted: #697d9d;
+  --ot-ink: #173255;
+}
+
+body[data-northbound-portal] .ot-secondary:hover,
+body[data-northbound-portal] .ot-icon:hover {
+  border-color: #a9c5e7;
+}
+
+body[data-northbound-portal] .ot-danger,
+body[data-northbound-portal] .ot-danger-text {
+  color: #b4283c;
+}
+
+body[data-northbound-portal] .ot-danger {
+  border-color: #edcbd2;
+}
+
+body[data-northbound-portal] .ot-danger:hover {
+  background: #fff5f6;
+}
+
+body[data-northbound-portal] .ot-master-item[aria-pressed=true] {
+  border-color: #2674d6;
+}
+
+body[data-northbound-portal] .ot-member [data-state=green],
+body[data-northbound-portal] .ot-member [data-state=success],
+body[data-northbound-portal] .ot-member [data-state=good] {
+  color: #008966;
+}
+
+body[data-northbound-portal] .ot-member [data-state=blue],
+body[data-northbound-portal] .ot-member [data-state=active] {
+  color: #0759c5;
+}
+
+body[data-northbound-portal] .ot-member [data-state=red],
+body[data-northbound-portal] .ot-member [data-state=error] {
+  color: #c43d48;
+}
+
+body[data-northbound-portal] .ot-team-card {
+  --team-ink: #8848ab;
+  --team-edge: #dfd2ec;
+}
+
+body[data-northbound-portal] .ot-card-status [data-state=error] {
+  color: #bc354e;
+}
+
+body[data-northbound-portal] .ot-card-status [data-state=ready] {
+  color: #008565;
+}
+
+body[data-northbound-portal] .ot-card-status [data-state=waiting] {
+  color: #8b672a;
+}
+
+body[data-northbound-portal] .ot-card-entry:hover {
+  border-color: #ac69b7;
+}
+
+body[data-northbound-portal] .ot-error {
+  background: #fff2f2;
+  color: #a62a3e;
+}
+
+body[data-northbound-portal] .ot-note {
+  background: #fff6e8;
+  color: #896126;
+}
+
+body[data-northbound-portal] .ot-operation {
+  background: #eff7ff;
+  color: #245380;
+}
+
+body[data-northbound-portal] .ot-modal::backdrop {
+  background: #14304e66;
+}
+
+body[data-northbound-portal] .ot-instance-tabs {
+  background: #f1f5fc;
+}
+
+body[data-northbound-portal] .ot-instance-tabs button {
+  color: #5b759b;
+}
+
+body[data-northbound-portal] .ot-instance-tabs button[aria-selected=true] {
+  color: #0759c5;
+}
+
+body[data-northbound-portal] .ot-northbound-layout {
+  color: #173255;
+}
+
+/* components/teams/owner-team-feedback.css */
+
+body[data-northbound-portal] .ot-floating-notice {
+  --notice-border: #dce5f2;
+  --notice-ink: #173255;
+  --notice-muted: #697d9d;
+}
+
+body[data-northbound-portal] .ot-notice-symbol {
+  color: #008565;
+  background: #edf8f4;
+}
+
+body[data-northbound-portal] .ot-floating-notice[data-kind=error] .ot-notice-symbol {
+  color: #b73750;
+  background: #fff0f3;
+}
+
+body[data-northbound-portal] .ot-floating-notice[data-kind=warning] .ot-notice-symbol {
+  color: #946421;
+  background: #fff6e7;
+}
+
+body[data-northbound-portal] .ot-floating-notice[data-kind=pending] .ot-notice-symbol {
+  color: #0759c5;
+  background: #eff5ff;
+}
+
+/* components/teams/team-badges.css */
+
+body[data-northbound-portal] .team-functional-badge {
+  background: #eff6ff;
+  color: #2563eb;
+  border: 1px solid #e1ecfb;
+}
+
+body[data-northbound-portal] .team-functional-badge[data-identity=leader] {
+  background: #fff1ed;
+  color: #bc4d35;
+  border-color: #f5ded6;
+}
+
+body[data-northbound-portal] .team-functional-badge[data-identity=user] {
+  background: #fff8ed;
+  color: #996324;
+  border-color: #f2e5cd;
+}
+
+body[data-northbound-portal] .team-functional-badge[data-identity=system],
+body[data-northbound-portal] .team-functional-badge[data-identity=unknown] {
+  color: #64748b;
+}
+
+body[data-northbound-portal] .team-functional-badge small {
+  color: #64748b;
+}
+
+body[data-northbound-portal] .team-avatar-picker-options {
+  border: 1px solid #e2e8f0;
+}
+
+body[data-northbound-portal] .team-avatar-picker-options>button[aria-pressed=true] {
+  border-color: #60a5fa;
+  background: #eff6ff;
+}
+
+body[data-northbound-portal] .team-avatar-picker-auto {
+  color: #64748b;
+}
+
+/* components/teams/team-chat-workspace.css */
+
+body[data-northbound-portal] .team-chat-workspace {
+  border: 1px solid #e2e8f0;
+}
+
+body[data-northbound-portal] .team-tools-toolbar button:hover,
+body[data-northbound-portal] .team-tools-toolbar button[aria-pressed=true],
+body[data-northbound-portal] .team-tools-toolbar button[aria-expanded=true] {
+  background: #e8f2fb;
+  color: #0369a1;
+}
+
+body[data-northbound-portal] .team-tools-panel {
+  border: 1px solid #d7e2ed;
+}
+
+body[data-northbound-portal] .team-tools-toolbar {
+  background: linear-gradient(110deg,#f4f8fd,#fff);
+  border-bottom: 1px solid #dfe8f1;
+  color: #475569;
+}
+
+body[data-northbound-portal] .team-chat-workspace[data-right=closed] .team-tools-toolbar>button {
+  border: 1px solid #dbe5f0;
+  color: #475569;
+}
+
+body[data-northbound-portal] .team-workflow-mini {
+  border: 1px solid #d4e3ef;
+  background: linear-gradient(155deg,#f2f7ff,#f6fbfc 70%,#edf9f5);
+  color: #334155;
+}
+
+body[data-northbound-portal] .team-workflow-heading {
+  color: #34526f;
+}
+
+body[data-northbound-portal] .team-workflow-heading small {
+  color: #7790a8;
+}
+
+body[data-northbound-portal] .team-workflow-status {
+  color: #56708b;
+}
+
+body[data-northbound-portal] .team-workflow-status>span {
+  border: 1px solid #dce7ef;
+}
+
+body[data-northbound-portal] .team-workflow-status b {
+  color: #0284c7;
+}
+
+body[data-northbound-portal] .team-workflow-order {
+  color: #8394a8;
+}
+
+body[data-northbound-portal] .team-workflow-connector {
+  border-left: 1px dashed #c3d3df;
+}
+
+body[data-northbound-portal] .team-workflow-connector[data-linked=true] {
+  border-left: 1px solid #89bcd4;
+}
+
+body[data-northbound-portal] .team-workflow-connector svg {
+  color: #6b9fb7;
+  background: #f3f9fc;
+}
+
+body[data-northbound-portal] .team-workflow-node {
+  border: 1px solid #dce5ef;
+}
+
+body[data-northbound-portal] .team-workflow-node:hover {
+  border-color: #8dbdd9;
+}
+
+body[data-northbound-portal] .team-workflow-marker {
+  background: #edf1f6;
+  color: #94a3b8;
+}
+
+body[data-northbound-portal] .team-workflow-person small {
+  color: #8290a3;
+}
+
+body[data-northbound-portal] .team-workflow-state {
+  color: #8190a3;
+}
+
+body[data-northbound-portal] .team-workflow-nodes li[data-tone=active] .team-workflow-node {
+  background: linear-gradient(110deg,#fff,#ebf8ff);
+  border-color: #7dd3fc;
+}
+
+body[data-northbound-portal] .team-workflow-nodes li[data-tone=active] .team-workflow-marker {
+  background: #d9f2ff;
+  color: #0284c7;
+}
+
+body[data-northbound-portal] .team-workflow-nodes li[data-tone=active] .team-workflow-state {
+  color: #0284c7;
+}
+
+body[data-northbound-portal] .team-workflow-nodes li[data-tone=done] .team-workflow-marker {
+  background: #dff5e9;
+  color: #149367;
+}
+
+body[data-northbound-portal] .team-workflow-nodes li[data-tone=done] .team-workflow-state {
+  color: #149367;
+}
+
+body[data-northbound-portal] .team-workflow-nodes li[data-tone=error] .team-workflow-node {
+  background: #fff8f3;
+  border-color: #fed7aa;
+}
+
+body[data-northbound-portal] .team-workflow-nodes li[data-tone=error] .team-workflow-marker {
+  background: #ffedd5;
+  color: #c2410c;
+}
+
+body[data-northbound-portal] .team-workflow-nodes li[data-tone=error] .team-workflow-state {
+  color: #c2410c;
+}
+
+body[data-northbound-portal] .team-workflow-handoff {
+  border-top: 1px solid #d9e8ed;
+}
+
+body[data-northbound-portal] .team-workflow-handoff-caption {
+  color: #64748b;
+}
+
+body[data-northbound-portal] .team-workflow-handoff-route {
+  color: #334155;
+}
+
+body[data-northbound-portal] .team-workflow-handoff-row>span {
+  color: #64748b;
+}
+
+body[data-northbound-portal] .team-workflow-handoff-arrow {
+  color: #0284c7;
+}
+
+body[data-northbound-portal] .team-workflow-handoff[data-fresh=true]::before {
+  background: #0ea5e9;
+}
+
+body[data-northbound-portal] .team-workflow-empty {
+  color: #8091a5;
+}
+
+body[data-northbound-portal] .team-workflow-tooltip {
+  border: 1px solid #d6e3ef;
+  color: #334155;
+}
+
+body[data-northbound-portal] .team-workflow-tooltip-caption {
+  color: #6e829b;
+}
+
+body[data-northbound-portal] .team-workflow-tooltip-status {
+  color: #0284c7;
+}
+
+body[data-northbound-portal] .team-workflow-tooltip-footer {
+  border-top: 1px solid #e7eef5;
+  color: #8091a6;
+}
+
+body[data-northbound-portal] .team-chat-topbar {
+  border-bottom: 1px solid #e5ebf3;
+  background: linear-gradient(105deg,#edf1fa 0%,#f7fafc 55%,#edf6fa 100%);
+}
+
+body[data-northbound-portal] .team-chat-heading {
+  color: #263c57;
+}
+
+body[data-northbound-portal] .team-chat-heading>span {
+  border: 1px solid #d9e1f1;
+  background: #e8eef9;
+  color: #5d719b;
+}
+
+body[data-northbound-portal] .team-chat-subtitle {
+  color: #8190a4;
+}
+
+body[data-northbound-portal] .team-chat-online {
+  color: #668278;
+}
+
+body[data-northbound-portal] .team-chat-online i {
+  background: #34c995;
+}
+
+body[data-northbound-portal] .team-history-menu {
+  color: #56708a;
+}
+
+body[data-northbound-portal] .team-history-menu>summary {
+  border: 1px solid #dce5ef;
+}
+
+body[data-northbound-portal] .team-history-menu[open]>summary {
+  color: #0369a1;
+  background: #eaf4fc;
+  border-color: #c4dff1;
+}
+
+body[data-northbound-portal] .team-history-popover {
+  border: 1px solid #dce5f0;
+}
+
+body[data-northbound-portal] .team-history-popover>header>span {
+  color: #90a0b3;
+}
+
+body[data-northbound-portal] .team-history-options>button:hover {
+  background: #f2f6fb;
+}
+
+body[data-northbound-portal] .team-history-options>button[aria-current=true] {
+  background: #eef6fd;
+  color: #0369a1;
+}
+
+body[data-northbound-portal] .team-history-options small {
+  color: #92a0b3;
+}
+
+body[data-northbound-portal] .team-chat-transcript form {
+  border: 1px solid #dce4ee;
+}
+
+body[data-northbound-portal] .team-chat-transcript form>button {
+  background: #364f6e;
+}
+
+body[data-northbound-portal] .team-chat-transcript form>button:disabled {
+  background: #e4eaf1;
+  color: #93a2b5;
+}
+
+body[data-northbound-portal] .team-plain-message {
+  color: #263348;
+}
+
+body[data-northbound-portal] .team-docked-kanban>.cm-tech-workspace {
+  background: linear-gradient(155deg,#f4f7fc,#eef5f9) !important;
+}
+
+body[data-northbound-portal] .team-board-overview {
+  border: 1px solid #dce5ee;
+  color: #64748b;
+}
+
+body[data-northbound-portal] .team-board-plan {
+  border: 1px solid #dce5ee;
+  color: #475569;
+}
+
+body[data-northbound-portal] .team-board-plan button {
+  border-top: 1px solid #e5ebf1;
+}
+
+body[data-northbound-portal] .team-file-row {
+  border: 1px solid #e2e8f0;
+}
+
+body[data-northbound-portal] .team-file-meta {
+  color: #64748b;
+}
+
+/* components/teams/team-continuous-chat.css */
+
+body[data-northbound-portal] .team-chat-workspace .team-chat-heading {
+  color: #172b43;
+}
+
+body[data-northbound-portal] .team-chat-workspace .team-chat-heading>span {
+  background: #fff4ef;
+  border-color: #f2e1d9;
+  color: #bc4d35;
+}
+
+body[data-northbound-portal] .team-chat-workspace .team-chat-subtitle {
+  color: #596579;
+}
+
+body[data-northbound-portal] .team-chat-workspace .team-chat-online {
+  color: #376a55;
+}
+
+body[data-northbound-portal] .team-chat-workspace .team-chat-messages {
+  color: #243248;
+}
+
+body[data-northbound-portal] .team-chat-author-heading>strong {
+  color: #172b43;
+}
+
+body[data-northbound-portal] .team-chat-author-role {
+  color: #58677a;
+}
+
+body[data-northbound-portal] .team-chat-time {
+  color: #64748b;
+}
+
+body[data-northbound-portal] .team-chat-continuation-time {
+  color: #64748b;
+}
+
+body[data-northbound-portal] .team-chat-workspace .team-plain-message {
+  color: #243248;
+}
+
+body[data-northbound-portal] .team-chat-event-label {
+  color: #526277;
+}
+
+body[data-northbound-portal] .team-chat-event-label[data-tone=assignment] {
+  color: #986220;
+}
+
+body[data-northbound-portal] .team-chat-event-label[data-tone=feedback] {
+  color: #08785b;
+}
+
+body[data-northbound-portal] .team-chat-event-label[data-tone=warning] {
+  color: #9a6616;
+}
+
+body[data-northbound-portal] .team-chat-event-label[data-tone=error] {
+  color: #b43b32;
+}
+
+body[data-northbound-portal] .team-continuous-message[data-tone=error] .team-plain-message {
+  color: #9b342e;
+}
+
+body[data-northbound-portal] .team-continuous-message[data-tone=warning] .team-plain-message {
+  color: #805514;
+}
+
+body[data-northbound-portal] .team-chat-workspace .team-chat-file-chip {
+  color: #36526d;
+}
+
+body[data-northbound-portal] .team-chat-file-chip>svg {
+  color: #64748b;
+}
+
+body[data-northbound-portal] .team-chat-file-chip:hover {
+  border-color: #cbd5e1;
+}
+
+body[data-northbound-portal] .team-chat-file-name>small {
+  color: #64748b;
+}
+
+body[data-northbound-portal] .team-chat-system-line {
+  color: #58677a;
+}
+
+body[data-northbound-portal] .team-chat-system-heading {
+  color: #64748b;
+}
+
+body[data-northbound-portal] .team-chat-workspace .team-history-options small {
+  color: #64748b;
+}
+
+body[data-northbound-portal] .team-chat-workspace .team-history-popover>header>span {
+  color: #64748b;
+}
+
+body[data-northbound-portal] .team-chat-workspace .team-chat-transcript form {
+  border-color: #d9dfe7;
+}
+
+body[data-northbound-portal] .team-chat-workspace .team-chat-transcript form>button:not(:disabled) {
+  background: #b74b36;
+}
+
+body[data-northbound-portal] .team-chat-workspace .team-workflow-heading small,
+body[data-northbound-portal] .team-chat-workspace .team-workflow-status,
+body[data-northbound-portal] .team-chat-workspace .team-workflow-order {
+  color: #58677a;
+}
+
+body[data-northbound-portal] .team-chat-workspace .team-workflow-person strong {
+  color: #243248;
+}
+
+body[data-northbound-portal] .team-chat-workspace .team-workflow-person small,
+body[data-northbound-portal] .team-chat-workspace .team-workflow-state {
+  color: #58677a;
+}
+
+body[data-northbound-portal] .team-chat-workspace .team-roster-rail-heading {
+  color: #475569;
+}
+
+body[data-northbound-portal] .team-chat-workspace .team-roster-rail-heading small {
+  color: #64748b;
+}
+
+/* components/teams/team-members.css */
+
+body[data-northbound-portal] .team-roster-rail-heading {
+  color: #536986;
+}
+
+body[data-northbound-portal] .team-roster-rail-heading small {
+  color: #7a8ba1;
+}
+
+body[data-northbound-portal] .team-roster-mini-person {
+  color: #30425e;
+}
+
+body[data-northbound-portal] .team-roster-mini-state {
+  color: #68788e;
+}
+
+body[data-northbound-portal] .team-roster-mini[data-tone=active] .team-roster-mini-state {
+  color: #285ecf;
+}
+
+body[data-northbound-portal] .team-roster-mini[data-tone=error] .team-roster-mini-state {
+  color: #be4230;
+}
+
+body[data-northbound-portal] .team-roster-mini[data-tone=unknown] .team-roster-mini-state {
+  color: #92651b;
+}
+
+body[data-northbound-portal] .team-roster-quick-entry {
+  color: #4a688f;
+}
+
+body[data-northbound-portal] .team-roster-no-instance {
+  color: #7c8799;
+}
+
+body[data-northbound-portal] .team-members-panel {
+  border: 1px solid #e0e7f1;
+}
+
+body[data-northbound-portal] .team-members-panel>header {
+  background: #f2f6fc;
+  border-bottom: 1px solid #e0e7f1;
+  color: #24344d;
+}
+
+body[data-northbound-portal] .team-roster-count {
+  border: 1px solid #e0e7f1;
+  color: #68788e;
+}
+
+body[data-northbound-portal] .team-roster-header-actions button {
+  color: #68788e;
+}
+
+body[data-northbound-portal] .team-roster-header-actions button:hover {
+  background: #eaf1ff;
+  color: #285ecf;
+}
+
+body[data-northbound-portal] .team-roster-card {
+  border: 1px solid #e0e7f1;
+  color: #24344d;
+}
+
+body[data-northbound-portal] .team-roster-card[data-tone=active] {
+  background: linear-gradient(110deg,#eaf1ff,#fff 65%);
+  border-color: #b8cdf7;
+}
+
+body[data-northbound-portal] .team-roster-card[data-tone=error] {
+  border-color: #efc9bf;
+}
+
+body[data-northbound-portal] .team-roster-meta {
+  color: #68788e;
+}
+
+body[data-northbound-portal] .team-roster-entry {
+  background: #285ecf;
+}
+
+body[data-northbound-portal] .team-roster-entry:hover {
+  background: #204dab;
+}
+
+body[data-northbound-portal] .team-roster-status>span {
+  background: #f2f6fc;
+  color: #68788e;
+}
+
+body[data-northbound-portal] .team-roster-status [data-tone=good] {
+  background: #e9f7f0;
+  color: #13765a;
+}
+
+body[data-northbound-portal] .team-roster-status [data-tone=active] {
+  background: #eaf1ff;
+  color: #285ecf;
+}
+
+body[data-northbound-portal] .team-roster-status [data-tone=error] {
+  background: #fff2ef;
+  color: #be4230;
+}
+
+body[data-northbound-portal] .team-roster-status [data-tone=unknown] {
+  background: #fff5df;
+  color: #92651b;
+}
+
+body[data-northbound-portal] .team-roster-status>button {
+  color: #68788e;
+}
+
+body[data-northbound-portal] .team-roster-status>button:hover {
+  color: #285ecf;
+}
+
+body[data-northbound-portal] .team-roster-summary {
+  color: #68788e;
+}
+
+body[data-northbound-portal] .team-roster-summary[data-error=true],
+body[data-northbound-portal] .team-roster-error {
+  color: #be4230;
+}
+
+body[data-northbound-portal] .team-roster-empty {
+  color: #68788e;
+}
+
+body[data-northbound-portal] .team-roster-pager {
+  color: #68788e;
+}
+
+body[data-northbound-portal] .team-roster-pager button:hover:not(:disabled) {
+  background: #eaf1ff;
+  color: #285ecf;
+}
+
+body[data-northbound-portal] .team-member-dialog {
+  border: 1px solid #e0e7f1;
+  color: #24344d;
+}
+
+body[data-northbound-portal] .team-member-dialog::backdrop {
+  background: #18283e40;
+}
+
+body[data-northbound-portal] .team-member-dialog>header {
+  border-bottom: 1px solid #e0e7f1;
+  background: #f2f6fc;
+}
+
+body[data-northbound-portal] .team-member-dialog header small {
+  color: #68788e;
+}
+
+body[data-northbound-portal] .team-member-dialog header>button {
+  color: #68788e;
+}
+
+body[data-northbound-portal] .team-member-dialog-body dt {
+  color: #68788e;
+}
+
+/* components/teams/team-task-composer.css */
+
+body[data-northbound-portal] .team-task-composer {
+  color: #263449;
+}
+
+body[data-northbound-portal] .team-recipient-trigger {
+  border: 1px solid #e2e7ee;
+}
+
+body[data-northbound-portal] .team-recipient-trigger>span:not(.team-functional-badge) {
+  color: #617089;
+}
+
+body[data-northbound-portal] .team-reference-chip {
+  border: 1px solid #e4e9f0;
+  color: #526178;
+}
+
+body[data-northbound-portal] .team-reference-chip button:hover {
+  background: #e9eef5;
+}
+
+body[data-northbound-portal] .team-recipient-popover {
+  border: 1px solid #dfe6ef;
+}
+
+body[data-northbound-portal] .team-recipient-popover input {
+  border: 1px solid #dfe6ef;
+}
+
+body[data-northbound-portal] .team-recipient-popover input:focus {
+  border-color: #8ca8d3;
+}
+
+body[data-northbound-portal] .team-recipient-popover [data-highlighted=true] {
+  background: #f0f5fb;
+}
+
+body[data-northbound-portal] .team-recipient-popover small {
+  color: #617089;
+}
+
+body[data-northbound-portal] .team-recipient-popover em {
+  color: #617089;
+}
+
+body[data-northbound-portal] .team-recipient-popover p {
+  color: #617089;
+}
+
+body[data-northbound-portal] .team-composer-input-row textarea {
+  border: 1px solid #dce3ec;
+  color: #263449;
+}
+
+body[data-northbound-portal] .team-composer-input-row textarea:focus {
+  border-color: #8da6c8;
+}
+
+body[data-northbound-portal] .team-composer-send {
+  background: #314963;
+}
+
+body[data-northbound-portal] .team-composer-send:disabled {
+  background: #e4eaf2;
+  color: #8b9bb0;
+}
+
+body[data-northbound-portal] .team-composer-error {
+  border: 1px solid #f1c5c5;
+  background: #fff4f4;
+  color: #a92e2e;
+}
+
+body[data-northbound-portal] .portal-runtime-card[data-runtime=deepseek-harness] {
+  --instance-accent: #087f91;
+  --instance-edge: #c3e4e8;
+  --instance-soft: #edf9fa;
+}
+
+body[data-northbound-portal] .portal-runtime-card.is-selected {
+  border-color: var(--instance-accent);
+  background: var(--instance-soft);
+}
+
+body[data-northbound-portal] .ot-team-card {
+  --team-ink: #8848ab;
+  --team-edge: #dfd2ec;
+  border-color: var(--team-edge);
+  color: #173255;
+}
+
+body[data-northbound-portal] .ot-team-card:hover,body[data-northbound-portal] .ot-team-card:focus-within {
+  border-color: #ac69b7;
+  box-shadow: none;
+}
+
+body[data-northbound-portal] .ot-team-card[data-expanded=true] {
+  border-color: #ad6bca;
+  background: #fdfaff;
+}
+
+/* Keep the three dashboard card surfaces white, including their selected/hover states. */
+body[data-northbound-portal] .owner-continue-list>button,
+body[data-northbound-portal] .owner-continue-list>button:hover,
+body[data-northbound-portal] .owner-work-question,
+body[data-northbound-portal] .ot-team-card,
+body[data-northbound-portal] .ot-team-card.is-selected,
+body[data-northbound-portal] .ot-team-card[data-expanded=true],
+body[data-northbound-portal] .owner-growth-path,
+body[data-northbound-portal] .owner-path-stage.current {
+  background: var(--cm-surface);
+  box-shadow: none;
+}
+
+body[data-northbound-portal] .owner-growth-path .owner-path-axis::before,
+body[data-northbound-portal] .owner-growth-path .owner-path-locate {
+  box-shadow: none;
+}
+
+@media(forced-colors:active) {
+
+  body[data-northbound-portal] {
+    --cm-primary: LinkText;
+    --cm-primary-hover: LinkText;
+    --cm-primary-pressed: LinkText;
+    --cm-selected: Canvas;
+    --cm-ink: CanvasText;
+    --cm-text: CanvasText;
+    --cm-muted: CanvasText;
+    --cm-canvas: Canvas;
+    --cm-subtle: Canvas;
+    --cm-border: ButtonBorder;
+    --cm-border-subtle: ButtonBorder;
+    --cm-success: CanvasText;
+    --cm-error: CanvasText;
+    --cm-warning: CanvasText;
+  }
+
+  body[data-northbound-portal] .portal-runtime-card,body[data-northbound-portal] .ot-team-card {
+    border-color: ButtonBorder;
+    background: Canvas;
+    color: CanvasText;
+  }
+}
+

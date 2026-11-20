@@ -43,6 +43,7 @@ type RuntimeScheduler struct {
 
 	workspaceRoot             string
 	runtimeNamespace          string
+	runtimeSlotPoolPrefix     string
 	gatewayPortStart          int
 	gatewayPortEnd            int
 	heartbeatTimeout          time.Duration
@@ -121,6 +122,14 @@ func WithRuntimeSchedulerNamespace(namespace string) RuntimeSchedulerOption {
 			s.runtimeNamespace = strings.TrimSpace(namespace)
 		}
 	}
+}
+
+func WithRuntimeSchedulerPoolPrefix(prefix string) RuntimeSchedulerOption {
+	return func(s *RuntimeScheduler) { s.runtimeSlotPoolPrefix = prefix }
+}
+
+func (s *RuntimeScheduler) DefaultRuntimePoolName(runtimeType string) string {
+	return k8s.RuntimeSlotPoolName(s.runtimeSlotPoolPrefix, runtimeType)
 }
 
 func WithRuntimeSchedulerMaxGatewaysPerPod(capacity int) RuntimeSchedulerOption {
@@ -289,6 +298,9 @@ func (s *RuntimeScheduler) StartRollout(ctx context.Context, rolloutID int64) er
 	}
 	// The legacy rollout changes a shared Deployment before migrating its
 	// instances. It is not a data-preserving OpenCode upgrade path.
+	if rollout.Phase == RuntimeEmptyPoolRecoveryPhase {
+		return s.advanceEmptyRuntimeRecovery(ctx, rollout)
+	}
 	if rollout.RuntimeType == RuntimeTypeOpenCode {
 		if isOpenCodeNativeRollout(rollout) {
 			return s.advanceOpenCodeUpgrade(ctx, rollout)
@@ -937,7 +949,7 @@ func runtimePodIsUpgradeLab(pod models.RuntimePod) bool {
 }
 
 func runtimePodEligibleForOrdinaryScheduling(pod models.RuntimePod) bool {
-	if runtimePodIsUpgradeLab(pod) {
+	if runtimePodIsUpgradeLab(pod) || isFreshRuntimePool(pod) {
 		return false
 	}
 	if strings.EqualFold(strings.TrimSpace(pod.PoolRole), "upgrade-target") {
@@ -1084,6 +1096,9 @@ func (s *RuntimeScheduler) rejectLegacyOpenCodeRollout(ctx context.Context, roll
 }
 
 func (s *RuntimeScheduler) finishRolloutIfReady(ctx context.Context, rollout models.RuntimeRollout) error {
+	if rollout.Phase == RuntimeEmptyPoolRecoveryPhase {
+		return s.advanceEmptyRuntimeRecovery(ctx, &rollout)
+	}
 	if rollout.RuntimeType == RuntimeTypeOpenCode {
 		if !isOpenCodeNativeRollout(&rollout) {
 			return s.rejectLegacyOpenCodeRollout(ctx, rollout)
@@ -1791,14 +1806,14 @@ func (s *RuntimeScheduler) retryUnpublishedPendingSlot(ctx context.Context, clie
 	if err := client.canRetryPendingGateway(ctx, endpoint, RuntimeAgentCreateGatewayRequest{
 		InstanceID: instance.ID, UserID: instance.UserID, Generation: instance.RuntimeGeneration, AgentType: runtimeType, PodUID: *pod.PodUID, GatewayPort: binding.GatewayPort,
 	}); err != nil {
-		return err
+		return fmt.Errorf("pending_authority: %w", err)
 	}
-	if err := s.verifyOrdinaryRuntimePod(ctx, *pod); err != nil {
-		return err
+	if err := s.verifyRuntimePodForInstance(ctx, *pod, instance.ID); err != nil {
+		return fmt.Errorf("pending_placement: %w", err)
 	}
 	start, err := s.prepareGatewayStartParameters(ctx, instance, runtimeType, *pod)
 	if err != nil {
-		return err
+		return fmt.Errorf("pending_parameters: %w", err)
 	}
 	start.reservedBinding = binding
 	return s.createGatewayOnPod(ctx, instance, runtimeType, *pod, start)
@@ -2168,7 +2183,7 @@ func (s *RuntimeScheduler) assignInstance(ctx context.Context, instance models.I
 		}
 		return err
 	}
-	pods, err = s.verifiedOrdinaryRuntimePods(ctx, runtimeType, pods)
+	pods, err = s.verifiedRuntimePodsForInstance(ctx, runtimeType, pods, instance.ID)
 	if err != nil {
 		if runtimeUpgradeInfrastructureRetryable(err) {
 			return fmt.Errorf("%w: classify schedulable runtime pods: %v", errRuntimeControlPlanePending, err)
@@ -2715,7 +2730,7 @@ func (s *RuntimeScheduler) prepareGatewayStartParameters(ctx context.Context, in
 
 func (s *RuntimeScheduler) prepareGatewayStartOwned(ctx context.Context, instance models.Instance, runtimeType string, pod models.RuntimePod, excludedPorts map[int]struct{}, rollout *models.RuntimeRollout) (*runtimeGatewayStart, error) {
 	if rollout == nil {
-		if err := s.verifyOrdinaryRuntimePod(ctx, pod); err != nil {
+		if err := s.verifyRuntimePodForInstance(ctx, pod, instance.ID); err != nil {
 			return nil, err
 		}
 	}
@@ -2755,7 +2770,7 @@ func (s *RuntimeScheduler) createGatewayOnPod(ctx context.Context, instance mode
 		}
 	}
 	if start.upgradeID == "" {
-		if err := s.verifyOrdinaryRuntimePod(ctx, pod); err != nil {
+		if err := s.verifyRuntimePodForInstance(ctx, pod, instance.ID); err != nil {
 			// A reservation exists: preserve it for authoritative reconciliation,
 			// never try another Pod after an uncertain start boundary.
 			return s.preservePendingGatewayStart(ctx, instance.ID, instance.RuntimeGeneration, err)
@@ -3134,6 +3149,9 @@ func (s *RuntimeScheduler) preservePendingGatewayStart(ctx context.Context, inst
 	if cause == nil {
 		cause = errors.New("runtime gateway start outcome is unknown")
 	}
+	// Do not expose arbitrary upstream text or renew the reservation's timeout.
+	// The original cause used to disappear once a binding was already creating.
+	log.Printf("runtime pending start: instance_id=%d generation=%d reason=%s", instanceID, generation, pendingStartReason(cause))
 	message := cause.Error()
 	if s != nil && s.bindingRepo != nil && generation > 0 {
 		binding, readErr := s.bindingRepo.GetByInstanceID(ctx, instanceID)

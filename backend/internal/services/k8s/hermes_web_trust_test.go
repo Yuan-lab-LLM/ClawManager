@@ -2,6 +2,7 @@ package k8s
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -74,5 +75,43 @@ func TestHermesWebTrustDiscoversControlPlaneDuringColdStart(t *testing.T) {
 	}
 	if env["CLAWMANAGER_TRUSTED_PROXY_CIDRS"] != "10.1.2.3" {
 		t.Fatalf("unexpected cold-start proxy identities: %v", env)
+	}
+}
+
+func TestGuardedHermesWebRolloutChecksSameImageTemplateChange(t *testing.T) {
+	const image = "runtime/hermes@sha256:abc"
+	dep := BuildRuntimeDeployment(RuntimeDeploymentSpec{Name: "hermes-runtime", Namespace: "tenant", RuntimeType: "hermes", Image: image, Replicas: 1, BackendURL: "http://manager.tenant.svc.cluster.local:9001", SlotCount: 8})
+	dep.UID = "source-uid"
+	endpoints := &corev1.Endpoints{ObjectMeta: metav1.ObjectMeta{Name: "manager", Namespace: "tenant"}, Subsets: []corev1.EndpointSubset{{Addresses: []corev1.EndpointAddress{
+		{IP: "10.1.2.3", TargetRef: &corev1.ObjectReference{Kind: "Pod", Namespace: "tenant", Name: "app"}},
+	}}}}
+	client := fake.NewSimpleClientset(dep, endpoints)
+	service := &runtimeDeploymentService{client: client}
+	source := RuntimeRolloutTarget{Namespace: dep.Namespace, Name: dep.Name, UID: string(dep.UID), Image: image}
+	occupied := errors.New("occupied")
+	check := func(context.Context) error { return occupied }
+	if err := service.RolloutGuardedPoolImage(t.Context(), source, "hermes", image, true, check); !errors.Is(err, occupied) {
+		t.Fatalf("same image bypassed an occupied pool: %v", err)
+	}
+	for _, action := range client.Actions() {
+		if action.Matches("update", "deployments") {
+			t.Fatal("changed the occupied Deployment template")
+		}
+	}
+	if err := service.RolloutGuardedPoolImage(t.Context(), source, "hermes", image, true, func(context.Context) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	client.ClearActions()
+	if err := service.RolloutGuardedPoolImage(t.Context(), source, "hermes", image, true, check); err != nil {
+		t.Fatalf("identical template needs only verification: %v", err)
+	}
+	for _, action := range client.Actions() {
+		if action.Matches("update", "deployments") {
+			t.Fatal("wrote an identical template")
+		}
+	}
+	source.UID = "recreated"
+	if err := service.RolloutGuardedPoolImage(t.Context(), source, "hermes", image, true, check); err == nil {
+		t.Fatal("recreated Deployment was accepted")
 	}
 }

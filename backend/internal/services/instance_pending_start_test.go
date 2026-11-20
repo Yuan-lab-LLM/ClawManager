@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	"clawreef/internal/models"
@@ -24,40 +25,48 @@ func (r *pendingStartInstanceRepo) ResumeUnpublishedRuntimeStart(_ context.Conte
 }
 
 func TestExplicitStartResumesUnpublishedPendingReservation(t *testing.T) {
-	f := newPendingSlotReplayFixture(t)
-	f.seed(t, 1, "stopped")
-	// The completed predecessor is in the old pool; the unpublished successor
-	// already reserved a slot in the newly deployed pool.
-	cm, _ := f.kube.CoreV1().ConfigMaps("runtime").Get(context.Background(), "lite-instance-7", metav1.GetOptions{})
-	cm.Data["endpoint"], cm.Data["pod_uid"] = "https://10.0.0.3:19090", "previous-pod"
-	var previous RuntimeAgentCreateGatewayRequest
-	json.Unmarshal([]byte(cm.Data["request"]), &previous)
-	previous.PodUID = "previous-pod"
-	raw, _ := json.Marshal(previous)
-	cm.Data["request"] = string(raw)
-	if _, err := f.kube.CoreV1().ConfigMaps("runtime").Update(context.Background(), cm, metav1.UpdateOptions{}); err != nil {
-		t.Fatal(err)
-	}
-	f.instance.Status = "stopped"
-	repo := &pendingStartInstanceRepo{fakeRuntimeInstanceRepo: newFakeRuntimeInstanceRepo()}
-	repo.byID[7] = &f.instance
-	s := &instanceService{instanceRepo: repo, bindingRepo: f.bindings, runtimePodRepo: f.pods, agentClient: f.client}
-	configureLifecycleModels(t, s)
-	if err := s.Start(7); err != nil {
-		t.Fatalf("explicit retry attempted to delete an unpublished gateway: %v", err)
-	}
-	if got := repo.runtimeStates[7]; got.status != "creating" || got.generation != 2 {
-		t.Fatalf("retry abandoned its existing generation: %+v", got)
-	}
-	f.assertReservationUnchanged(t)
-	if len(f.requests) != 0 || f.envCalls != 0 {
-		t.Fatal("API retry published credentials or launched a duplicate")
-	}
-	if errs := f.scheduler.reconcileCreatingInstance(context.Background(), f.instance); len(errs) != 0 {
-		t.Fatal(errs)
-	}
-	if len(f.requests) != 1 || f.requests[0].Generation != 2 || f.binding.State != "running" {
-		t.Fatal("scheduler did not resume the original pending reservation")
+	for _, mode := range []string{"start", "start-stopped"} {
+		t.Run(mode, func(t *testing.T) {
+			f := newPendingSlotReplayFixture(t)
+			f.seed(t, 1, "stopped")
+			// The completed predecessor is in the old pool; the unpublished successor
+			// already reserved a slot in the newly deployed pool.
+			cm, _ := f.kube.CoreV1().ConfigMaps("runtime").Get(context.Background(), "lite-instance-7", metav1.GetOptions{})
+			cm.Data["endpoint"], cm.Data["pod_uid"] = "https://10.0.0.3:19090", "previous-pod"
+			var previous RuntimeAgentCreateGatewayRequest
+			json.Unmarshal([]byte(cm.Data["request"]), &previous)
+			previous.PodUID = "previous-pod"
+			raw, _ := json.Marshal(previous)
+			cm.Data["request"] = string(raw)
+			if _, err := f.kube.CoreV1().ConfigMaps("runtime").Update(context.Background(), cm, metav1.UpdateOptions{}); err != nil {
+				t.Fatal(err)
+			}
+			f.instance.Status = "stopped"
+			repo := &pendingStartInstanceRepo{fakeRuntimeInstanceRepo: newFakeRuntimeInstanceRepo()}
+			repo.byID[7] = &f.instance
+			s := &instanceService{instanceRepo: repo, bindingRepo: f.bindings, runtimePodRepo: f.pods, agentClient: f.client}
+			configureLifecycleModels(t, s)
+			start := s.Start
+			if mode == "start-stopped" {
+				start = s.StartStopped
+			}
+			if err := start(7); err != nil {
+				t.Fatalf("explicit retry attempted to delete an unpublished gateway: %v", err)
+			}
+			if got := repo.runtimeStates[7]; got.status != "creating" || got.generation != 2 {
+				t.Fatalf("retry abandoned its existing generation: %+v", got)
+			}
+			f.assertReservationUnchanged(t)
+			if len(f.requests) != 0 || f.envCalls != 0 {
+				t.Fatal("API retry published credentials or launched a duplicate")
+			}
+			if errs := f.scheduler.reconcileCreatingInstance(context.Background(), f.instance); len(errs) != 0 {
+				t.Fatal(errs)
+			}
+			if len(f.requests) != 1 || f.requests[0].Generation != 2 || f.binding.State != "running" {
+				t.Fatal("scheduler did not resume the original pending reservation")
+			}
+		})
 	}
 }
 
@@ -115,5 +124,49 @@ func TestExplicitStartDoesNotResumeUnprovenPendingReservation(t *testing.T) {
 			}
 			f.assertReservationUnchanged(t)
 		})
+	}
+}
+
+func TestTeamContinuationResumesFailedNativeReservationWithoutNewGeneration(t *testing.T) {
+	for _, state := range []string{"error", "stopped", "creating", "running"} {
+		for _, slotReady := range []bool{true, false} {
+			t.Run(state+fmt.Sprint(slotReady), func(t *testing.T) {
+				f := newPendingSlotReplayFixture(t)
+				f.seed(t, 1, "stopped")
+				ctx := context.Background()
+				pod, _ := f.kube.CoreV1().Pods("runtime").Get(ctx, "pool", metav1.GetOptions{})
+				pod.Labels["clawmanager.io/sandbox-profile"] = "nfs-rootless-v1"
+				pod.Spec.Containers = []corev1.Container{
+					{Name: "coordinator", Env: []corev1.EnvVar{{Name: "RUNTIME_AGENT_ROLE", Value: "pool"}}},
+					{Name: "slot", Env: []corev1.EnvVar{{Name: "RUNTIME_AGENT_ROLE", Value: "slot"}, {Name: "RUNTIME_GATEWAY_PORT_START", Value: "20003"}, {Name: "RUNTIME_GATEWAY_PORT_END", Value: "20005"}}},
+				}
+				pod.Status.ContainerStatuses = []corev1.ContainerStatus{
+					{Name: "coordinator", Ready: true, ContainerID: "containerd://coordinator", State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{StartedAt: metav1.Now()}}},
+					{Name: "slot", Ready: slotReady, ContainerID: "containerd://slot", State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{StartedAt: metav1.Now()}}},
+				}
+				if _, err := f.kube.CoreV1().Pods("runtime").Update(ctx, pod, metav1.UpdateOptions{}); err != nil {
+					t.Fatal(err)
+				}
+				f.instance.Status = state
+				repo := &pendingStartInstanceRepo{fakeRuntimeInstanceRepo: newFakeRuntimeInstanceRepo()}
+				repo.byID[7] = &f.instance
+				s := &instanceService{instanceRepo: repo, bindingRepo: f.bindings, runtimePodRepo: f.pods, agentClient: f.client}
+				configureLifecycleModels(t, s)
+				c := &teamLifecycleCoordinator{instances: s}
+				err := c.startMember(&f.instance, f.binding)
+				failed := state == "error" || state == "stopped"
+				if failed && slotReady {
+					if err != nil || repo.runtimeStates[7].status != "creating" || repo.runtimeStates[7].generation != 2 {
+						t.Fatalf("Team lost its safe continuation: state=%+v err=%v", repo.runtimeStates, err)
+					}
+				} else if len(repo.runtimeStates) != 0 || (failed && err == nil) {
+					t.Fatalf("live or unready reservation was restarted: states=%+v err=%v", repo.runtimeStates, err)
+				}
+				if len(f.requests) != 0 || f.envCalls != 0 {
+					t.Fatal("Team continuation launched or republished a gateway")
+				}
+				f.assertReservationUnchanged(t)
+			})
+		}
 	}
 }

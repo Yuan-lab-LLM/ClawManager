@@ -1,4 +1,4 @@
-// Pinned compatibility helper for the Kubernetes v1.35.0 Deployment controller.
+// Compatibility helper compiled against the pinned Kubernetes Deployment controller API.
 // Algorithm: kubernetes/pkg/controller/controller_utils.go ComputeHash and
 // kubernetes/pkg/util/hash/hash.go DeepHashObject, with nil collisionCount.
 package main
@@ -16,6 +16,8 @@ import (
 )
 
 const maxTemplateBytes = 1 << 20
+
+var controllerVersion = "v1.35.0"
 
 func hashTemplate(raw []byte) (string, error) {
 	if len(raw) > maxTemplateBytes {
@@ -50,7 +52,7 @@ func main() {
 	if err = json.NewEncoder(os.Stdout).Encode(struct {
 		APIVersion string `json:"api_version"`
 		Hash       string `json:"hash"`
-	}{"v1.35.0", hash}); err != nil {
+	}{controllerVersion, hash}); err != nil {
 		os.Exit(1)
 	}
 }

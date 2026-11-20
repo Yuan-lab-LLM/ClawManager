@@ -104,11 +104,21 @@ func (h *RuntimeServicesHandler) ServeHTTP(w http.ResponseWriter, r *http.Reques
 		rejectRuntimeService(w, r, 401)
 		return
 	}
-	checkCtx, checkCancel := context.WithTimeout(r.Context(), 2*time.Second)
+	checkCtx, checkCancel := context.WithTimeout(runtimeauth.WithDiagnostics(r.Context()), 2*time.Second)
+	started := time.Now()
 	identity, err := h.verifier.Verify(checkCtx, parts[1], runtimeauth.AudienceServices)
+	runtimeauth.RecordStage(checkCtx, "services_verify", started, err)
 	if err != nil || identity.InstanceID < 1 || identity.UserID < 1 || identity.Generation < 1 || identity.PodUID == "" {
+		if checkCtx.Err() != nil {
+			err = checkCtx.Err()
+		}
+		runtimeauth.LogDiagnostics(checkCtx, identity.InstanceID, identity.Generation, started, err)
 		checkCancel()
-		rejectRuntimeService(w, r, 403)
+		status := 403
+		if runtimeauth.IsUnavailable(err) {
+			status = 503
+		}
+		rejectRuntimeService(w, r, status)
 		return
 	}
 	operation, err := h.resolve(checkCtx, identity, r)
@@ -120,8 +130,16 @@ func (h *RuntimeServicesHandler) ServeHTTP(w http.ResponseWriter, r *http.Reques
 		}
 	}()
 	if err != nil || operation.Serve == nil || checkCtx.Err() != nil {
+		if checkCtx.Err() != nil {
+			err = checkCtx.Err()
+		}
+		runtimeauth.LogDiagnostics(checkCtx, identity.InstanceID, identity.Generation, started, err)
 		checkCancel()
-		rejectRuntimeService(w, r, 403)
+		status := 403
+		if runtimeauth.IsUnavailable(err) {
+			status = 503
+		}
+		rejectRuntimeService(w, r, status)
 		return
 	}
 	checkCancel()
@@ -137,12 +155,18 @@ func (h *RuntimeServicesHandler) ServeHTTP(w http.ResponseWriter, r *http.Reques
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				checkCtx, checkCancel := context.WithTimeout(ctx, 2*time.Second)
+				checkCtx, checkCancel := context.WithTimeout(runtimeauth.WithDiagnostics(ctx), 2*time.Second)
+				started := time.Now()
 				current, err := h.verifier.Verify(checkCtx, parts[1], runtimeauth.AudienceServices)
+				runtimeauth.RecordStage(checkCtx, "services_verify", started, err)
 				if err == nil && current == identity && operation.Check != nil {
 					err = operation.Check(checkCtx)
 				}
 				failed := err != nil || current != identity || checkCtx.Err() != nil
+				if checkCtx.Err() != nil {
+					err = checkCtx.Err()
+				}
+				runtimeauth.LogDiagnostics(checkCtx, identity.InstanceID, identity.Generation, started, err)
 				checkCancel()
 				if failed {
 					cancel()

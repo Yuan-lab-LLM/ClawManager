@@ -2,7 +2,7 @@ import {useEffect,useRef,useState} from 'react';
 import type {UsageDay,OwnerDashboardData} from '../services/ieiSystemService';
 export const ownerNumber=(n:number)=>new Intl.NumberFormat('zh-CN',{notation:n>=10000?'compact':'standard',maximumFractionDigits:2}).format(n);
 export const ownerCard='rounded-2xl border border-slate-200 bg-white p-4';
-export function UsageChart({days,onDay,label='Token',height:fixedHeight=176,fit=false,maxTicks=6}:{days:UsageDay[];onDay?:(day:UsageDay)=>void;label?:string;height?:number;fit?:boolean;maxTicks?:number}){
+export function UsageChart({days,onDay,label='Token',height:fixedHeight=176,fit=false,maxTicks=6,showHint=true}:{days:UsageDay[];onDay?:(day:UsageDay)=>void;label?:string;height?:number;fit?:boolean;maxTicks?:number;showHint?:boolean}){
  const [autoHeight,setAutoHeight]=useState(176);const height=fit?autoHeight:fixedHeight;
  const ref=useRef<HTMLDivElement>(null);const [width,setWidth]=useState(600);const [selected,setSelected]=useState<number|null>(null);
  useEffect(()=>{const el=ref.current;if(!el)return;const observer=new ResizeObserver(()=>{setWidth(Math.max(200,el.clientWidth));if(fit)setAutoHeight(Math.max(100,el.clientHeight))});observer.observe(el);return()=>observer.disconnect()},[fit]);
@@ -24,7 +24,7 @@ export function UsageChart({days,onDay,label='Token',height:fixedHeight=176,fit=
    }}/ >}{(i%stride===0||i===days.length-1)&&<text x={x(i)} y={height-6} textAnchor={i===days.length-1?'end':'middle'} fontSize="12" fill="#718096">{d.date.slice(5).replace('-','/')}</text>}</g>)}
   </svg>
   {active&&<div role="tooltip" className="pointer-events-none absolute right-2 top-0 z-10 rounded-lg border border-blue-100 bg-white/95 px-3 py-2 text-[13px] shadow-lg"><strong>{active.date}</strong>{active.observed?<><p>{label}：{active.tokens.toLocaleString()}</p>{label==='Token'&&<><p>输入 {active.prompt_tokens.toLocaleString()} / 输出 {active.completion_tokens.toLocaleString()}</p><p>有效提问 {active.questions} · 新增会话 {active.sessions}</p></>}</>:<p>该日无已确认记录，覆盖未知</p>}</div>}
-  {!fit&&<p className="min-h-4 text-[12px] text-slate-500">悬停查看具体值{onDay?' · 点击数据点查看当日明细':''} · 缺失数据不连线</p>}
+  {!fit&&showHint&&<p className="min-h-4 text-[12px] text-slate-500">悬停查看具体值{onDay?' · 点击数据点查看当日明细':''} · 缺失数据不连线</p>}
  </div>
 }
 export function ActivityHeatmap({days,onDay,visits}:{days:UsageDay[];onDay:(day:UsageDay)=>void;visits?:OwnerDashboardData['visits']}){
