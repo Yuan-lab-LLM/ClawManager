@@ -35,6 +35,11 @@ func (s *instanceService) prepareDeletion(instanceID, teamID int) (*models.Insta
 	if err := s.ValidateDelete(instanceID); err != nil {
 		return nil, err
 	}
+	if _, native := v2RuntimeTypeForInstance(instance); native {
+		if err := s.requireGatewayCleanupProofCapabilities(); err != nil {
+			return nil, err
+		}
+	}
 	if instance.Status != "deleting" {
 		prepared := *instance
 		instance = &prepared

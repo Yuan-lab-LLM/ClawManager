@@ -146,6 +146,15 @@ func TestSlotClientConfirmedStopAllowsHandover(t *testing.T) {
 		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body))}, nil
 	})}
 	client := NewSlotRuntimeAgentClientWithHTTPClient("token", kube, "runtime", httpClient)
+	legacy := NewRuntimeAgentClientWithHTTPClient("legacy-token", &http.Client{Transport: slotRoundTripper(func(*http.Request) (*http.Response, error) {
+		t.Fatal("ordinary HTTPS slots reached the legacy process client")
+		return nil, nil
+	})})
+	if err := ConfigureSlotLegacyCoexistence(client, legacy, func(context.Context, int) (bool, error) {
+		return false, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
 	a := RuntimeAgentCreateGatewayRequest{InstanceID: 7, UserID: 2, Generation: 1, AgentType: "openclaw", GatewayPort: 20000}
 	if _, err := client.CreateGateway(ctx, "https://10.0.0.2:19090", a); err != nil {
 		t.Fatal(err)

@@ -587,3 +587,24 @@ func TestNorthboundGatewayBootstrapIncludesDynamicSettingsReadGrants(t *testing.
 		}
 	}
 }
+
+func TestStaticRuntimeDeploymentsInjectPodUID(t *testing.T) {
+	for _, filename := range deploymentRuntimeManifests(filepath.Join("..", "..", "..")) {
+		t.Run(filename, func(t *testing.T) {
+			raw, err := os.ReadFile(filename)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, kind := range []string{"openclaw", "hermes", "opencode", "deepseek-harness"} {
+				for _, document := range strings.Split(string(raw), "\n---") {
+					if !strings.Contains(document, "\nkind: Deployment\nmetadata:\n  name: "+kind+"-runtime\n") {
+						continue
+					}
+					if !strings.Contains(document, "name: POD_UID\n              valueFrom:\n                fieldRef:\n                  fieldPath: metadata.uid\n") {
+						t.Errorf("%s-runtime must register the live Kubernetes Pod UID", kind)
+					}
+				}
+			}
+		})
+	}
+}

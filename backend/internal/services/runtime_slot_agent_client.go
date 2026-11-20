@@ -287,7 +287,9 @@ func (c *slotRuntimeAgentClient) ForceDeleteGateway(ctx context.Context, endpoin
 }
 
 func (c *slotRuntimeAgentClient) deleteGateway(ctx context.Context, endpoint, gatewayID string, forceDelete bool) error {
-	if c.legacy != nil {
+	// Ordinary container slots can have an empty security profile. Their HTTPS
+	// endpoint still requires the slot transport and a confirmed teardown receipt.
+	if c.legacy != nil && strings.HasPrefix(endpoint, "http://") {
 		id, parseErr := legacyGatewayInstanceID(gatewayID)
 		if parseErr == nil {
 			protected, err := c.protectedInstance(ctx, id)

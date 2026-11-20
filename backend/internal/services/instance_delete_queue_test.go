@@ -283,3 +283,16 @@ func TestTeamDeleteRetainsSharedResourcesUntilNativeProof(t *testing.T) {
 		t.Fatal("Team cleared its member/shared state before confirmed native deletion")
 	}
 }
+
+func TestQueueDeleteRejectsLegacyRuntimeBeforePersistingIntent(t *testing.T) {
+	repo := newV2LifecycleInstanceRepo()
+	repo.byID[77] = &models.Instance{ID: 77, UserID: 1, Type: "openclaw", RuntimeType: "gateway", InstanceMode: "lite", Status: "running", RuntimeGeneration: 1}
+	service := &instanceService{instanceRepo: repo, agentClient: NewRuntimeAgentClient("control-token")}
+
+	if err := service.QueueDelete(77); err == nil {
+		t.Fatal("deletion accepted without a stop-proof verifier")
+	}
+	if status := repo.byID[77].Status; status != "running" {
+		t.Fatalf("rejected deletion persisted status %q", status)
+	}
+}

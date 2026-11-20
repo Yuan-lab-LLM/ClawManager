@@ -6198,14 +6198,10 @@ spec:
             - name: TZ
               value: "Asia/Shanghai"
             # Enable only with the matching upstream Hermes Lite runtime.
-            - name: CLAWMANAGER_HERMES_DESKTOP_WEB_ENABLED
-              value: "true"
             - name: HERMES_DEPLOYMENT_NAMESPACE
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
-            - name: CLAWMANAGER_CONTROL_UI_ORIGIN
-              value: "http://clawmanager-gateway.$(HERMES_DEPLOYMENT_NAMESPACE).svc.cluster.local:9001"
             - name: SERVER_ADDRESS
               value: ":9001"
             - name: SERVER_MODE
@@ -6496,6 +6492,10 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
+            - name: POD_UID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.uid
             - name: POD_IP
               valueFrom:
                 fieldRef:
@@ -6542,14 +6542,10 @@ spec:
           env:
             - name: CLAWMANAGER_RUNTIME_TYPE
               value: hermes
-            - name: CLAWMANAGER_HERMES_DESKTOP_WEB_ENABLED
-              value: "true"
             - name: HERMES_DEPLOYMENT_NAMESPACE
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
-            - name: CLAWMANAGER_CONTROL_UI_ORIGIN
-              value: "http://clawmanager-gateway.$(HERMES_DEPLOYMENT_NAMESPACE).svc.cluster.local:9001"
             # Set trusted proxy addresses through the managed Hermes rollout,
             # or provide reviewed CLAWMANAGER_TRUSTED_PROXY_CIDRS explicitly.
             - name: CLAWMANAGER_BACKEND_URL
@@ -6612,6 +6608,10 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
+            - name: POD_UID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.uid
             - name: POD_IP
               valueFrom:
                 fieldRef:
@@ -6694,6 +6694,10 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
+            - name: POD_UID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.uid
             - name: POD_IP
               valueFrom:
                 fieldRef:
@@ -6841,6 +6845,10 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
+            - name: POD_UID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.uid
             - name: POD_IP
               valueFrom:
                 fieldRef:
