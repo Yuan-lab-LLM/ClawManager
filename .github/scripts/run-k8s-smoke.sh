@@ -87,8 +87,11 @@ install() {
   if [[ $image == clawmanager:ci ]]; then
     kind load docker-image "$image" --name "$cluster"
   fi
-  # The ext4 root contains lost+found. Give the workspace PVC the empty data directory inside it.
-  sed 's|^\([[:space:]]*path: /data/clawmanager/system/workspaces\)$|\1/data|' \
+  # The user-namespace preflight mounts all HostPaths. Put each one in its own
+  # directory on the ext4 filesystem to support ID-mapped mounts.
+  sed -E \
+    -e 's|^([[:space:]]*path: /data/clawmanager/system/)([^/[:space:]]+)$|\1workspaces/data/\2|' \
+    -e 's|^([[:space:]]*value: )"/data/clawreef"$|\1"/data/clawmanager/system/workspaces/data/users"|' \
     deployments/k8s/single-node/clawmanager.yaml > "$manifest"
   python3 tools/k8s/install_fresh.py --context "$context" \
     --manifest "$manifest" --credentials-dir "$credentials" \
