@@ -68,4 +68,4 @@ Skill Hub 是 OpenClaw、Hermes、OpenCode、DeepSeek Harness 共用的平台能
 
 验收应覆盖创建、启停重启、Portal/桌面、AI Gateway 流式与工具调用、工作区持久化、Share Link 权限，以及需要时的技能清单/安装/收录和明确错误反馈。
 
-相关说明：[用户手册](./use_guide_cn.md)、[AI Gateway 指南](./aigateway_cn.md)、[Skill Hub 指南](./skill-hub-guide.md)。
+相关说明：[用户手册](./use_guide_cn.md)、[AI Gateway 指南](./aigateway_cn.md)、[Skill Hub 指南](./skill-hub-guide.md)、[OpenCode v2 集成说明](./opencode-lite-v2.md)。
