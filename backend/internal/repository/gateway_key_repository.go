@@ -340,8 +340,20 @@ func (r *gatewayKeyRepository) Create(key *models.GatewayKey) error {
 	if key.BudgetResetAt == nil {
 		key.BudgetResetAt = nextGatewayBudgetReset(key.BudgetPeriod, time.Now().UTC())
 	}
-	_, err := r.sess.Collection("gateway_keys").Insert(key)
-	return err
+	return r.insert(key)
+}
+
+func (r *gatewayKeyRepository) insert(key *models.GatewayKey) error {
+	result, err := r.sess.Collection("gateway_keys").Insert(key)
+	if err != nil {
+		return err
+	}
+	id, ok := result.ID().(int64)
+	if !ok || id <= 0 || int64(int(id)) != id {
+		return errors.New("database did not return a valid gateway key ID")
+	}
+	key.ID = int(id)
+	return nil
 }
 
 func (r *gatewayKeyRepository) GetByID(id int) (*models.GatewayKey, error) {
@@ -401,8 +413,7 @@ func (r *gatewayKeyRepository) UpsertManagedInstance(ctx context.Context, instan
 	}
 	now := time.Now().UTC()
 	key = &models.GatewayKey{KeyID: "legacy-instance-" + itoa(instanceID), KeyPrefix: maskGatewayKey(token), TokenHash: GatewayKeyTokenHash(token), KeyType: models.GatewayKeyTypeManagedInstance, Name: "Managed instance " + itoa(instanceID), OwnerUserID: &ownerUserID, InstanceID: &instanceID, BudgetPeriod: models.GatewayKeyBudgetPeriodLifetime, Status: models.GatewayKeyStatusActive, CreatedAt: now, UpdatedAt: now}
-	_, err = r.sess.Collection("gateway_keys").Insert(key)
-	if err != nil {
+	if err := r.insert(key); err != nil {
 		return nil, err
 	}
 	return key, nil
