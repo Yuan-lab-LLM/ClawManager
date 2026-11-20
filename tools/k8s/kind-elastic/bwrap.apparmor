@@ -1,0 +1,5 @@
+abi <abi/4.0>,
+include <tunables/global>
+profile cm-kind-bwrap /usr/bin/bwrap flags=(unconfined) {
+  userns,
+}

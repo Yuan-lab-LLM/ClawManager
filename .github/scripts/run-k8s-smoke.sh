@@ -18,6 +18,10 @@ on_exit() {
   if [[ $owned == true ]] && (( status != 0 )); then
     kubectl --context "$context" -n "$namespace" get deployments,pods,pvc -o wide || true
     kubectl --context "$context" -n "$namespace" get events --sort-by=.lastTimestamp | tail -40 || true
+    kubectl --context "$context" -n "$namespace" logs -l clawmanager.io/runtime-type -c slot-0 \
+      --prefix --tail=25 --request-timeout=15s |
+      sed -E -e 's#(https?://)[^ /@]+:[^ /@]+@#\1[redacted]@#g' \
+        -e 's#[[:alnum:]_~./+-]{32,}#[redacted]#g' || true
   fi
   if [[ $owned == true ]]; then kind delete cluster --name "$cluster" || true; fi
   rm -rf -- "$private"
@@ -35,6 +39,12 @@ fi
 if kind get clusters | grep -Fxq "$cluster"; then
   echo "kind cluster $cluster already exists" >&2
   exit 1
+fi
+
+if [[ ${GITHUB_ACTIONS:-false} == true ]] &&
+   [[ $(sysctl -n kernel.apparmor_restrict_unprivileged_userns 2>/dev/null || true) == 1 ]]; then
+  sudo apparmor_parser -r tools/k8s/kind-elastic/bwrap.apparmor
+  printf '%s\n' 'Loaded the bubblewrap user namespace profile on the CI runner'
 fi
 
 printf 'Candidate CM image: %s\n' "$candidate"
