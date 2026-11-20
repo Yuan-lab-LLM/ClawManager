@@ -29,6 +29,7 @@ type runtimeEventPublisher interface {
 
 type RuntimeAgentHandler struct {
 	reportVerifier RuntimeGatewayReportVerifier
+	shutdownAudits repository.RuntimeShutdownAuditRepository
 	cfg            config.RuntimePoolConfig
 	podRepo        repository.RuntimePodRepository
 	bindingRepo    repository.InstanceRuntimeBindingRepository
@@ -93,19 +94,20 @@ type runtimeAgentGatewaysRequest struct {
 }
 
 type runtimeAgentGatewayReport struct {
-	InstanceID     int        `json:"instance_id" binding:"required"`
-	GatewayID      string     `json:"gateway_id"`
-	GatewayPort    int        `json:"gateway_port"`
-	GatewayPID     *int       `json:"gateway_pid,omitempty"`
-	WorkspacePath  string     `json:"workspace_path,omitempty"`
-	State          string     `json:"state" binding:"required"`
-	Generation     int        `json:"generation" binding:"required"`
-	ErrorMessage   *string    `json:"error_message,omitempty"`
-	FailureClass   string     `json:"failure_class,omitempty"`
-	ExitCode       *int       `json:"exit_code,omitempty"`
-	Retryable      *bool      `json:"retryable,omitempty"`
-	RestartAttempt int        `json:"restart_attempt,omitempty"`
-	HealthAt       *time.Time `json:"health_at,omitempty"`
+	ShutdownObservation *models.RuntimeShutdownObservation `json:"shutdown_observation,omitempty"`
+	InstanceID          int                                `json:"instance_id" binding:"required"`
+	GatewayID           string                             `json:"gateway_id"`
+	GatewayPort         int                                `json:"gateway_port"`
+	GatewayPID          *int                               `json:"gateway_pid,omitempty"`
+	WorkspacePath       string                             `json:"workspace_path,omitempty"`
+	State               string                             `json:"state" binding:"required"`
+	Generation          int                                `json:"generation" binding:"required"`
+	ErrorMessage        *string                            `json:"error_message,omitempty"`
+	FailureClass        string                             `json:"failure_class,omitempty"`
+	ExitCode            *int                               `json:"exit_code,omitempty"`
+	Retryable           *bool                              `json:"retryable,omitempty"`
+	RestartAttempt      int                                `json:"restart_attempt,omitempty"`
+	HealthAt            *time.Time                         `json:"health_at,omitempty"`
 }
 
 func NewRuntimeAgentHandler(cfg config.RuntimePoolConfig, podRepo repository.RuntimePodRepository, bindingRepo repository.InstanceRuntimeBindingRepository, instanceRepo repository.InstanceRepository, events runtimeEventPublisher, skillService services.SkillService) *RuntimeAgentHandler {
@@ -378,6 +380,28 @@ func (h *RuntimeAgentHandler) ReportGateways(c *gin.Context) {
 		if binding == nil || binding.RuntimePodID != podID || binding.Generation != gateway.Generation {
 			continue
 		}
+		if gateway.ShutdownObservation != nil {
+			if gateway.ShutdownObservation.Validate() != nil || gateway.ShutdownObservation.Generation != gateway.Generation {
+				utils.Error(c, 400, "Invalid runtime shutdown observation")
+				return
+			}
+			if h.shutdownAudits == nil || h.instanceRepo == nil {
+				utils.Error(c, 503, "Runtime shutdown audit storage unavailable")
+				return
+			}
+			instance, err := h.instanceRepo.GetByID(gateway.InstanceID)
+			if err != nil {
+				utils.Error(c, 503, "Runtime shutdown audit storage unavailable")
+				return
+			}
+			if instance == nil || instance.RuntimeGeneration != gateway.Generation {
+				continue
+			}
+			if err := h.shutdownAudits.Record(c.Request.Context(), instance.ID, instance.UserID, "lite_agent", *gateway.ShutdownObservation); err != nil {
+				utils.Error(c, 503, "Runtime shutdown audit not accepted")
+				return
+			}
+		}
 		lifecycle := services.NormalizeRuntimeGatewayLifecycle(gateway.State, gateway.ErrorMessage)
 		if writer, ok := h.bindingRepo.(interface {
 			ApplyReportedGateway(context.Context, models.InstanceRuntimeBinding, models.InstanceRuntimeBinding, string) error
@@ -449,6 +473,11 @@ func (h *RuntimeAgentHandler) ReportGateways(c *gin.Context) {
 		"gateway_count": len(req.Gateways),
 	})
 	utils.Success(c, http.StatusOK, "Runtime gateway report accepted", nil)
+}
+
+func (h *RuntimeAgentHandler) WithShutdownAudits(repo repository.RuntimeShutdownAuditRepository) *RuntimeAgentHandler {
+	h.shutdownAudits = repo
+	return h
 }
 
 func pendingBindingCanYieldToReportedGateway(binding *models.InstanceRuntimeBinding, podID int64, gateway runtimeAgentGatewayReport) bool {

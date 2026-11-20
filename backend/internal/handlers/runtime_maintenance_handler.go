@@ -11,13 +11,18 @@ import (
 )
 
 // RuntimeMaintenanceHandler accepts authenticated runtime evidence for upgrade
-// isolation. Manual instance drain controls are intentionally not exposed.
+// isolation. Compatibility endpoints expose status but reject manual mutations.
 type RuntimeMaintenanceHandler struct {
-	store repository.RuntimeMaintenanceRepository
+	store     repository.RuntimeMaintenanceRepository
+	instances repository.InstanceRepository
 }
 
-func NewRuntimeMaintenanceHandler(store repository.RuntimeMaintenanceRepository) *RuntimeMaintenanceHandler {
-	return &RuntimeMaintenanceHandler{store: store}
+func NewRuntimeMaintenanceHandler(store repository.RuntimeMaintenanceRepository, instances ...repository.InstanceRepository) *RuntimeMaintenanceHandler {
+	h := &RuntimeMaintenanceHandler{store: store}
+	if len(instances) > 0 {
+		h.instances = instances[0]
+	}
+	return h
 }
 
 func (h *RuntimeMaintenanceHandler) Poll(c *gin.Context) {

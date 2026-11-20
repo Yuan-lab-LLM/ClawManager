@@ -95,13 +95,13 @@ func (r *llmModelRepository) GetByDisplayName(name string) (*models.LLMModel, er
 func (r *llmModelRepository) Save(model *models.LLMModel) error {
 	err := r.sess.Tx(func(sess db.Session) error {
 		if model.ID != 0 {
-			row, err := sess.SQL().QueryRow("SELECT visibility_scope, access_policy_version FROM llm_models WHERE id = ? FOR UPDATE", model.ID)
+			row, err := sess.SQL().QueryRow("SELECT visibility_scope, access_policy_version, runtime_model_id FROM llm_models WHERE id = ? FOR UPDATE", model.ID)
 			if err != nil {
 				return err
 			}
 			var scope string
 			var version int
-			if err := row.Scan(&scope, &version); err != nil {
+			if err := row.Scan(&scope, &version, &model.RuntimeModelID); err != nil {
 				return err
 			}
 			if model.UpdateAccessPolicy {
@@ -124,6 +124,11 @@ func (r *llmModelRepository) Save(model *models.LLMModel) error {
 				}
 			}
 		} else {
+			identity, err := newRuntimeModelID()
+			if err != nil {
+				return err
+			}
+			model.RuntimeModelID = identity
 			model.AccessPolicyVersion = 1
 			if model.VisibilityScope == "" {
 				model.VisibilityScope = models.ModelVisibilityAll
@@ -163,6 +168,12 @@ func (r *llmModelRepository) Save(model *models.LLMModel) error {
 					}
 				}
 			}
+		}
+		if err := reserveRuntimeModelAliases(sess, model); err != nil {
+			return err
+		}
+		if err := reserveRuntimeProviderRef(sess, model); err != nil {
+			return err
 		}
 		return revokeUnauthorizedTasks(sess, model.ID)
 	})

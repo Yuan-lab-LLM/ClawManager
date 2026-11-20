@@ -8,6 +8,8 @@ const compile = (source) => ts.transpileModule(source, {
   compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
 }).outputText;
 const routing = await import(`data:text/javascript;base64,${Buffer.from(compile(read('../src/lib/modelRoutingPlan.ts'))).toString('base64')}`);
+const providers = await import(`data:text/javascript;base64,${Buffer.from(compile(read('../src/lib/modelProviderTemplates.ts'))).toString('base64')}`);
+const context = await import(`data:text/javascript;base64,${Buffer.from(compile(read('../src/lib/modelContext.ts'))).toString('base64')}`);
 const page = read('../src/pages/admin/ModelManagementPage.tsx');
 const section = (start, end) => {
   const offset = page.indexOf(start);
@@ -18,12 +20,14 @@ const section = (start, end) => {
 // Run the actual callbacks, not source-pattern assertions, so restore/reset and
 // asynchronous discovery behavior are covered with no browser or live API.
 const makeActions = new Function('env', compile(`
-  const { models, setModels, modelService, mergeDiscoveredPlan, plannedModelKind } = env;
+  const { models, setModels, modelService, mergeDiscoveredPlan, plannedModelKind, findProviderTemplate, normalizeBaseUrl, contextWindowTokensOrDefault } = env;
   const hasEditingCard = models.some((card) => card.isEditing);
   const t = (key) => key;
   const canDiscover = () => true;
   const buildDiscoveryKey = (card) => JSON.stringify([card.provider_type, card.protocol_type, card.base_url, card.api_key, card.api_key_secret_ref]);
   const resolveProviderProtocolType = (_provider, protocol) => protocol;
+  ${section('function uniqueImportedDisplayName', 'function getProviderTypeLabel')}
+  ${section('function buildCurrentTemplate', 'const TEMPLATE_ICON_META')}
   ${section('const captureSnapshot =', 'const createEmptyModel =')}
   ${section('  const updateCard =', '  const updateDiscoveryPlan =')}
   return { captureSnapshot, buildDiscoveryKey, updateCard, startEditing, cancelEditing, discoverModels };
@@ -46,7 +50,7 @@ function harness(respond = async () => [], patch = {}) {
     ], ...patch,
   }, { id: 2, local_id: 'other', provider_model_name: 'other' }];
   const actions = () => makeActions({
-    ...routing, models: state, setModels: (update) => { state = update(state); },
+    ...routing, ...providers, ...context, models: state, setModels: (update) => { state = update(state); },
     modelService: { discoverModels: async (...args) => { calls++; return respond(...args); } },
   });
   state[0].discovery_key = actions().buildDiscoveryKey(state[0]);
@@ -135,4 +139,28 @@ test('stale discovery failure cannot overwrite drafts for a new connection', asy
   await pending;
   assert.deepEqual(h.card().discovered_models, [{ id: 'new', display_name: 'New draft' }]);
   assert.equal(h.card().discovery_error, null);
+});
+
+
+test('editing a legacy zero context fills 256K and cancel restores the saved value', () => {
+  const h = harness(undefined, { context_window_tokens: 0 });
+  h.actions().startEditing(h.card());
+  assert.equal(h.card().context_window_tokens, 262144);
+  h.actions().updateCard('saved', { context_window_tokens: 64000, context_window_edited: true });
+  h.actions().cancelEditing(h.card());
+  assert.equal(h.card().context_window_tokens, 0);
+  assert.equal(h.card().context_window_edited, undefined);
+});
+
+
+test('discovery shows a known provider context while preserving an explicit administrator choice', async () => {
+  const h = harness(async () => [{ id: 'a', display_name: 'Model A', context_window_tokens: 131072 }], {
+    id: undefined, isNew: true, isEditing: true, model_group: '',
+    context_window_tokens: 262144, context_window_edited: false,
+  });
+  await h.actions().discoverModels('saved', true);
+  assert.equal(h.card().context_window_tokens, 131072);
+  h.actions().updateCard('saved', { context_window_tokens: 262144, context_window_edited: true });
+  await h.actions().discoverModels('saved', true);
+  assert.equal(h.card().context_window_tokens, 262144);
 });

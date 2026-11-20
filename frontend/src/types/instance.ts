@@ -1,8 +1,23 @@
 import type { OpenClawConfigPlan } from "./openclawConfig";
 import type { InstanceSkill } from "./skill";
 
+export interface RuntimeShutdownAuditHistory {
+  diagnostic_only: true;
+  generation: number;
+  next_before_id: number;
+  items: Array<{
+    id: number;
+    generation: number;
+    claim_id: string;
+    outcome: "cleanup_unconfirmed" | "cleanup_confirmed_release_unconfirmed" | "cleanup_confirmed_release_observed";
+    source: "pro_agent" | "lite_agent";
+    received_at: string;
+  }>;
+}
+
 export interface RuntimeGovernanceStatus {
   mode: "legacy" | "governed" | "awaiting_runtime";
+  reason?: "not_enrolled" | "connected" | "unsupported_protocol" | "owner_changed" | "generation_changed" | "runtime_not_running" | "report_clock_skew" | "report_expired" | "invalid_report";
   task_identity_required: boolean;
   capabilities: string[];
   report: {
@@ -550,6 +565,26 @@ export interface InstanceLLMGovernanceStatus {
   session_fallback_rate: number;
   recent_egress_block_count: number;
   is_compliant: boolean;
+}
+
+export interface RuntimeMaintenanceStatus {
+  manual_controls_available?: boolean;
+  draining: boolean;
+  drained: boolean;
+  automatic_upgrade_available: false;
+  operation: null | {
+    upgrade_fenced?: boolean;
+    operation_id: string;
+    generation: number;
+    deadline: string;
+    cancelled: boolean;
+    gate_closed: boolean;
+    active_executions: number;
+    active_admissions: number;
+    active_jobs: number;
+    queued_inputs: number;
+    reported_at: string | null;
+  };
 }
 
 export const PRESET_CONFIGS = {

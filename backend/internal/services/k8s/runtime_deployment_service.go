@@ -145,6 +145,12 @@ func (s *runtimeDeploymentService) EnsureUpgradeLabPool(ctx context.Context, nam
 	}
 	deployments := s.client.AppsV1().Deployments(namespace)
 	if existing, err := deployments.Get(ctx, name, metav1.GetOptions{}); err == nil {
+		if err := rejectRuntimeReceiptClone(existing); err != nil {
+			return err
+		}
+		if err := s.checkRuntimeReceiptCloneSource(ctx, namespace, templateName, existing.Labels["clawmanager.io/runtime-type"]); err != nil {
+			return err
+		}
 		if existing.Labels[upgradeLabPurposeLabel] != upgradeLabPurposeValue || existing.Labels[upgradeLabRunLabel] != runID {
 			return fmt.Errorf("deployment %s/%s is not owned by upgrade lab run %s", namespace, name, runID)
 		}
@@ -158,6 +164,9 @@ func (s *runtimeDeploymentService) EnsureUpgradeLabPool(ctx context.Context, nam
 	template, err := deployments.Get(ctx, templateName, metav1.GetOptions{})
 	if err != nil {
 		return fmt.Errorf("get upgrade lab template deployment %s/%s: %w", namespace, templateName, err)
+	}
+	if err := rejectRuntimeReceiptClone(template); err != nil {
+		return err
 	}
 	target := template.DeepCopy()
 	target.TypeMeta = metav1.TypeMeta{}
@@ -269,6 +278,12 @@ func (s *runtimeDeploymentService) ensureUpgradePool(ctx context.Context, namesp
 	}
 	deployments := s.client.AppsV1().Deployments(namespace)
 	if existing, err := deployments.Get(ctx, targetName, metav1.GetOptions{}); err == nil {
+		if err := rejectRuntimeReceiptClone(existing); err != nil {
+			return err
+		}
+		if err := s.checkRuntimeReceiptCloneSource(ctx, namespace, sourceName, existing.Labels["clawmanager.io/runtime-type"]); err != nil {
+			return err
+		}
 		if cold != nil {
 			return s.verifyColdSuccessorTemplate(ctx, existing, cold.Source, cold.Hash, cold.Operation, upgradeID)
 		}
@@ -303,6 +318,9 @@ func (s *runtimeDeploymentService) ensureUpgradePool(ctx context.Context, namesp
 }
 
 func buildUpgradeRuntimePool(source *appsv1.Deployment, namespace, sourceName, targetName, image, upgradeID string, cold *runtimeColdClone) (*appsv1.Deployment, error) {
+	if err := rejectRuntimeReceiptClone(source); err != nil {
+		return nil, err
+	}
 	target := source.DeepCopy()
 	target.TypeMeta = metav1.TypeMeta{}
 	target.ObjectMeta = metav1.ObjectMeta{Name: targetName, Namespace: namespace, Labels: map[string]string{}}
@@ -382,6 +400,18 @@ func (s *runtimeDeploymentService) setUpgradePoolActive(ctx context.Context, nam
 			deployment, err := deployments.Get(ctx, name, metav1.GetOptions{})
 			if err != nil {
 				return err
+			}
+			if active && value == "true" {
+				if err := rejectRuntimeReceiptClone(deployment); err != nil {
+					return err
+				}
+				source, err := deployments.Get(ctx, sourceName, metav1.GetOptions{})
+				if err != nil {
+					return err
+				}
+				if err := rejectRuntimeReceiptClone(source); err != nil {
+					return err
+				}
 			}
 			if validateTarget && (deployment.Labels[runtimePoolRoleLabel] != "upgrade-target" || deployment.Labels[runtimeUpgradeIDLabel] != upgradeID || deployment.Labels[runtimeSourceLabel] != sourceName) {
 				return fmt.Errorf("deployment %s/%s is not upgrade target %s for source %s", namespace, name, upgradeID, sourceName)
@@ -640,6 +670,9 @@ func (s *runtimeDeploymentService) Ensure(ctx context.Context, spec RuntimeDeplo
 	}
 
 	desired := BuildRuntimeDeployment(spec)
+	if err := s.prepareRuntimeReceiptStorage(ctx, desired); err != nil {
+		return err
+	}
 	if spec.RuntimeType == "hermes" && spec.HermesDesktopWeb {
 		container := &desired.Spec.Template.Spec.Containers[0]
 		upsertEnvVar(container, "CLAWMANAGER_CONTROL_UI_ORIGIN", spec.ControlUIOrigin)
@@ -675,6 +708,16 @@ func (s *runtimeDeploymentService) Ensure(ctx context.Context, spec RuntimeDeplo
 	if existing.Labels[RuntimeScaleInOperationLabel] != "" {
 		return fmt.Errorf("Runtime scale-in is active; Deployment updates are fenced")
 	}
+	if hasRuntimeReceiptStorage(existing) {
+		// Validate the old layout too: a freshly generated template must not
+		// silently turn an old subPath/shared mount into a different directory.
+		if err := s.prepareRuntimeReceiptStorage(ctx, existing.DeepCopy()); err != nil {
+			return err
+		}
+	}
+	if err := validateRuntimeReceiptTransition(existing, desired); err != nil {
+		return err
+	}
 
 	updated := existing.DeepCopy()
 	if updated.Labels == nil {
@@ -691,6 +734,15 @@ func (s *runtimeDeploymentService) Ensure(ctx context.Context, spec RuntimeDeplo
 		updated.Spec.Template.Labels[key] = value
 	}
 	updated.Spec.Template.Spec = desired.Spec.Template.Spec
+	if hasRuntimeReceiptStorage(desired) {
+		if updated.Spec.Template.Annotations == nil {
+			updated.Spec.Template.Annotations = map[string]string{}
+		}
+		for key, value := range desired.Spec.Template.Annotations {
+			updated.Spec.Template.Annotations[key] = value
+		}
+		updated.Spec.Strategy = desired.Spec.Strategy
+	}
 
 	_, err = deployments.Update(ctx, updated, metav1.UpdateOptions{})
 	if err != nil {
@@ -736,17 +788,28 @@ func (s *runtimeDeploymentService) Scale(ctx context.Context, namespace, name st
 	deployments := s.client.AppsV1().Deployments(namespace)
 	current, err := deployments.Get(ctx, name, metav1.GetOptions{})
 	if err != nil {
-		return err
+		return fmt.Errorf("inspect runtime before scaling: %w", err)
+	}
+	if hasRuntimeReceiptStorage(current) && replicas > 0 {
+		if replicas > 1 {
+			return fmt.Errorf("runtime receipt storage currently supports zero or one Pod")
+		}
+		if err := s.prepareRuntimeReceiptStorage(ctx, current.DeepCopy()); err != nil {
+			return err
+		}
 	}
 	if current.Labels[RuntimeScaleInOperationLabel] != "" {
 		return fmt.Errorf("Runtime scale-in is active; replica changes are fenced")
 	}
-	patch, err := json.Marshal(map[string]interface{}{
-		"metadata": map[string]interface{}{"resourceVersion": current.ResourceVersion},
+	patchBody := map[string]interface{}{
 		"spec": map[string]interface{}{
 			"replicas": replicas,
 		},
-	})
+	}
+	if current.ResourceVersion != "" {
+		patchBody["metadata"] = map[string]interface{}{"resourceVersion": current.ResourceVersion}
+	}
+	patch, err := json.Marshal(patchBody)
 	if err != nil {
 		return fmt.Errorf("failed to build runtime deployment scale patch %s/%s: %w", namespace, name, err)
 	}
@@ -844,6 +907,14 @@ func (s *runtimeDeploymentService) rolloutImage(ctx context.Context, namespace, 
 		updated.Spec.Strategy.RollingUpdate = &appsv1.RollingUpdateDeployment{
 			MaxUnavailable: intOrStringPtr(nonNegativeRolloutInt(maxUnavailable)),
 			MaxSurge:       intOrStringPtr(positiveRolloutInt(maxSurge)),
+		}
+		if upgradeID != "" {
+			if err := rejectRuntimeReceiptClone(existing); err != nil {
+				return err
+			}
+		}
+		if err := s.prepareRuntimeReceiptStorage(ctx, updated); err != nil {
+			return err
 		}
 
 		_, err = deployments.Update(ctx, updated, metav1.UpdateOptions{})

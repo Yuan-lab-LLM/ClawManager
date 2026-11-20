@@ -73,6 +73,30 @@ func TestRuntimeManagementCoordinationIsReferenceOnly(t *testing.T) {
 	}
 }
 
+func TestRuntimeIdentityReservationsAndShutdownHistoryArePreserved(t *testing.T) {
+	for _, tc := range []struct {
+		name, category string
+		row            team.Row
+	}{
+		{"llm_runtime_model_aliases", "ai_gateway", team.Row{"alias": team.Value("deleted-model-alias"), "model_id": team.Value("999")}},
+		{"llm_runtime_provider_refs", "ai_gateway", team.Row{"provider_id": team.Value("old-provider"), "model_ref": team.Value("old-model"), "model_id": team.Value("999")}},
+		{"runtime_shutdown_audits", "instances", team.Row{"instance_id": team.Value("42"), "generation": team.Value("7"), "claim_id": team.Value("historical-claim-hash"), "outcome": team.Value("stopped")}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			policy, ok := Policy(tc.name)
+			if !ok || policy.Category != tc.category || policy.Classification != "secret" || policy.BackupStrategy != "mysql_dump" || policy.RestoreStrategy != "normalize" {
+				t.Fatalf("durable identity/history excluded from encrypted backup: %+v", policy)
+			}
+			// Deleted deployments retain reservations; history is diagnostic,
+			// not a live cancellation receipt or a runnable stop operation.
+			change, err := NormalizeDataRow(SQLTable{Name: tc.name}, tc.row, time.Now().UTC())
+			if err != nil || change.Reason != "preserved" || change.Quarantined || !reflect.DeepEqual(change.Before, tc.row) || !reflect.DeepEqual(change.After, tc.row) {
+				t.Fatalf("identity/history changed during isolated restore: %+v %v", change, err)
+			}
+		})
+	}
+}
+
 func TestBrowserOriginBackupPolicies(t *testing.T) {
 	ledger, ok := Policy("browser_origin_ports")
 	if !ok || ledger.Category != "instances" || ledger.Classification != "secret" || ledger.BackupStrategy != "mysql_dump" || ledger.RestoreStrategy != "normalize" {

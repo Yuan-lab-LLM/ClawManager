@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "test:opencode-storage": "node scripts/opencode-browser-storage.test.mjs",
+    "test:opencode-onboarding": "node scripts/opencode-onboarding.test.mjs",
+    "test:opencode-browser": "npm run test:opencode-storage && npm run test:opencode-onboarding",
     "test:p0": "tsx scripts/run-with-log.ts p0",
     "test:p1": "tsx scripts/run-with-log.ts p1",
     "test:p2": "tsx scripts/run-with-log.ts p2",

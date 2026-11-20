@@ -303,13 +303,13 @@ func NewService(
 
 func newGatewayHTTPClients() (*http.Client, *http.Client) {
 	return &http.Client{
-		Timeout: providerRequestTimeout,
-	}, &http.Client{
-		// Streaming model calls are bounded by the incoming request context,
-		// not by a fixed whole-request deadline. A single Agent turn may
-		// legitimately take longer than an ordinary JSON request.
-		Timeout: 0,
-	}
+			Timeout: providerRequestTimeout,
+		}, &http.Client{
+			// Streaming model calls are bounded by the incoming request context,
+			// not by a fixed whole-request deadline. A single Agent turn may
+			// legitimately take longer than an ordinary JSON request.
+			Timeout: 0,
+		}
 }
 
 func (s *service) ListAvailableModels() ([]AvailableModel, error) {
@@ -2265,6 +2265,24 @@ func (s *service) resolveRequestedModel(requestedModel string) (*models.LLMModel
 		return nil, fmt.Errorf("failed to list active models: %w", err)
 	}
 	items = models.ExpandLLMModelCatalog(items)
+	// A retained historical reference is an explicit identity decision, including
+	// a tombstone denial. Do not bypass it through a same-named upstream ID.
+	var historical *models.LLMModel
+	if resolver, ok := s.modelRepo.(repository.RuntimeModelResolver); ok {
+		historical, err = resolver.ResolveRuntimeModel(requestedModel)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if strings.HasPrefix(strings.ToLower(requestedModel), "cm-deploy-v1-") {
+		if historical == nil {
+			return nil, models.ErrModelUnavailable
+		}
+		if !models.LLMChatAvailable(historical) {
+			return nil, models.ErrChatNotSupported
+		}
+		return historical, nil
+	}
 	// Runtime configurations carry the real upstream ID, including namespace
 	// slashes. An owner-visible canonical ID takes priority over a colliding
 	// display alias; UI labels must never redirect it to another real model.
@@ -2283,6 +2301,12 @@ func (s *service) resolveRequestedModel(requestedModel string) (*models.LLMModel
 			return &selected, nil
 		}
 	}
+	if historical != nil {
+		if !models.LLMChatAvailable(historical) {
+			return nil, models.ErrChatNotSupported
+		}
+		return historical, nil
+	}
 	// Preserve the scoped repository's explicit denial (including its stable
 	// error code) before attempting legacy display or logical-group aliases.
 	configured, lookupErr := s.modelRepo.GetByDisplayName(requestedModel)
@@ -2297,6 +2321,24 @@ func (s *service) resolveRequestedModel(requestedModel string) (*models.LLMModel
 			configured.CatalogProviderName = strings.TrimSpace(configured.DisplayName)
 		}
 		return configured, nil
+	}
+	if strings.HasPrefix(requestedModel, models.RuntimeModelAliasPrefix) {
+		// Resolve only within the request-scoped catalog. Never turn an opaque
+		// runtime alias into an unrestricted repository/ID lookup.
+		for _, item := range items {
+			name := strings.TrimSpace(item.DisplayName)
+			if name == "" {
+				name = strings.TrimSpace(item.ProviderModelName)
+			}
+			if models.RuntimeModelAlias(name) == requestedModel {
+				selected := item
+				if !models.LLMChatAvailable(&selected) {
+					return nil, models.ErrChatNotSupported
+				}
+				return &selected, nil
+			}
+		}
+		return nil, models.ErrModelUnavailable
 	}
 	for _, item := range items {
 		if strings.TrimSpace(item.DisplayName) == requestedModel {

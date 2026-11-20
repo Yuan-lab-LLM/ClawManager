@@ -34,6 +34,8 @@ import ActionMenu from "../../components/ActionMenu";
 import InstanceSkillsDialog from "../../components/InstanceSkillsDialog";
 import InstanceWorkspaceSplit from "../../components/InstanceWorkspaceSplit";
 import InstanceNameEditor from "../../components/InstanceNameEditor";
+import ModelCatalogSyncBadge from "../../components/ModelCatalogSyncBadge";
+import RuntimeShutdownAuditPanel from "../../components/RuntimeShutdownAuditPanel";
 import { InstanceServiceFrame } from "../../components/InstanceServiceFrame";
 import InstanceSleepingState from "../../components/InstanceSleepingState";
 import { getInstanceDisplayStatus } from "../../lib/instanceStatus";
@@ -525,17 +527,6 @@ const InstanceDetailPage: React.FC = () => {
     return () => cancelRestartNoticeTimer();
   }, [cancelRestartNoticeTimer]);
 
-  const openCodeInitialDirectory = (() => {
-    if (instance?.type !== "opencode" || instance.instance_mode !== "lite") {
-      return undefined;
-    }
-    const workspacePath = instance?.workspace_path?.trim().replaceAll("\\", "/");
-    if (!workspacePath?.startsWith("/")) {
-      return undefined;
-    }
-    return `${workspacePath.replace(/\/+$/gu, "")}/starter`;
-  })();
-
   const returnToInventory = useCallback((targetInstanceId: number) => {
     if (userId) {
       forgetInstance(userId, targetInstanceId);
@@ -544,7 +535,6 @@ const InstanceDetailPage: React.FC = () => {
     metaRequest.current += 1;
     navigate(listReturnTo, { replace: true });
   }, [userId, queryClient, navigate, listReturnTo]);
-
   const fetchMeta = useCallback(
     async (targetInstanceId: number, options?: { background?: boolean }) => {
       if (!activePage.current || metaInFlight.current) return;
@@ -1120,6 +1110,8 @@ const InstanceDetailPage: React.FC = () => {
 
   const renderFrameActions = () => <>
     {shareLinkControl}
+    {["opencode", "openclaw", "hermes", "deepseek-harness"].includes(instance.type) && <ModelCatalogSyncBadge instanceId={instance.id} generation={instance.runtime_generation ?? 0} status={instance.status} />}
+    {instance.type === "openclaw" && <RuntimeShutdownAuditPanel key={`shutdown-${instance.id}`} instanceId={instance.id} />}
     <InstanceSkillsDialog key={instance.id} instance={instance} onRuntimeDetailsChange={setRuntimeDetails} iconOnly />
     <ActionMenu label={t("instances.runtimeManagement")} icon={<Settings2 size={16} />} disabled={actionLoading !== null} items={[
             ...(instance.status === "running" ? [{ id: "stop", label: t("common.stop"), onSelect: () => void handleAction("stop") }]
@@ -1466,7 +1458,6 @@ const InstanceDetailPage: React.FC = () => {
               availability={availability}
               unavailableContent={sleepingContent}
               reloadToken={serviceFrameReloadToken}
-              openCodeInitialDirectory={openCodeInitialDirectory}
               workspaceVisible={supportsWorkspace(instance) ? workspaceVisible : undefined}
               onWorkspaceVisibilityChange={supportsWorkspace(instance) ? setWorkspaceVisible : undefined}
             />
@@ -1481,7 +1472,6 @@ const InstanceDetailPage: React.FC = () => {
                 runtimeGeneration={instance.runtime_generation ?? 0}
                 isRunning={instance.status === "running"}
                 visible={workspaceVisible}
-                initialPath={instance.type === "opencode" && instance.instance_mode === "lite" ? "starter" : undefined}
               />
             </div>
           ) : null} />

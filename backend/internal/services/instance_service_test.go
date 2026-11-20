@@ -128,6 +128,10 @@ func TestBuildGatewayEnvInjectsGatewayModelCatalog(t *testing.T) {
 			if instanceType == "opencode" {
 				assertOpenCodeGatewayConfig(t, env["OPENCODE_CONFIG_CONTENT"])
 			}
+			needsModelRefs := instanceType == "openclaw" || instanceType == "hermes" || instanceType == RuntimeTypeDeepSeekHarness
+			if got := env["CLAWMANAGER_MODEL_REFERENCE_PROTOCOL"]; needsModelRefs && got != "1" || !needsModelRefs && got != "" {
+				t.Fatalf("unexpected model reference protocol for %s: %q", instanceType, got)
+			}
 		})
 	}
 }
@@ -564,6 +568,18 @@ func TestResolveGatewayModelInjectionRequiresActiveModels(t *testing.T) {
 	injection, err := service.resolveGatewayModelInjection(1)
 	if err == nil {
 		t.Fatalf("expected resolveGatewayModelInjection to fail when no active models exist, got %#v", injection)
+	}
+}
+
+func TestExistingInstanceStartsWithAuthoritativeEmptyCatalog(t *testing.T) {
+	t.Setenv("CLAWMANAGER_LLM_GATEWAY_BASE_URL", "http://gateway.example/api/v1/gateway/llm")
+	token := "test-instance-token"
+	s := &instanceService{llmModelRepo: &stubLLMModelRepository{}}
+	for _, kind := range []string{"opencode", "openclaw", RuntimeTypeHermes, RuntimeTypeDeepSeekHarness} {
+		env, err := s.buildGatewayEnvReadOnly(&models.Instance{ID: 42, UserID: 1, Type: kind, AccessToken: &token})
+		if err != nil || env["CLAWMANAGER_MODEL_CATALOG_SYNC"] != "1" || env["CLAWMANAGER_LLM_MODEL"] != "[]" {
+			t.Fatalf("%s empty startup: %v %v", kind, env, err)
+		}
 	}
 }
 

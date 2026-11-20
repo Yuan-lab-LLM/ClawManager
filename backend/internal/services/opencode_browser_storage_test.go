@@ -83,6 +83,12 @@ func TestOpenCodeBrowserStorageProxyIsolatesDedicatedHTMLOnly(t *testing.T) {
 			if !strings.Contains(rec.Body.String(), "clawmanager-opencode-storage-scope") {
 				t.Fatal("dedicated origin missing storage isolation")
 			}
+			if !strings.Contains(rec.Body.String(), "clawmanager-opencode-onboarding") {
+				t.Fatal("dedicated origin missing OpenCode onboarding")
+			}
+			if strings.Index(rec.Body.String(), "clawmanager-opencode-storage-scope") > strings.Index(rec.Body.String(), "clawmanager-opencode-onboarding") {
+				t.Fatal("onboarding ran before instance-scoped storage isolation")
+			}
 			if strings.Contains(rec.Body.String(), "igt_test_only") {
 				t.Fatal("credential leaked into browser HTML")
 			}
@@ -92,8 +98,13 @@ func TestOpenCodeBrowserStorageProxyIsolatesDedicatedHTMLOnly(t *testing.T) {
 			if !strings.Contains(rec.Body.String(), `src="/_assets/app.js"`) {
 				t.Fatal("dedicated-origin asset path was rewritten")
 			}
-		} else if rec.Body.String() != `window.asset=true;` || rec.Header().Get("ETag") != `"upstream"` {
-			t.Fatal("asset response should retain normal caching and contents")
+		} else {
+			if strings.Contains(rec.Body.String(), "clawmanager-opencode-onboarding") {
+				t.Fatal("onboarding must not be injected into static assets")
+			}
+			if rec.Body.String() != `window.asset=true;` || rec.Header().Get("ETag") != `"upstream"` {
+				t.Fatal("asset response should retain normal caching and contents")
+			}
 		}
 	}
 }

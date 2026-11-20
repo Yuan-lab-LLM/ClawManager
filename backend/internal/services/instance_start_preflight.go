@@ -25,6 +25,12 @@ func (s *instanceService) validateInstanceStartConfiguration(ctx context.Context
 	prepared := *instance
 	placeholder := "preflight-only-not-a-credential"
 	if prepared.AccessToken == nil || strings.TrimSpace(*prepared.AccessToken) == "" {
+		// A persisted row without a credential still needs initial model
+		// provisioning. A placeholder must not enable the existing-instance
+		// empty-catalog fallback before fencing, cleanup or environment writes.
+		if _, err := s.resolveGatewayModelInjection(prepared.UserID); err != nil {
+			return fmt.Errorf("validate instance gateway configuration: %w", err)
+		}
 		prepared.AccessToken = &placeholder
 	}
 	env, err := s.buildGatewayEnvReadOnly(&prepared)

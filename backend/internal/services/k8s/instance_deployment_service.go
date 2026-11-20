@@ -39,16 +39,26 @@ func (s *InstanceDeploymentService) EnsureDeployment(ctx context.Context, config
 	if s.client == nil {
 		return nil, fmt.Errorf("k8s client not initialized")
 	}
-	if _, err := s.namespaceService.EnsureNamespace(ctx, config.UserID); err != nil {
-		return nil, fmt.Errorf("failed to ensure namespace: %w", err)
-	}
-
 	desired := BuildInstanceDeployment(s.client, config, replicas)
+	if err := s.prepareOpenClawReceiptStorage(ctx, config, desired); err != nil {
+		return nil, err
+	}
 	deployments := s.client.Clientset.AppsV1().Deployments(desired.Namespace)
+	existing, err := deployments.Get(ctx, desired.Name, metav1.GetOptions{})
+	if err != nil && !errors.IsNotFound(err) {
+		return nil, fmt.Errorf("failed to get instance deployment %s/%s: %w", desired.Namespace, desired.Name, err)
+	}
+	if err == nil {
+		if transitionErr := validateOpenClawReceiptTransition(existing, desired); transitionErr != nil {
+			return nil, transitionErr
+		}
+	}
+	if _, namespaceErr := s.namespaceService.EnsureNamespace(ctx, config.UserID); namespaceErr != nil {
+		return nil, fmt.Errorf("failed to ensure namespace: %w", namespaceErr)
+	}
 	if err := s.deleteLegacyDeployments(ctx, desired.Namespace, config.InstanceID, desired.Name); err != nil {
 		return nil, err
 	}
-	existing, err := deployments.Get(ctx, desired.Name, metav1.GetOptions{})
 	if errors.IsNotFound(err) {
 		created, createErr := deployments.Create(ctx, desired, metav1.CreateOptions{})
 		if createErr != nil {
@@ -72,6 +82,9 @@ func (s *InstanceDeploymentService) EnsureDeployment(ctx context.Context, config
 		if !reflect.DeepEqual(current.Spec.Selector, desired.Spec.Selector) {
 			return fmt.Errorf("instance deployment %s/%s selector mismatch; delete and recreate the deployment to change immutable selector", desired.Namespace, desired.Name)
 		}
+		if err := validateOpenClawReceiptTransition(current, desired); err != nil {
+			return err
+		}
 
 		updated := current.DeepCopy()
 		if updated.Labels == nil {
@@ -82,6 +95,9 @@ func (s *InstanceDeploymentService) EnsureDeployment(ctx context.Context, config
 		}
 		updated.Spec.Replicas = desired.Spec.Replicas
 		updated.Spec.Template = desired.Spec.Template
+		if desired.Spec.Template.Annotations[openClawReceiptAnnotation] != "" {
+			updated.Spec.Strategy = desired.Spec.Strategy
+		}
 
 		result, getErr = deployments.Update(ctx, updated, metav1.UpdateOptions{})
 		return getErr
@@ -102,11 +118,23 @@ func (s *InstanceDeploymentService) deleteLegacyDeployments(ctx context.Context,
 	}
 
 	for _, item := range items.Items {
+		if item.Name != expectedName && hasRuntimeReceiptStorage(&item) {
+			return fmt.Errorf("legacy deployment %s/%s has receipt storage; explicit migration is required", namespace, item.Name)
+		}
+	}
+	for _, item := range items.Items {
 		if item.Name == expectedName {
 			continue
 		}
 		propagation := metav1.DeletePropagationForeground
-		if err := deployments.Delete(ctx, item.Name, metav1.DeleteOptions{PropagationPolicy: &propagation}); err != nil && !errors.IsNotFound(err) {
+		preconditions := &metav1.Preconditions{}
+		if item.UID != "" {
+			preconditions.UID = &item.UID
+		}
+		if item.ResourceVersion != "" {
+			preconditions.ResourceVersion = &item.ResourceVersion
+		}
+		if err := deployments.Delete(ctx, item.Name, metav1.DeleteOptions{PropagationPolicy: &propagation, Preconditions: preconditions}); err != nil && !errors.IsNotFound(err) {
 			return fmt.Errorf("failed to delete legacy instance deployment %s/%s: %w", namespace, item.Name, err)
 		}
 	}
@@ -119,9 +147,30 @@ func (s *InstanceDeploymentService) ScaleDeployment(ctx context.Context, userID,
 	}
 	namespace := s.client.GetNamespace(userID)
 	name := InstanceDeploymentName(instanceID)
-	patch, err := json.Marshal(map[string]any{
+	var expectedResourceVersion string
+	if replicas > 0 {
+		current, err := s.client.Clientset.AppsV1().Deployments(namespace).Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			return fmt.Errorf("failed to inspect deployment before scaling: %w", err)
+		}
+		if hasRuntimeReceiptStorage(current) {
+			if replicas > 1 {
+				return fmt.Errorf("receipt storage requires zero or one replica")
+			}
+			if err := s.validateOpenClawReceiptStart(ctx, current, userID, instanceID); err != nil {
+				return err
+			}
+		}
+		expectedResourceVersion = current.ResourceVersion
+	}
+	patchBody := map[string]any{
 		"spec": map[string]any{"replicas": replicas},
-	})
+	}
+	if expectedResourceVersion != "" {
+		// Do not race a concurrent transition into single-writer receipt storage.
+		patchBody["metadata"] = map[string]any{"resourceVersion": expectedResourceVersion}
+	}
+	patch, err := json.Marshal(patchBody)
 	if err != nil {
 		return fmt.Errorf("failed to build instance deployment scale patch: %w", err)
 	}

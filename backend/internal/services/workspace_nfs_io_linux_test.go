@@ -349,6 +349,19 @@ func TestNFSUploadOverwritePreservesPrivateMetadata(t *testing.T) {
 
 type emptyNFSTeamGuard struct{}
 
+// Cancel on payload consumption, after owner preflight and durable intent
+// registration. A short wall-clock timeout can expire during helper startup
+// instead, testing an undispatched operation rather than uncertain mutation.
+type cancelOnNFSUploadRead struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+}
+
+func (r cancelOnNFSUploadRead) Read([]byte) (int, error) {
+	r.cancel()
+	return 0, r.ctx.Err()
+}
+
 func (emptyNFSTeamGuard) WithWorkspaceMutation(_ context.Context, _ WorkspaceFileScope, run func() error) error {
 	return run()
 }
@@ -381,10 +394,10 @@ func TestNFSTeamStoppedMutationStillTracksIntent(t *testing.T) {
 	s := NewWorkspaceFileService(nil).(*workspaceFileService)
 	ConfigureWorkspaceNFSIO(s, "nfs-rootless-v1", base, writes)
 	ConfigureWorkspaceUpgradeGuard(s, emptyNFSTeamGuard{})
-	ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
-	_, err = s.Upload(ctx, WorkspaceFileScope{TeamID: 7, UserID: 3, WorkspacePath: root}, "", "pending", cancelNFSUpload{ctx}, 100)
-	if !errors.Is(err, ErrWorkspaceNFSUncertain) || !writes.active || writes.begins != 1 {
+	_, err = s.Upload(ctx, WorkspaceFileScope{TeamID: 7, UserID: 3, WorkspacePath: root}, "", "pending", cancelOnNFSUploadRead{ctx, cancel}, 100)
+	if !errors.Is(err, context.Canceled) || !errors.Is(err, ErrWorkspaceNFSUncertain) || !writes.active || writes.begins != 1 || writes.completes != 0 {
 		t.Fatalf("Team dispatch escaped durable tracking: %+v %v", writes, err)
 	}
 }

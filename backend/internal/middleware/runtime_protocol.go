@@ -3,6 +3,7 @@ package middleware
 import (
 	"net/http"
 
+	"clawreef/internal/models"
 	"clawreef/internal/repository"
 	"github.com/gin-gonic/gin"
 )
@@ -22,6 +23,12 @@ func RuntimeProtocolPolicy(repo repository.RuntimeProtocolRepository) gin.Handle
 			return
 		}
 		if state != nil {
+			// Only an absent enrollment is legacy. Unknown/corrupt protocol state
+			// cannot be interpreted as compatible or silently downgraded to v1.
+			if state.Protocol != models.RuntimeGovernanceProtocol {
+				c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{"error": "Unsupported runtime governance policy"})
+				return
+			}
 			c.Set("runtimeGovernanceProtocol", state.Protocol)
 		}
 		c.Next()

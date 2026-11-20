@@ -3,6 +3,8 @@ import AdminLayout from '../../components/AdminLayout';
 import ModelCatalog from '../../components/ModelCatalog';
 import ModelDiscoveryPlan, { type DiscoveryPlanPatch } from '../../components/ModelDiscoveryPlan';
 import { mergeDiscoveredPlan, modelRoutingPlanRows, plannedModelKind, plannedReasoningEnabled } from '../../lib/modelRoutingPlan';
+import { importableModels } from '../../lib/modelImport';
+import { DEFAULT_CONTEXT_WINDOW_TOKENS, MAX_CONTEXT_WINDOW_TOKENS, TOKENS_PER_K, contextWindowInputTokens, contextWindowTokensOrDefault, isValidContextWindow } from '../../lib/modelContext';
 import { selectedRows, mergeBatchSave } from '../../lib/modelSelection';
 import {
   modelService,
@@ -37,7 +39,9 @@ const PROTOCOL_TYPE_LABELS: Record<string, string> = {
 };
 
 interface EditableModel extends LLMModel {
+  context_window_edited?: boolean;
   local_id: string;
+  selected_template?: ProviderTemplate;
   isNew?: boolean;
   isEditing?: boolean;
   saving?: boolean;
@@ -52,6 +56,7 @@ interface EditableModel extends LLMModel {
 
 type EditableModelSnapshot = Pick<
   EditableModel,
+  | 'selected_template'
   | 'visibility_scope'
   | 'allowed_user_ids'
   | 'access_policy_version'
@@ -68,6 +73,7 @@ type EditableModelSnapshot = Pick<
   | 'deployment_priority'
   | 'max_concurrent_requests'
   | 'context_window_tokens'
+  | 'context_window_edited'
   | 'quality_tier'
   | 'base_url'
   | 'provider_model_name'
@@ -93,6 +99,7 @@ type EditableModelSnapshot = Pick<
 >;
 
 const captureSnapshot = (card: EditableModel): EditableModelSnapshot => ({
+  selected_template: card.selected_template,
   visibility_scope: card.visibility_scope,
   allowed_user_ids: [...(card.allowed_user_ids ?? [])],
   access_policy_version: card.access_policy_version,
@@ -109,6 +116,7 @@ const captureSnapshot = (card: EditableModel): EditableModelSnapshot => ({
   deployment_priority: card.deployment_priority,
   max_concurrent_requests: card.max_concurrent_requests,
   context_window_tokens: card.context_window_tokens,
+  context_window_edited: card.context_window_edited,
   quality_tier: card.quality_tier,
   base_url: card.base_url,
   provider_model_name: card.provider_model_name,
@@ -144,7 +152,7 @@ const createEmptyModel = (): EditableModel => ({
   model_group: '',
   deployment_priority: 100,
   max_concurrent_requests: 0,
-  context_window_tokens: 0,
+  context_window_tokens: DEFAULT_CONTEXT_WINDOW_TOKENS,
   quality_tier: 0,
   base_url: '',
   provider_model_name: '',
@@ -251,17 +259,16 @@ function buildCurrentTemplate(card: Pick<EditableModel, 'provider_type' | 'proto
 }
 
 function getTemplateOptions(card: EditableModel, currentLabel: string) {
-  const matchedTemplate = findProviderTemplate(card.provider_type, card.base_url);
-  if (matchedTemplate) {
+  const selectedTemplate = getSelectedTemplate(card, currentLabel);
+  if (!selectedTemplate || BUILTIN_PROVIDER_TEMPLATES.some((template) => template.id === selectedTemplate.id)) {
     return BUILTIN_PROVIDER_TEMPLATES;
   }
-
-  const currentTemplate = buildCurrentTemplate(card, currentLabel);
-  return currentTemplate ? [currentTemplate, ...BUILTIN_PROVIDER_TEMPLATES] : BUILTIN_PROVIDER_TEMPLATES;
+  return [selectedTemplate, ...BUILTIN_PROVIDER_TEMPLATES];
 }
 
 function getSelectedTemplate(card: EditableModel, currentLabel: string) {
   return (
+    card.selected_template ??
     findProviderTemplate(card.provider_type, card.base_url) ??
     buildCurrentTemplate(card, currentLabel)
   );
@@ -674,6 +681,13 @@ const ModelManagementPage: React.FC = () => {
       }
 
       const next = { ...card, ...patch, error: patch.error ?? card.error };
+      // Template identity is a draft choice, not a live URL lookup. Preserve it
+      // while editing the address, including temporarily clearing the field.
+      if (Object.prototype.hasOwnProperty.call(patch, 'provider_type') && !Object.prototype.hasOwnProperty.call(patch, 'selected_template')) {
+        next.selected_template = undefined;
+      } else if (Object.prototype.hasOwnProperty.call(patch, 'base_url') && !Object.prototype.hasOwnProperty.call(patch, 'selected_template')) {
+        next.selected_template = getSelectedTemplate(card, t('modelManagementPage.currentVendorTemplate'));
+      }
       if (
         Object.prototype.hasOwnProperty.call(patch, 'provider_type') ||
         Object.prototype.hasOwnProperty.call(patch, 'protocol_type') ||
@@ -720,6 +734,8 @@ const ModelManagementPage: React.FC = () => {
       isEditing: true,
       error: null,
       edit_snapshot: captureSnapshot(card),
+      context_window_tokens: contextWindowTokensOrDefault(card.context_window_tokens),
+      context_window_edited: false,
     });
   };
 
@@ -788,7 +804,10 @@ const ModelManagementPage: React.FC = () => {
           discovery_key: nextKey,
           provider_model_name: nextProviderModelName,
           ...(!item.provider_model_name && !item.display_name ? {
-            display_name: discovered.find((model) => model.id === nextProviderModelName)?.display_name || nextProviderModelName,
+            display_name: uniqueImportedDisplayName(
+              discovered.find((model) => model.id === nextProviderModelName)?.display_name || nextProviderModelName,
+              item.base_url, new Set(current.filter((row) => row.local_id !== localId).map((row) => row.display_name.trim())),
+            ),
           } : {}),
           ...(item.isNew ? {
             supports_tools: discovered.find((model) => model.id === nextProviderModelName)?.supports_tools,
@@ -796,6 +815,9 @@ const ModelManagementPage: React.FC = () => {
             capability_source: discovered.find((model) => model.id === nextProviderModelName)?.classification_source,
           } : {}),
           ...(initialPlan ? {
+            context_window_tokens: item.context_window_edited
+              ? item.context_window_tokens
+              : contextWindowTokensOrDefault(initialPlan.context_window_tokens),
             model_kind: item.model_kind ?? plannedModelKind(initialPlan),
             model_group: initialPlan.suggested_pool || 'default',
             quality_tier: initialPlan.suggested_quality_tier ?? 0,
@@ -865,12 +887,10 @@ const ModelManagementPage: React.FC = () => {
       updateCard(localId, { error: t('modelManagementPage.requiredFields') });
       return;
     }
-    const existingKeys = new Set(
-      models.filter((item) => !(item.local_id === localId && item.isNew)).map((item) => `${item.base_url.trim()}\n${item.provider_model_name.trim()}`),
-    );
+    const connection = (card: EditableModel) => ({ ...card, protocol_type: resolveProviderProtocolType(card.provider_type, card.protocol_type) });
+    const existing = models.filter((item) => !(item.local_id === localId && item.isNew)).map(connection);
     const usedDisplayNames = new Set(models.filter((item) => !(item.local_id === localId && item.isNew)).map((item) => item.display_name.trim()).filter(Boolean));
-    const planned = discovered
-      .filter((model) => !existingKeys.has(`${source.base_url.trim()}\n${model.id.trim()}`))
+    const planned = importableModels(connection(source), discovered, existing)
       .map((model, index): EditableModel => ({
         ...createEmptyModel(),
         display_name: uniqueImportedDisplayName(
@@ -881,8 +901,11 @@ const ModelManagementPage: React.FC = () => {
         protocol_type: source.protocol_type,
         model_group: model.suggested_pool || "default",
         deployment_priority: model.suggested_priority ?? 50 + index,
-        context_window_tokens: model.context_window_tokens ?? 0,
-        ...(source.context_window_tokens ? { context_window_tokens: source.context_window_tokens } : {}),
+        context_window_tokens: contextWindowTokensOrDefault(
+          source.context_window_edited || (!source.isNew && source.context_window_tokens)
+            ? source.context_window_tokens
+            : model.context_window_tokens,
+        ),
         max_concurrent_requests: source.max_concurrent_requests,
         description: source.description,
         quality_tier: model.suggested_quality_tier ?? 0,
@@ -940,6 +963,11 @@ const ModelManagementPage: React.FC = () => {
       return;
     }
 
+    if (!isValidContextWindow(card.context_window_tokens)) {
+      updateCard(card.local_id, { error: t('modelManagementPage.contextWindowInvalid') });
+      return;
+    }
+
     if (card.visibility_scope === 'selected_users' && !card.allowed_user_ids?.length) {
       updateCard(card.local_id, { error: '请选择至少一位可使用此模型的用户' }); return;
     }
@@ -963,7 +991,7 @@ const ModelManagementPage: React.FC = () => {
         model_group: card.model_group?.trim() || card.display_name.trim(),
         deployment_priority: Number(card.deployment_priority) || 0,
         max_concurrent_requests: Number(card.max_concurrent_requests) || 0,
-        context_window_tokens: Number(card.context_window_tokens) || 0,
+        context_window_tokens: contextWindowTokensOrDefault(card.context_window_tokens),
         quality_tier: Number(card.quality_tier) || 0,
         base_url: card.base_url.trim(),
         provider_model_name: card.provider_model_name.trim(),
@@ -1030,6 +1058,14 @@ const ModelManagementPage: React.FC = () => {
       setModels((current) => current.map((card) => invalidIds.has(card.local_id) ? { ...card, error: t('modelManagementPage.requiredFields') } : card));
       return;
     }
+    const invalidContext = pending.filter((card) => !isValidContextWindow(card.context_window_tokens));
+    if (invalidContext.length > 0) {
+      const invalidIds = new Set(invalidContext.map((card) => card.local_id));
+      const error = t('modelManagementPage.contextWindowInvalid');
+      setPageError(error);
+      setModels((current) => current.map((card) => invalidIds.has(card.local_id) ? { ...card, error } : card));
+      return;
+    }
     setBulkSaving(true);
     setPageError(null);
     try {
@@ -1050,7 +1086,7 @@ const ModelManagementPage: React.FC = () => {
         model_group: card.model_group?.trim() || card.display_name.trim(),
         deployment_priority: Number(card.deployment_priority) || 0,
         max_concurrent_requests: Number(card.max_concurrent_requests) || 0,
-        context_window_tokens: Number(card.context_window_tokens) || 0,
+        context_window_tokens: contextWindowTokensOrDefault(card.context_window_tokens),
         quality_tier: Number(card.quality_tier) || 0,
         base_url: card.base_url.trim(),
         provider_model_name: card.provider_model_name.trim(),
@@ -1214,6 +1250,7 @@ const ModelManagementPage: React.FC = () => {
                           onSelect={(template) => {
                             const suggestedModels = template.suggestedModels ?? [];
                             updateCard(card.local_id, {
+                              selected_template: template,
                               provider_type: template.providerType,
                               protocol_type: resolveProviderProtocolType(template.providerType, template.protocolType),
                               base_url: template.baseUrl,
@@ -1296,20 +1333,28 @@ const ModelManagementPage: React.FC = () => {
 
                     <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
                       <div>
-                      <label className="block text-sm font-medium text-gray-700">{t('modelManagementPage.contextWindowTokens')}</label>
+                      <label htmlFor={`context-window-${card.local_id}`} className="block text-sm font-medium text-gray-700">{t('modelManagementPage.contextWindowTokens')}</label>
                       <input
                         type="number"
-                        min="0"
-                        max="2147483647"
-                        step="1"
-                        value={card.context_window_tokens ?? 0}
+                        id={`context-window-${card.local_id}`}
+                        aria-describedby={`context-window-help-${card.local_id}`}
+                        min={1 / TOKENS_PER_K}
+                        max={MAX_CONTEXT_WINDOW_TOKENS / TOKENS_PER_K}
+                        step={1 / TOKENS_PER_K}
+                        value={card.context_window_tokens == null ? '' : card.context_window_tokens / TOKENS_PER_K}
                         onChange={(event) => updateCard(card.local_id, {
-                          context_window_tokens: Number.parseInt(event.target.value, 10) || 0,
+                          context_window_tokens: contextWindowInputTokens(event.target.value),
+                          context_window_edited: true,
                         })}
                         className="app-input mt-1 block w-full"
+                        onBlur={() => {
+                          if (card.context_window_tokens == null || card.context_window_tokens === 0) {
+                            updateCard(card.local_id, { context_window_tokens: DEFAULT_CONTEXT_WINDOW_TOKENS });
+                          }
+                        }}
                         placeholder={t('modelManagementPage.contextWindowPlaceholder')}
                       />
-                      <p className="mt-2 text-xs text-gray-500">{t('modelManagementPage.contextWindowHelp')}</p>
+                      <p id={`context-window-help-${card.local_id}`} className="mt-2 text-xs text-gray-500">{t('modelManagementPage.contextWindowHelp')}</p>
                       </div>
                       <div>
                         <label className="block text-sm font-medium text-gray-700">{t('modelManagementPage.maxConcurrentRequests')}</label>

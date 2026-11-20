@@ -97,20 +97,76 @@ func TestRuntimeTaskLegacyAndEnrolledHeaderBoundary(t *testing.T) {
 }
 
 type runtimeReceiptStore struct {
-	state    models.GatewayTaskState
-	identity models.GatewayTaskIdentity
+	state                         models.GatewayTaskState
+	identity                      models.GatewayTaskIdentity
+	checks, finishes, inspections int
+	missing                       bool
+	inspectErr, finishErr         error
+	requested                     []models.GatewayTaskIdentity
+}
+
+func TestRuntimeTaskFailStopMarkerRequiresConfirmedRevocation(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		state      models.GatewayTaskState
+		generation int
+		marker     string
+	}{
+		{"active", models.GatewayTaskState{}, 3, ""},
+		{"finished", models.GatewayTaskState{Finished: true}, 3, ""},
+		{"revoked", models.GatewayTaskState{Revoked: true}, 3, "revoked"},
+		{"wrong generation", models.GatewayTaskState{Revoked: true}, 4, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			c.Request = httptest.NewRequest("POST", "/", strings.NewReader(`{"session_id":"ses_one","task_id":"msg_one","generation":3}`))
+			c.Request.Header.Set("Content-Type", "application/json")
+			c.Set("userID", 7)
+			c.Set("instanceID", 8)
+			c.Set("runtimeGeneration", tc.generation)
+			store := &runtimeReceiptStore{state: tc.state}
+			NewGatewayRuntimeHandler(store, nil, nil).CheckTask(c)
+			if got := w.Header().Get("X-ClawManager-Task-State"); got != tc.marker {
+				t.Fatalf("marker=%q want=%q status=%d", got, tc.marker, w.Code)
+			}
+		})
+	}
 }
 
 func (s *runtimeReceiptStore) Check(_ context.Context, identity models.GatewayTaskIdentity) (*models.GatewayTaskState, error) {
+	s.checks++
 	s.identity = identity
 	state := s.state
 	return &state, nil
 }
 func (*runtimeReceiptStore) Bind(context.Context, models.GatewayTaskIdentity, int) error { return nil }
 func (s *runtimeReceiptStore) Finish(_ context.Context, _ models.GatewayTaskIdentity, cancelled bool) error {
+	s.finishes++
+	if s.finishErr != nil {
+		return s.finishErr
+	}
 	s.state.Finished = true
 	s.state.RuntimeAcknowledged = s.state.RuntimeAcknowledged || (s.state.Revoked && cancelled)
 	return nil
+}
+
+func (s *runtimeReceiptStore) Inspect(_ context.Context, scope models.GatewayTaskIdentity, tasks []models.GatewayTaskIdentity) ([]models.GatewayTaskSnapshot, error) {
+	s.inspections++
+	s.identity = scope
+	s.requested = tasks
+	if s.inspectErr != nil {
+		return nil, s.inspectErr
+	}
+	result := make([]models.GatewayTaskSnapshot, len(tasks))
+	for i, task := range tasks {
+		result[i].GatewayTaskIdentity = task
+		if !s.missing {
+			copy := s.state
+			result[i].State = &copy
+		}
+	}
+	return result, nil
 }
 
 func TestRuntimeTaskReceiptUsesTrustedOwnerAndOnlyAcknowledgesRevocation(t *testing.T) {

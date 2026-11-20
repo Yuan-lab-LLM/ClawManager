@@ -26,7 +26,7 @@ OpenCode 会收到 ClawManager 管理的 AI Gateway Provider 配置。除非管�
 
 进入 **我的实例 → 创建**，选择 OpenCode 和 Lite/Pro，再选择已启用镜像、资源、环境变量及当前支持的启动资源。创建完成后，实例页提供生命周期操作、OpenCode 终端/桌面和工作区文件。
 
-OpenCode Lite 会在实例自己的持久化工作区中自动创建空的 `starter` 文件夹，并将它作为默认启动目录。控制台直接进入该目录的新会话路由，因此打开实例时已经选中 `starter`，可以立即开始一个空白对话。这个过程不显示额外的工作区选项或新手向导；重启和 Runtime 滚动升级也不会覆盖其中的用户文件。
+OpenCode Lite 会保留官方原生首页，不会在实例启动或首次访问时自动创建文件夹和会话。OpenCode 页面会显示实例级的新手引导，说明如何创建或选择文件夹、添加并选中项目，以及创建新会话。具备工作区写权限的用户可以从引导中明确创建文件夹；只读 Share Link 只显示操作说明，不提供创建操作。
 
 通过 ClawManager 执行启动、停止、重启和删除。直接修改生成的工作负载可能被期望状态同步覆盖；删除前先保存需要的文件。
 
@@ -68,4 +68,4 @@ Skill Hub 是 OpenClaw、Hermes、OpenCode、DeepSeek Harness 共用的平台能
 
 验收应覆盖创建、启停重启、Portal/桌面、AI Gateway 流式与工具调用、工作区持久化、Share Link 权限，以及需要时的技能清单/安装/收录和明确错误反馈。
 
-相关说明：[用户手册](./use_guide_cn.md)、[AI Gateway 指南](./aigateway_cn.md)、[Skill Hub 指南](./skill-hub-guide.md)。
+相关说明：[用户手册](./use_guide_cn.md)、[AI Gateway 指南](./aigateway_cn.md)、[Skill Hub 指南](./skill-hub-guide.md)、[OpenCode v2 集成说明](./opencode-lite-v2.md)。

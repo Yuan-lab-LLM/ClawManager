@@ -11,6 +11,7 @@ import type {
   InstanceEnvironmentOverrides,
   InstanceStatus,
   InstanceRuntimeDetails,
+  RuntimeMaintenanceStatus,
   InstanceRuntimeCommand,
   InstanceConfigRevision,
   ExternalAccessStatusResult,
@@ -39,8 +40,27 @@ export interface BrowserWorkerStatus {
 }
 
 export const instanceService = {
+  getRuntimeShutdownAudits: async (id: number, beforeId?: number, signal?: AbortSignal): Promise<import("../types/instance").RuntimeShutdownAuditHistory> => {
+    const response = await api.get(`/instances/${id}/runtime-shutdown-audits`, { params: beforeId ? { before_id: beforeId } : {}, timeout: 15000, signal });
+    return response.data.data;
+  },
+  getRuntimeMaintenance: async (id: number): Promise<RuntimeMaintenanceStatus> => {
+    const response = await api.get(`/instances/${id}/runtime-maintenance`);
+    return response.data.data;
+  },
+  beginRuntimeMaintenance: async (id: number): Promise<RuntimeMaintenanceStatus> => {
+    const response = await api.post(`/instances/${id}/runtime-maintenance`, { timeout_seconds: 300 });
+    return response.data.data;
+  },
+  cancelRuntimeMaintenance: async (id: number, operationId: string): Promise<void> => {
+    await api.post(`/instances/${id}/runtime-maintenance/cancel`, { operation_id: operationId });
+  },
   getRuntimeGovernance: async (id: number): Promise<import("../types/instance").RuntimeGovernanceStatus> => {
     const response = await api.get(`/instances/${id}/runtime-governance`);
+    return response.data.data;
+  },
+  getModelCatalogSync: async (id: number): Promise<import('../lib/modelCatalogSync').ModelCatalogSyncStatus> => {
+    const response = await api.get(`/instances/${id}/model-catalog-sync`);
     return response.data.data;
   },
   // Get instance list

@@ -1322,6 +1322,20 @@ func (h *InstanceHandler) GetRuntimeDetails(c *gin.Context) {
 	utils.Success(c, http.StatusOK, "Instance runtime details retrieved successfully", response)
 }
 
+func (h *InstanceHandler) GetModelCatalogSync(c *gin.Context) {
+	_, instance, ok := h.resolveOwnedInstance(c)
+	if !ok {
+		return
+	}
+	status := &services.InstanceModelCatalogSyncStatus{State: "unknown", Reason: "not_reported"}
+	if reader, ok := h.instanceService.(interface {
+		ModelCatalogSyncStatus(context.Context, *models.Instance) *services.InstanceModelCatalogSyncStatus
+	}); ok {
+		status = reader.ModelCatalogSyncStatus(c.Request.Context(), instance)
+	}
+	utils.Success(c, http.StatusOK, "Startup model catalog observation", status)
+}
+
 type SessionUsageQueryRequest struct {
 	Cursor string `form:"cursor"`
 	Page   int    `form:"page,default=1"`

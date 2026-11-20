@@ -372,7 +372,8 @@ func main() {
 		}
 	}
 	instanceAgentService := services.NewInstanceAgentService(instanceRepo, instanceAgentRepo, instanceDesiredStateRepo, instanceRuntimeStatusRepo, instanceCommandRepo)
-	instanceRuntimeStatusService := services.NewInstanceRuntimeStatusService(instanceRuntimeStatusRepo, instanceAgentRepo, instanceDesiredStateRepo)
+	shutdownAudits := repository.NewRuntimeShutdownAuditRepository(database)
+	instanceRuntimeStatusService := services.NewInstanceRuntimeStatusService(instanceRuntimeStatusRepo, instanceAgentRepo, instanceDesiredStateRepo, shutdownAudits)
 	instanceCommandService := services.NewInstanceCommandService(instanceCommandRepo, instanceRuntimeStatusRepo, instanceDesiredStateRepo, skillRepo)
 	instanceConfigRevisionService := services.NewInstanceConfigRevisionService(instanceConfigRevisionRepo)
 	teamService := services.NewTeamService(
@@ -451,7 +452,7 @@ func main() {
 	gatewayRuntimeHandler := handlers.NewGatewayRuntimeHandler(runtimeTasks, aiGatewayService, auditEventService)
 	runtimeProtocols := repository.NewRuntimeProtocolRepository(database)
 	runtimeProtocolHandler := handlers.NewRuntimeProtocolHandler(runtimeProtocols, instanceRepo)
-	runtimeMaintenanceHandler := handlers.NewRuntimeMaintenanceHandler(repository.NewRuntimeMaintenanceRepository(database))
+	runtimeMaintenanceHandler := handlers.NewRuntimeMaintenanceHandler(repository.NewRuntimeMaintenanceRepository(database), instanceRepo)
 	runtimeProtocolPolicy := middleware.RuntimeProtocolPolicy(runtimeProtocols)
 	customTeamTemplateService := teamtemplate.NewService(customTeamTemplateRepo, aiGatewayService)
 	ownerTeamAPI := northbound.NewOwnerTeamAPI(database, teamService, instanceService, userRepo, aiGatewayService, false, 0)
@@ -482,7 +483,7 @@ func main() {
 		services.NewInstanceShellService(),
 		services.WithInstanceProxyRuntimeRepositories(instanceRepo, runtimePodRepo, bindingRepo),
 		services.WithInstanceProxyRuntimeSecurity(runtimeSecurity),
-		services.WithOpenCodeLiteSessionBootstrap(),
+		services.WithOpenCodeOnboardingWorkspace(workspaceFileService, externalAccessService),
 		services.WithInstanceProxyPolicyCoordinator(runtimeAgentClient, cfg.Runtime.Namespace),
 		services.WithInstanceProxyOwnerUsage(ownerStore),
 	)
@@ -654,6 +655,7 @@ func main() {
 		instanceConfigRevisionService,
 		skillService,
 		handlers.WithAgentSkillReportPersistence(cfg.Runtime.SkillReportPersistence),
+		handlers.WithAgentShutdownAudits(shutdownAudits),
 	)
 	if !cfg.Runtime.SkillReportPersistence {
 		log.Printf("skill inventory report persistence is disabled; reports will be acknowledged without database synchronization")
@@ -694,7 +696,7 @@ func main() {
 	workspaceFileHandler.SetSkillRepository(skillRepo)
 	workspaceFileHandler.SetExternalAccessServices(externalAccessService, instanceHandler.InstanceAccessService())
 	ieiSystemHandler.SetWorkspaceFileHandler(workspaceFileHandler)
-	runtimeAgentHandler := handlers.NewRuntimeAgentHandler(cfg.Runtime, runtimePodRepo, bindingRepo, instanceRepo, runtimeEvents, skillService)
+	runtimeAgentHandler := handlers.NewRuntimeAgentHandler(cfg.Runtime, runtimePodRepo, bindingRepo, instanceRepo, runtimeEvents, skillService).WithShutdownAudits(shutdownAudits)
 	if runtimeSecurity != nil {
 		runtimeAgentHandler.SetRuntimeGatewayReportVerifier(runtimeSecurity)
 	}
@@ -986,6 +988,7 @@ func main() {
 		}
 
 		runtimeAgent := api.Group("/runtime-agent")
+		runtimeAgent.POST("/shutdown-deliveries", runtimeAgentHandler.ReportShutdownDeliveries)
 		{
 			runtimeAgent.POST("/register", runtimeAgentHandler.Register)
 			runtimeAgent.POST("/heartbeat", runtimeAgentHandler.Heartbeat)
@@ -1077,7 +1080,12 @@ func main() {
 			instances.GET("/:id/environment-overrides", instanceHandler.GetInstanceEnvironmentOverrides)
 			instances.GET("/:id/status", instanceHandler.GetInstanceStatus)
 			instances.GET("/:id/runtime", instanceHandler.GetRuntimeDetails)
+			instances.GET("/:id/model-catalog-sync", instanceHandler.GetModelCatalogSync)
 			instances.GET("/:id/runtime-governance", runtimeProtocolHandler.Status)
+			instances.GET("/:id/runtime-shutdown-audits", handlers.NewRuntimeShutdownAuditHandler(instanceRepo, shutdownAudits).List)
+			instances.GET("/:id/runtime-maintenance", runtimeMaintenanceHandler.Status)
+			instances.POST("/:id/runtime-maintenance", runtimeMaintenanceHandler.Begin)
+			instances.POST("/:id/runtime-maintenance/cancel", runtimeMaintenanceHandler.Cancel)
 			instances.GET("/:id/session-usage", instanceHandler.GetInstanceSessionUsage)
 			instances.GET("/:id/session-usage/detail", instanceHandler.GetInstanceSessionUsageDetail)
 			instances.POST("/:id/runtime/:command", instanceHandler.CreateRuntimeCommand)
@@ -1529,9 +1537,13 @@ func main() {
 			gatewayLLM.GET("/images/models", aiGatewayHandler.ImageModels)
 			gatewayLLM.GET("/runtime/catalog", gatewayRuntimeHandler.Catalog)
 			gatewayLLM.POST("/runtime/capabilities", runtimeProtocolHandler.Negotiate)
+			gatewayLLM.GET("/runtime/capabilities", runtimeProtocolHandler.Inspect)
+			gatewayLLM.POST("/runtime/capabilities/renew", runtimeProtocolHandler.Renew)
+			gatewayLLM.POST("/runtime/capabilities/enroll", runtimeProtocolHandler.Enroll)
 			gatewayLLM.POST("/runtime/maintenance", runtimeMaintenanceHandler.Poll)
 			gatewayLLM.POST("/runtime/tasks/check", gatewayRuntimeHandler.CheckTask)
 			gatewayLLM.POST("/runtime/tasks/finish", gatewayRuntimeHandler.FinishTask)
+			gatewayLLM.POST("/runtime/tasks/inspect", gatewayRuntimeHandler.InspectTasks)
 			gatewayLLM.POST("/chat/completions", runtimeProtocolPolicy, aiGatewayHandler.ChatCompletions)
 			gatewayLLM.POST("/responses", runtimeProtocolPolicy, aiGatewayHandler.Responses)
 			gatewayLLM.POST("/v1/responses", runtimeProtocolPolicy, aiGatewayHandler.Responses)
@@ -1546,6 +1558,8 @@ func main() {
 			agent.POST("/commands/:id/start", agentHandler.StartCommand)
 			agent.POST("/commands/:id/finish", agentHandler.FinishCommand)
 			agent.POST("/state/report", agentHandler.ReportState)
+			agent.POST("/shutdown-deliveries", agentHandler.ReportShutdownDeliveries)
+			agent.GET("/shutdown-deliveries/scope", agentHandler.ShutdownDeliveryScope)
 			agent.POST("/skills/inventory", agentHandler.ReportSkillInventory)
 			agent.POST("/skills/upload", agentHandler.UploadSkillPackage)
 			agent.GET("/skills/versions/:skillVersion/download", agentHandler.DownloadSkillVersion)

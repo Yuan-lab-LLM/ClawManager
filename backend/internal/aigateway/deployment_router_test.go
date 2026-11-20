@@ -51,13 +51,13 @@ func (*routingDeploymentStore) Release(context.Context, *services.GatewayDeploym
 
 func deploymentRoutingFixture() (*preparedChatRequest, []*models.LLMModel) {
 	return &preparedChatRequest{
-		sessionID: "session-sticky", userID: 9, requestID: "request-a",
-		resolvedModel: &models.LLMModel{ModelGroup: "general"},
-		req:           ChatCompletionRequest{MaxTokens: intPtr(256)},
-	}, []*models.LLMModel{
-		{ID: 1, ModelGroup: "general", DeploymentPriority: 1, MaxConcurrentRequests: 10},
-		{ID: 2, ModelGroup: "general", DeploymentPriority: 2, MaxConcurrentRequests: 10},
-	}
+			sessionID: "session-sticky", userID: 9, requestID: "request-a",
+			resolvedModel: &models.LLMModel{ModelGroup: "general"},
+			req:           ChatCompletionRequest{MaxTokens: intPtr(256)},
+		}, []*models.LLMModel{
+			{ID: 1, ModelGroup: "general", DeploymentPriority: 1, MaxConcurrentRequests: 10},
+			{ID: 2, ModelGroup: "general", DeploymentPriority: 2, MaxConcurrentRequests: 10},
+		}
 }
 
 func TestAutoDeploymentRoutingPrefersMateriallyFasterHealthyDeployment(t *testing.T) {
@@ -100,21 +100,22 @@ func TestAutoDeploymentRoutingDoesNotTrustExpiredPerformanceSamples(t *testing.T
 
 	ordered := gateway.orderAutoDeployments(t.Context(), prepared, candidates)
 	if len(ordered) != 2 || len(audit.events) != 1 || audit.events[0].Details == nil {
-		t.Fatalf("missing deployment routing result: %#v", ordered)
+		t.Fatal("routing candidates or score audit missing")
 	}
+	// An expired deployment may legitimately receive the bounded exploration
+	// traffic. Assert its stale measurements are discarded, not which deployment
+	// the wall-clock-dependent exploration bucket happens to choose.
 	var details deploymentRoutingDetails
 	if err := json.Unmarshal([]byte(*audit.events[0].Details), &details); err != nil {
 		t.Fatal(err)
 	}
-	scores := make(map[int]deploymentRouteScore)
-	for _, candidate := range details.Candidates {
-		scores[candidate.DeploymentID] = candidate
+	scores := map[int]deploymentRouteScore{}
+	for _, score := range details.Candidates {
+		scores[score.DeploymentID] = score
 	}
-	// Expired deployments can receive bounded exploration traffic. Check their
-	// discarded measurements and score, independent of the time-bucket hash.
-	stale, fresh := scores[1], scores[2]
-	if stale.State != "unknown" || stale.EWMATTFTMs != 0 || stale.EWMALatencyMs != 0 || stale.EWMATokensPerSecond != 0 || stale.Score <= fresh.Score {
-		t.Fatalf("expired performance sample remained authoritative: %+v", details)
+	expired, fresh := scores[1], scores[2]
+	if expired.State != "unknown" || expired.EWMATTFTMs != 0 || expired.EWMALatencyMs != 0 || expired.EWMATokensPerSecond != 0 || expired.Score <= fresh.Score || fresh.State != "healthy" {
+		t.Fatalf("expired performance sample remained authoritative: %#v", details)
 	}
 }
 

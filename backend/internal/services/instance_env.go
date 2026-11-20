@@ -15,6 +15,12 @@ import (
 var ErrInvalidEnvironmentOverrides = errors.New("invalid environment overrides")
 
 var protectedManagedRuntimeEnvKeys = map[string]struct{}{
+	"CLAWMANAGER_TASK_RECEIPT_DIR":              {},
+	"CLAWMANAGER_TASK_RECEIPT_ROOT":             {},
+	"CLAWMANAGER_OPENCLAW_TASK_PROTOCOL":        {},
+	"CLAWMANAGER_MODEL_REFERENCE_PROTOCOL":      {},
+	"CLAWMANAGER_MODEL_CATALOG_SYNC":            {},
+	"CLAWMANAGER_MODEL_CATALOG_JSON":            {},
 	"CLAWMANAGER_GATEWAY_GENERATION":            {},
 	"CLAWMANAGER_LLM_BASE_URL":                  {},
 	"CLAWMANAGER_LLM_API_KEY":                   {},

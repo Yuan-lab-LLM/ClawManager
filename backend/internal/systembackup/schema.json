@@ -3929,10 +3929,69 @@
         "type": "decimal(18,8)",
         "nullable": "YES",
         "extra": ""
+      },
+      {
+        "name": "runtime_model_id",
+        "type": "varchar(64)",
+        "nullable": "NO",
+        "extra": ""
       }
     ],
     "primary_key": [
       "id"
+    ]
+  },
+  {
+    "name": "llm_runtime_model_aliases",
+    "columns": [
+      {
+        "name": "alias",
+        "type": "varchar(255)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "model_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "created_at",
+        "type": "timestamp",
+        "nullable": "NO",
+        "extra": "DEFAULT_GENERATED"
+      }
+    ],
+    "primary_key": [
+      "alias"
+    ]
+  },
+  {
+    "name": "llm_runtime_provider_refs",
+    "columns": [
+      {
+        "name": "provider_id",
+        "type": "varchar(255)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "model_ref",
+        "type": "varchar(255)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "model_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      }
+    ],
+    "primary_key": [
+      "provider_id",
+      "model_ref"
     ]
   },
   {
@@ -7172,6 +7231,62 @@
         "name": "recovery_key",
         "type": "varchar(96)",
         "nullable": "YES",
+        "extra": ""
+      }
+    ],
+    "primary_key": [
+      "id"
+    ]
+  },
+  {
+    "name": "runtime_shutdown_audits",
+    "columns": [
+      {
+        "name": "id",
+        "type": "bigint",
+        "nullable": "NO",
+        "extra": "auto_increment"
+      },
+      {
+        "name": "instance_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "owner_user_id",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "generation",
+        "type": "int",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "claim_id",
+        "type": "char(64)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "outcome",
+        "type": "varchar(48)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "source",
+        "type": "varchar(16)",
+        "nullable": "NO",
+        "extra": ""
+      },
+      {
+        "name": "received_at",
+        "type": "datetime(6)",
+        "nullable": "NO",
         "extra": ""
       }
     ],

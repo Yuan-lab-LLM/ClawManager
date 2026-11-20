@@ -30,26 +30,25 @@ import (
 
 // InstanceProxyService handles proxying requests to instance pods
 type InstanceProxyService struct {
-	browserOrigins           *browserorigin.Registry
-	serviceService           *k8s.ServiceService
-	accessService            *InstanceAccessService
-	instanceRepo             repository.InstanceRepository
-	runtimePodRepo           repository.RuntimePodRepository
-	bindingRepo              repository.InstanceRuntimeBindingRepository
-	httpClient               *http.Client
-	openClawGatewayToken     string
-	openClawProxyOrigin      string
-	serviceCache             map[serviceCacheKey]serviceCacheEntry
-	serviceLookups           map[serviceCacheKey]*serviceLookupCall
-	cacheMu                  sync.RWMutex
-	lookupMu                 sync.Mutex
-	serviceTTL               time.Duration
-	openCodeBootstrapEnabled bool
-	openCodeBootstrapMu      sync.Mutex
-	openCodeBootstraps       map[string]*openCodeBootstrapCall
-	ownerUsage               *ownerrecords.Store
-	proxyPolicy              *RuntimeProxyPolicyCoordinator
-	runtimeSecurity          *RuntimeSecurityAuthority
+	browserOrigins       *browserorigin.Registry
+	serviceService       *k8s.ServiceService
+	accessService        *InstanceAccessService
+	instanceRepo         repository.InstanceRepository
+	runtimePodRepo       repository.RuntimePodRepository
+	bindingRepo          repository.InstanceRuntimeBindingRepository
+	httpClient           *http.Client
+	openClawGatewayToken string
+	openClawProxyOrigin  string
+	serviceCache         map[serviceCacheKey]serviceCacheEntry
+	serviceLookups       map[serviceCacheKey]*serviceLookupCall
+	cacheMu              sync.RWMutex
+	lookupMu             sync.Mutex
+	serviceTTL           time.Duration
+	ownerUsage           *ownerrecords.Store
+	proxyPolicy          *RuntimeProxyPolicyCoordinator
+	runtimeSecurity      *RuntimeSecurityAuthority
+	openCodeWorkspace    WorkspaceFileService
+	externalAccess       InstanceExternalAccessService
 }
 
 type serviceCacheKey struct {
@@ -180,6 +179,14 @@ func (s *InstanceProxyService) ProxyRequest(ctx context.Context, instanceID int,
 	targetPort := s.resolveTargetPort(accessToken.InstanceType, accessToken.TargetPort, targetPath)
 	shouldRewriteHTML := s.shouldRewriteHTMLForProxy(instanceID, accessToken.InstanceType, targetPort) && !dedicatedRuntimeOrigin
 	previewBridgeDocument := nativePreviewBridgeDocument(r, accessToken.InstanceType)
+	bootstrapPath := stripInstanceProxyPrefix(targetPath, instanceID)
+	if opencodeLite && bootstrapPath == "/sw.js" {
+		serveOpenCodeOnlineOnlyServiceWorker(w)
+		return nil
+	}
+	if opencodeLite && bootstrapPath == openCodeOnboardingProjectDirectoryPath {
+		return s.handleOpenCodeOnboardingProjectDirectory(ctx, w, r, accessToken)
+	}
 
 	// Build target URL
 	targetURL, runtimeGateway, err := s.resolveHTTPProxyTarget(ctx, accessToken, instanceID, targetPort, targetPath, effectiveRequestPath)
@@ -192,14 +199,15 @@ func (s *InstanceProxyService) ProxyRequest(ctx context.Context, instanceID int,
 		return err
 	}
 	proxyPrefix := instanceProxyPrefix(instanceID)
-	bootstrapPath := stripInstanceProxyPrefix(targetPath, instanceID)
 	openCodeStorageScope := ""
+	openCodeOnboardingCanCreate := false
 	if opencodeLite && isOpenCodeBrowserDocumentRequest(r, bootstrapPath) {
 		instance, lookupErr := s.instanceRepo.GetByID(instanceID)
 		if lookupErr != nil || instance == nil {
 			return fmt.Errorf("failed to resolve OpenCode browser storage identity")
 		}
 		openCodeStorageScope = openCodeBrowserStorageScope(instance)
+		openCodeOnboardingCanCreate, _ = s.openCodeOnboardingWorkspaceWriteAllowed(ctx, accessToken)
 	}
 
 	// Copy query parameters, excluding ClawManager-owned proxy/gateway tokens.
@@ -218,18 +226,6 @@ func (s *InstanceProxyService) ProxyRequest(ctx context.Context, instanceID int,
 			targetURL.RawQuery = queryParams.Encode()
 		}
 	}
-	if s.openCodeBootstrapEnabled && opencodeLite && openCodeStorageScope != "" && bootstrapPath == "/" && len(queryParams) == 0 {
-		sessionID, bootstrapErr := s.ensureOpenCodeInitialSession(ctx, instanceID, targetURL, managedGatewayToken, protectedGateway)
-		if bootstrapErr != nil {
-			return fmt.Errorf("failed to initialize OpenCode session: %w", bootstrapErr)
-		}
-		if sessionID != "" {
-			w.Header().Set("Cache-Control", "no-store")
-			http.Redirect(w, r, openCodeSessionBrowserRoute(r, sessionID), http.StatusTemporaryRedirect)
-			return nil
-		}
-	}
-
 	// Agent UIs use SSE, streaming responses, and long-running HTTP calls such
 	// as DeepSeek Harness /api/respond. Keep every proxied request attached to
 	// the browser's request context instead of imposing an unrelated hard
@@ -363,6 +359,7 @@ func (s *InstanceProxyService) ProxyRequest(ctx context.Context, instanceID int,
 		}
 		if openCodeStorageScope != "" {
 			modifiedBody = injectOpenCodeBrowserStorageScope(modifiedBody, openCodeStorageScope)
+			modifiedBody = injectOpenCodeOnboarding(modifiedBody, openCodeOnboardingCanCreate)
 			resp.Header.Set("Cache-Control", "no-store")
 			resp.Header.Del("Last-Modified")
 		}

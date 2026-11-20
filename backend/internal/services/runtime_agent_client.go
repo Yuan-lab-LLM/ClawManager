@@ -162,10 +162,11 @@ type RuntimeAgentSessionSQLiteRestore struct {
 }
 
 type RuntimeAgentGatewayState struct {
-	GatewayID  string `json:"gateway_id"`
-	InstanceID int    `json:"instance_id"`
-	Generation int    `json:"generation"`
-	State      string `json:"state"`
+	ModelCatalogSync *RuntimeModelCatalogSyncReport `json:"model_catalog_sync,omitempty"`
+	GatewayID        string                         `json:"gateway_id"`
+	InstanceID       int                            `json:"instance_id"`
+	Generation       int                            `json:"generation"`
+	State            string                         `json:"state"`
 
 	// Runtime errors may include credentials. Decode only the classification;
 	// neither raw details nor the private verdict can enter inspection JSON.
@@ -183,6 +184,7 @@ func (state *RuntimeAgentGatewayState) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	*state = RuntimeAgentGatewayState(wire.identity)
+	state.ModelCatalogSync = sanitizeModelCatalogSyncReport(state.ModelCatalogSync)
 	state.recoveryFailureBlocked = runtimeRecoveryFreshFailureBlocked(wire.ErrorCode, wire.ErrorMessage)
 	return nil
 }

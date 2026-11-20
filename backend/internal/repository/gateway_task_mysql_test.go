@@ -11,12 +11,14 @@ import (
 
 	"clawreef/internal/models"
 	drivermysql "github.com/go-sql-driver/mysql"
+	"github.com/upper/db/v4"
 	"github.com/upper/db/v4/adapter/mysql"
 )
 
 // Opt-in integration test. Requires an EMPTY, DISPOSABLE database whose name
 // begins with clawmanager_test_. Never runs against the application database.
-func TestRuntimeTaskMySQLRevocationLifecycle(t *testing.T) {
+func runtimeTaskMySQLFixture(t *testing.T) (db.Session, *models.LLMModel) {
+	t.Helper()
 	dsn := os.Getenv("CLAWMANAGER_TEST_MYSQL_DSN")
 	if dsn == "" {
 		t.Skip("CLAWMANAGER_TEST_MYSQL_DSN not configured; requires disposable MySQL")
@@ -52,6 +54,8 @@ func TestRuntimeTaskMySQLRevocationLifecycle(t *testing.T) {
 	}
 	// All tables below were created by this test after the empty-schema check.
 	t.Cleanup(func() {
+		_, _ = sess.SQL().Exec("DROP TABLE IF EXISTS llm_runtime_model_aliases")
+		_, _ = sess.SQL().Exec("DROP TABLE IF EXISTS llm_runtime_provider_refs")
 		for _, table := range []string{"instance_lifecycle_manual_guards", "runtime_management_operations", "browser_writer_registry", "team_workspace_write_intents", "team_members", "teams", "instance_workspace_write_fences", "instance_workspace_write_intents", "gateway_runtime_upgrade_stops", "instance_commands", "instance_desired_state", "instance_runtime_bindings", "runtime_pods", "gateway_runtime_upgrades", "gateway_runtime_maintenance", "gateway_runtime_protocols", "gateway_runtime_task_models", "gateway_runtime_tasks", "llm_model_user_grants", "llm_models", "instances", "users"} {
 			_, _ = sess.SQL().Exec("DROP TABLE IF EXISTS " + table)
 		}
@@ -131,10 +135,62 @@ func TestRuntimeTaskMySQLRevocationLifecycle(t *testing.T) {
 			exec(statement)
 		}
 	}
+	identitySchema, err := os.ReadFile("../db/migrations/077_add_runtime_model_identity.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, statement := range strings.Split(string(identitySchema), ";") {
+		if strings.TrimSpace(statement) != "" {
+			exec(statement)
+		}
+	}
 	model := &models.LLMModel{DisplayName: "deployment-one", ProviderType: "local", ProtocolType: "openai-compatible", ModelGroup: "general", BaseURL: "https://test.invalid/v1", ProviderModelName: "same", VisibilityScope: "all", IsActive: true, Currency: "USD"}
+	refsSchema, err := os.ReadFile("../db/migrations/078_add_runtime_provider_refs.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, statement := range strings.Split(string(refsSchema), ";") {
+		if strings.TrimSpace(statement) != "" {
+			exec(statement)
+		}
+	}
 	if err = modelRepo.Save(model); err != nil {
 		t.Fatal(err)
 	}
+	stableID := model.RuntimeModelID
+	model.DisplayName = "deployment-renamed"
+	if err = modelRepo.Save(model); err != nil {
+		t.Fatal(err)
+	}
+	if stableID == "" || stableID != model.RuntimeModelID {
+		t.Fatal("rename changed stable ID")
+	}
+	for _, ref := range []string{"deployment-one", models.RuntimeModelAlias("deployment-one"), stableID} {
+		m, err := modelRepo.(RuntimeModelResolver).ResolveRuntimeModel(ref)
+		if err != nil || m == nil || m.ID != model.ID {
+			t.Fatalf("historical alias lost: %s %v", ref, err)
+		}
+	}
+	return sess, model
+}
+
+func TestRuntimeTaskMySQLConcurrentAuthorization(t *testing.T) {
+	sess, model := runtimeTaskMySQLFixture(t)
+	sess.SetMaxOpenConns(12)
+	testGatewayTaskConcurrentWrites(t, sess, *model)
+}
+
+func TestRuntimeTaskMySQLRevocationLifecycle(t *testing.T) {
+	sess, model := runtimeTaskMySQLFixture(t)
+	modelRepo := NewLLMModelRepository(sess)
+	exec := func(query string, args ...any) {
+		t.Helper()
+		if _, err := sess.SQL().Exec(query, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var err error
+	var raw []byte
 	tasks := NewGatewayTaskRepository(sess)
 	identity := models.GatewayTaskIdentity{InstanceID: 10, UserID: 1, Generation: 5, SessionID: "ses_test", TaskID: "msg_one"}
 	if err = tasks.Bind(t.Context(), identity, model.ID); err != nil {

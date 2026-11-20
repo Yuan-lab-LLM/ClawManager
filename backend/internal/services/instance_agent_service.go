@@ -33,6 +33,7 @@ type AgentRegisterRequest struct {
 }
 
 type AgentRegisterResponse struct {
+	OwnerUserID                int       `json:"owner_user_id"`
 	SessionToken               string    `json:"session_token"`
 	SessionExpiresAt           time.Time `json:"session_expires_at"`
 	HeartbeatIntervalSeconds   int       `json:"heartbeat_interval_seconds"`
@@ -189,6 +190,7 @@ func (s *instanceAgentService) Register(bootstrapToken string, req AgentRegister
 	}
 
 	return &AgentRegisterResponse{
+		OwnerUserID:                instance.UserID,
 		SessionToken:               sessionToken,
 		SessionExpiresAt:           sessionExpiresAt,
 		HeartbeatIntervalSeconds:   heartbeat.ReportIntervalSeconds(),

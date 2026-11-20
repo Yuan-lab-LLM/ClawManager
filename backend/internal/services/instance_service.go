@@ -48,8 +48,6 @@ type InstanceService interface {
 	ForceSyncInstance(instanceID int) error
 }
 
-const OpenCodeDefaultProjectRelativePath = "starter"
-
 // InstanceOwnerService is the owner-scoped listing capability used by the
 // northbound API and its authenticated portal page.
 type InstanceOwnerService interface {
@@ -1707,7 +1705,18 @@ func (s *instanceService) buildGatewayEnvReadOnly(instance *models.Instance) (ma
 
 	modelInjection, err := s.resolveGatewayModelInjection(instance.UserID)
 	if err != nil {
-		return nil, err
+		// Preserve access to an existing instance's UI/history when its complete
+		// authorized catalog is empty. Never apply this fallback to storage errors.
+		switch strings.ToLower(strings.TrimSpace(instance.Type)) {
+		case "opencode", "openclaw", RuntimeTypeHermes, RuntimeTypeDeepSeekHarness:
+			if instance.ID > 0 && errors.Is(err, ErrModelConfigurationRequired) {
+				modelInjection = &gatewayModelInjection{modelsJSON: "[]", providerModelsJSON: "[]", contextWindowsJSON: "{}", visionJSON: "{}", reasoningJSON: "{}", reasoningControlJSON: "{}"}
+			} else {
+				return nil, err
+			}
+		default:
+			return nil, err
+		}
 	}
 
 	token := strings.TrimSpace(*instance.AccessToken)
@@ -1744,11 +1753,21 @@ func (s *instanceService) buildGatewayEnvReadOnly(instance *models.Instance) (ma
 		// credentials as env references ensures the generated file does not embed
 		// a user-managed provider or a direct external API key.
 		env["OPENCODE_CONFIG_CONTENT"] = configContent
-		if strings.EqualFold(strings.TrimSpace(instance.InstanceMode), InstanceModeLite) {
-			env["CLAWMANAGER_DEFAULT_PROJECT_RELATIVE_PATH"] = OpenCodeDefaultProjectRelativePath
-			if instance.WorkspacePath != nil && strings.TrimSpace(*instance.WorkspacePath) != "" {
-				env["CLAWMANAGER_DEFAULT_PROJECT_PATH"] = path.Join(strings.TrimSpace(*instance.WorkspacePath), OpenCodeDefaultProjectRelativePath)
-			}
+	}
+	if strings.EqualFold(strings.TrimSpace(instance.Type), "openclaw") || strings.EqualFold(strings.TrimSpace(instance.Type), RuntimeTypeHermes) || strings.EqualFold(strings.TrimSpace(instance.Type), RuntimeTypeDeepSeekHarness) {
+		// Additive contract: older runtime images ignore it. Updated images
+		// consult the owner-authorized catalog before restoring managed refs.
+		env["CLAWMANAGER_MODEL_REFERENCE_PROTOCOL"] = "1"
+	}
+	switch strings.ToLower(strings.TrimSpace(instance.Type)) {
+	case "opencode", "openclaw", RuntimeTypeHermes, RuntimeTypeDeepSeekHarness:
+		env["CLAWMANAGER_MODEL_CATALOG_SYNC"] = "1"
+		catalog, err := s.buildStartupModelCatalog(instance, token)
+		if err != nil {
+			return nil, err
+		}
+		if catalog != "" {
+			env["CLAWMANAGER_MODEL_CATALOG_JSON"] = catalog
 		}
 	}
 	return env, nil
@@ -2077,6 +2096,9 @@ chown -R 1000:1000 "$target" || true`,
 }
 
 func (s *instanceService) resolveGatewayModelInjection(ownerID int) (*gatewayModelInjection, error) {
+	if ownerID <= 0 {
+		return nil, models.ErrModelUnavailable
+	}
 	if s.llmModelRepo == nil {
 		return nil, fmt.Errorf("llm model repository not configured")
 	}
@@ -2084,6 +2106,9 @@ func (s *instanceService) resolveGatewayModelInjection(ownerID int) (*gatewayMod
 	modelRepo := repository.ForModelUser(s.llmModelRepo, ownerID)
 	items, err := modelRepo.ListActive()
 	if err != nil {
+		if errors.Is(err, models.ErrModelUnavailable) {
+			return nil, ErrModelConfigurationRequired
+		}
 		return nil, fmt.Errorf("failed to list active models: %w", err)
 	}
 	// Expand only the persisted catalog after owner visibility filtering.

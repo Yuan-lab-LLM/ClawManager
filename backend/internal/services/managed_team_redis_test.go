@@ -151,11 +151,17 @@ func TestManagedRedisNativeScriptsMatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Normalize checkout line endings before applying semantic Lua mutations.
+	// Git checkouts may use CRLF. Keep mutation fixtures and function boundary
+	// extraction independent of checkout format, without changing emitted Lua.
 	source = []byte(strings.ReplaceAll(string(source), "\r\n", "\n"))
 	if !managedNativeScriptsMatch(t, string(source)) {
 		t.Fatal("native emitted scripts changed")
 	}
+	t.Run("CRLF checkout", func(t *testing.T) {
+		if !managedNativeScriptsMatch(t, strings.ReplaceAll(string(source), "\n", "\r\n")) {
+			t.Fatal("checkout line endings changed native script semantics")
+		}
+	})
 	for name, mutated := range map[string]string{
 		"inserted Lua":      strings.Replace(string(source), `"local existing = redis.call('GET', KEYS[1])",`, `"local existing = redis.call('GET', KEYS[1])",`+"\n"+`    "local extra = 1",`, 1),
 		"unused old script": strings.Replace(string(source), "    script,\n    2,", "    \"return 0\",\n    2,", 1),
@@ -200,7 +206,7 @@ const sandbox = {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	command := exec.CommandContext(ctx, "node", "-e", harness)
-	command.Stdin = strings.NewReader(source)
+	command.Stdin = strings.NewReader(strings.ReplaceAll(source, "\r\n", "\n"))
 	output, err := command.Output()
 	if err != nil {
 		t.Fatalf("capture native emitted Lua (Node required): %v", err)

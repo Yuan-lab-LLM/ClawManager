@@ -1,12 +1,15 @@
 package handlers
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
+	"clawreef/internal/models"
+	"clawreef/internal/repository"
 	"clawreef/internal/services"
 	"clawreef/internal/utils"
 
@@ -14,6 +17,7 @@ import (
 )
 
 type AgentHandler struct {
+	shutdownAudits         repository.RuntimeShutdownAuditRepository
 	agentService           services.InstanceAgentService
 	commandService         services.InstanceCommandService
 	runtimeStatusService   services.InstanceRuntimeStatusService
@@ -23,6 +27,10 @@ type AgentHandler struct {
 }
 
 type AgentHandlerOption func(*AgentHandler)
+
+func WithAgentShutdownAudits(repo repository.RuntimeShutdownAuditRepository) AgentHandlerOption {
+	return func(h *AgentHandler) { h.shutdownAudits = repo }
+}
 
 func WithAgentSkillReportPersistence(enabled bool) AgentHandlerOption {
 	return func(handler *AgentHandler) {
@@ -167,6 +175,14 @@ func (h *AgentHandler) ReportState(c *gin.Context) {
 		return
 	}
 	if err := h.runtimeStatusService.Report(session, req, c.ClientIP()); err != nil {
+		if errors.Is(err, models.ErrInvalidShutdownObservation) {
+			utils.Error(c, 400, "Invalid runtime shutdown observation")
+			return
+		}
+		if errors.Is(err, models.ErrShutdownAuditUnavailable) {
+			utils.Error(c, 503, "Runtime shutdown audit storage unavailable")
+			return
+		}
 		utils.HandleError(c, err)
 		return
 	}

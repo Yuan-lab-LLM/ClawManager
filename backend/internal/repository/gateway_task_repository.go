@@ -4,6 +4,7 @@ import (
 	"clawreef/internal/models"
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -57,20 +58,75 @@ func revokeUnauthorizedTasks(sess db.Session, modelID int) error {
 }
 
 func (r *gatewayTaskRepository) Check(ctx context.Context, t models.GatewayTaskIdentity) (*models.GatewayTaskState, error) {
+	var state *models.GatewayTaskState
+	err := retryGatewayTaskWrite(ctx, func() error {
+		var err error
+		state, err = r.checkOnce(ctx, t)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return state, nil
+}
+
+// Retry whole transactions only after rollback; preserve cancellation and denials.
+func retryGatewayTaskWrite(ctx context.Context, operation func() error) error {
 	for attempt := 0; ; attempt++ {
-		state, err := r.checkOnce(ctx, t)
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		err := operation()
 		var deadlock *drivermysql.MySQLError
 		if err == nil || attempt >= 2 || !errors.As(err, &deadlock) || deadlock.Number != 1213 {
-			return state, err
+			return err
 		}
 		timer := time.NewTimer(time.Duration(attempt+1) * 10 * time.Millisecond)
 		select {
 		case <-ctx.Done():
 			timer.Stop()
-			return nil, ctx.Err()
+			return ctx.Err()
 		case <-timer.C:
 		}
 	}
+}
+
+// Policy writes lock models before tasks. Discover bindings without row locks,
+// then take shared model locks in primary-key order BEFORE locking the task.
+// The caller holds the instance lock, which also fences Bind's binding writes.
+func lockGatewayTaskModels(ctx context.Context, sess db.Session, key string) error {
+	rows, err := sess.SQL().QueryContext(ctx, "SELECT model_id FROM gateway_runtime_task_models WHERE task_key=? ORDER BY model_id", key)
+	if err != nil {
+		return err
+	}
+	var ids []any
+	for rows.Next() {
+		var id int
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		ids = append(ids, id)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil || len(ids) == 0 {
+		return err
+	}
+	query := "SELECT id FROM llm_models WHERE id IN (" + strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",") + ") ORDER BY id FOR SHARE"
+	locked, err := sess.SQL().QueryContext(ctx, query, ids...)
+	if err != nil {
+		return err
+	}
+	defer locked.Close()
+	for locked.Next() {
+		var id int
+		if err := locked.Scan(&id); err != nil {
+			return err
+		}
+	}
+	// Missing/deleted models are revoked by Check's current-read UPDATE below.
+	return locked.Err()
 }
 
 // Lock the instance before the task throughout admission AND revocation checks.
@@ -90,12 +146,18 @@ func (r *gatewayTaskRepository) checkOnce(ctx context.Context, t models.GatewayT
 	err = r.sess.TxContext(ctx, func(sess db.Session) error {
 		i, err := lockActivityInstance(ctx, sess, t.InstanceID)
 		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return models.ErrModelUnavailable
+			}
 			return err
 		}
 		if i.mode == "lite" {
 			if err = checkInstanceAutoStopMutation(ctx, sess, t.InstanceID); err != nil {
 				return err
 			}
+		}
+		if err := lockGatewayTaskModels(ctx, sess, key); err != nil {
+			return err
 		}
 		if i.userID != t.UserID || i.generation != t.Generation {
 			var n int
@@ -132,8 +194,15 @@ func (r *gatewayTaskRepository) checkOnce(ctx context.Context, t models.GatewayT
 		if err != nil {
 			return err
 		}
-		if err = sess.Collection("gateway_runtime_tasks").Find(db.Cond{"task_key": key}).Select("revoked", "finished", "runtime_acknowledged").One(&state); err != nil {
-			if err == db.ErrNoMoreRows {
+		// Binding discovery established a repeatable-read snapshot before waiting
+		// for model locks. Read the current task, including policy revocations
+		// committed during that wait, rather than returning the older snapshot.
+		row, err := sess.SQL().QueryRowContext(ctx, "SELECT revoked,finished,runtime_acknowledged FROM gateway_runtime_tasks WHERE task_key=? FOR UPDATE", key)
+		if err != nil {
+			return err
+		}
+		if err = row.Scan(&state.Revoked, &state.Finished, &state.RuntimeAcknowledged); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
 				return models.ErrModelUnavailable
 			}
 			return err
@@ -155,33 +224,57 @@ func (r *gatewayTaskRepository) Bind(ctx context.Context, t models.GatewayTaskId
 		return models.ErrModelUnavailable
 	}
 	key, _ := GatewayTaskKey(t)
-	return r.sess.Tx(func(sess db.Session) error {
-		// Same model-row lock as an administrator's policy update.
-		row, err := sess.SQL().QueryRowContext(ctx, "SELECT id FROM llm_models WHERE id=? FOR UPDATE", modelID)
-		if err != nil {
+	return retryGatewayTaskWrite(ctx, func() error {
+		return r.sess.TxContext(ctx, func(sess db.Session) error {
+			// Check already committed; re-fence identity under the same instance-
+			// first lock used by Check and Finish before taking model/task locks.
+			i, err := lockActivityInstance(ctx, sess, t.InstanceID)
+			if err != nil {
+				if errors.Is(err, sql.ErrNoRows) {
+					return models.ErrModelUnavailable
+				}
+				return err
+			}
+			if i.userID != t.UserID || i.generation != t.Generation {
+				return models.ErrModelUnavailable
+			}
+			// Same model-row lock as an administrator's policy update.
+			row, err := sess.SQL().QueryRowContext(ctx, "SELECT id FROM llm_models WHERE id=? FOR UPDATE", modelID)
+			if err != nil {
+				return err
+			}
+			var id int
+			if err = row.Scan(&id); err != nil {
+				if errors.Is(err, sql.ErrNoRows) {
+					return models.ErrModelUnavailable
+				}
+				return err
+			}
+			// Start consistent reads only after the current model lock, so a
+			// policy committed while waiting cannot be read from a stale snapshot.
+			if i.mode == "lite" {
+				if err := checkInstanceAutoStopMutation(ctx, sess, t.InstanceID); err != nil {
+					return err
+				}
+			}
+			checker := &llmModelRepository{sess: sess}
+			if err = checker.CheckModelAccess(ctx, t.UserID, modelID); err != nil {
+				return err
+			}
+			row, err = sess.SQL().QueryRowContext(ctx, "SELECT revoked,finished FROM gateway_runtime_tasks WHERE task_key=? FOR UPDATE", key)
+			if err != nil {
+				return err
+			}
+			var revoked, finished bool
+			if err = row.Scan(&revoked, &finished); err != nil {
+				return err
+			}
+			if revoked || finished {
+				return models.ErrModelUnavailable
+			}
+			_, err = sess.SQL().ExecContext(ctx, "INSERT IGNORE INTO gateway_runtime_task_models(task_key,model_id) VALUES (?,?)", key, modelID)
 			return err
-		}
-		var id int
-		if err = row.Scan(&id); err != nil {
-			return models.ErrModelUnavailable
-		}
-		checker := &llmModelRepository{sess: sess}
-		if err = checker.CheckModelAccess(ctx, t.UserID, modelID); err != nil {
-			return err
-		}
-		row, err = sess.SQL().QueryRowContext(ctx, "SELECT revoked,finished FROM gateway_runtime_tasks WHERE task_key=? FOR UPDATE", key)
-		if err != nil {
-			return err
-		}
-		var revoked, finished bool
-		if err = row.Scan(&revoked, &finished); err != nil {
-			return err
-		}
-		if revoked || finished {
-			return models.ErrModelUnavailable
-		}
-		_, err = sess.SQL().ExecContext(ctx, "INSERT IGNORE INTO gateway_runtime_task_models(task_key,model_id) VALUES (?,?)", key, modelID)
-		return err
+		}, nil)
 	})
 }
 
@@ -190,8 +283,53 @@ func (r *gatewayTaskRepository) Finish(ctx context.Context, t models.GatewayTask
 	if err != nil {
 		return err
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return retryGatewayTaskWrite(ctx, func() error {
+		return r.sess.TxContext(ctx, func(sess db.Session) error {
+			i, err := lockActivityInstance(ctx, sess, t.InstanceID)
+			if err != nil {
+				if errors.Is(err, sql.ErrNoRows) {
+					return models.ErrModelUnavailable
+				}
+				return err
+			}
+			if i.userID != t.UserID || i.generation != t.Generation {
+				return models.ErrModelUnavailable
+			}
+			return (&gatewayTaskRepository{sess: sess}).finishLocked(ctx, t, key, cancelled)
+		}, nil)
+	})
+}
+
+func (r *gatewayTaskRepository) finishLocked(ctx context.Context, t models.GatewayTaskIdentity, key string, cancelled bool) error {
+	// Fence at the write, not only in HTTP authentication or an earlier Check.
 	// A normal completion racing revocation is NOT a cancellation acknowledgment.
-	_, err = r.sess.SQL().ExecContext(ctx, `UPDATE gateway_runtime_tasks SET finished=TRUE,
- runtime_acknowledged=IF(revoked AND ?,TRUE,runtime_acknowledged) WHERE task_key=?`, cancelled, key)
-	return err
+	result, err := r.sess.SQL().ExecContext(ctx, `UPDATE gateway_runtime_tasks t
+ JOIN instances i ON i.id=t.instance_id AND i.user_id=t.owner_user_id AND i.runtime_generation=t.generation
+ JOIN users u ON u.id=i.user_id AND u.is_active=TRUE
+ SET t.finished=TRUE,t.runtime_acknowledged=IF(t.revoked AND ?,TRUE,t.runtime_acknowledged)
+ WHERE t.task_key=? AND i.id=? AND i.user_id=? AND i.runtime_generation=?`, cancelled, key, t.InstanceID, t.UserID, t.Generation)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected > 0 {
+		return nil
+	}
+	// MySQL may report zero changed rows for an idempotent repeat. Only accept
+	// it if the exact task still exists under the same current owner/generation.
+	snapshots, err := r.Inspect(ctx, t, []models.GatewayTaskIdentity{t})
+	if err != nil {
+		return err
+	}
+	state := snapshots[0].State
+	if state == nil || !state.Finished || cancelled && state.Revoked && !state.RuntimeAcknowledged {
+		return models.ErrModelUnavailable
+	}
+	return nil
 }
