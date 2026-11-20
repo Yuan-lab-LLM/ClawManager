@@ -21,7 +21,7 @@ ClawManager 是 Kubernetes 原生平台。先选择 Kubernetes 发行版，再�
 
 1. 核对镜像、StorageClass 和入口暴露方式，准备[审计与历史恢复凭据](#审计与历史恢复凭据)。
 2. 单节点先设置清单要求的存储节点标签；集群先确认 RWO/RWX StorageClass。
-3. 应用一套完整清单，等待核心 Pod Ready 和 PVC Bound。
+3. 单节点首装使用 [HostPath 安装入口](./install/k8s/single-node.md#start-a-fresh-installation)，集群模式按对应说明准备 CSI 卷。检查核心 Pod Ready 和 PVC Bound。
 4. 打开前端，配置普通模型，验证安全防护与 AI Gateway。
 5. 分别创建需要对外开放的 Runtime 测试实例。
 
@@ -32,8 +32,12 @@ ClawManager 是 Kubernetes 原生平台。先选择 Kubernetes 发行版，再�
 四份清单各自包含业务资源、审计 PVC 和凭据引用。单节点的审计目录位于标记节点的 `/data/clawmanager/system/observability`，集群使用独立的 RWX 审计卷。
 
 1. 用[凭据准备脚本](../tools/k8s/observability/README.md)为新环境生成审计密钥和恢复账号。创建 `clawmanager-system` 命名空间后，应用生成的两个 Secret。
-2. 应用所选清单。内置 MySQL 就绪后，由数据库管理员执行恢复账号对应的私有 `bootstrap.sql`，再验证 `clawmanager-app` 就绪。
+2. 单节点安装入口自动准备凭据，并在 CM 首次迁移期间临时开启 `log_bin_trust_function_creators`。手动部署时由数据库管理员等待 MySQL 就绪、执行恢复账号的私有 `bootstrap.sql`，并在 CM 迁移完成或失败后恢复 MySQL 参数原值。
 3. 升级已有环境时，复用原来的审计密钥、审计卷和恢复账号。已绑定的审计卷按现场 StorageClass 保留。
+
+## 发布验收
+
+安装文档、CI 和发布流程共用 [GHCR 镜像配置](../tools/k8s/single-node/ghcr-images.json)。候选 CM 镜像以 GHCR digest 为准。发布流程在两个隔离集群分别验证空库 HostPath 首装和上一版本升级。两轮均验证四种 Lite 实例的停启删与工作区文件、网关密钥按创建返回 ID 撤销，以及 OpenCode、DeepSeek Harness 的实际 Chrome 页面。任一轮失败时暂停发布标签晋升。
 
 ## 可选北向接口
 
@@ -46,7 +50,7 @@ ClawManager 是 Kubernetes 原生平台。先选择 Kubernetes 发行版，再�
 - Lite 在共享 `deepseek-harness-runtime` 池中运行隔离的 `dsh web` 进程，持久化目录为 `<workspace>/home/.dsh`。
 - Pro 使用专属 Webtop Deployment；桌面端口为 `3001`，内部 `dsh web` 监听回环端口 `3080`，持久化目录为 `/config/.dsh`。
 - 两种模式都由 ClawManager 注入 AI Gateway 地址、实例凭据和模型列表，并支持 Skill 与工作区文件。
-- Lite 浏览器必须配置独立域名模板，例如 `CLAWMANAGER_DEEPSEEK_HARNESS_PUBLIC_URL_TEMPLATE=https://deepseek-harness-{instance_id}.clawmanager.test:39443/`；`{instance_id}` 不可省略。
+- Lite 浏览器需要独立的 HTTPS 源。Chrome 可使用[同主机 HTTPS 端口池](./browser-origin-ports.md)，也可配置包含 `{instance_id}` 的独立域名模板，例如 `CLAWMANAGER_DEEPSEEK_HARNESS_PUBLIC_URL_TEMPLATE=https://deepseek-harness-{instance_id}.clawmanager.test:39443/`。
 
 镜像源码位于 [AgentsRuntime 的 `deepseek-harness/`](https://github.com/Iamlovingit/AgentsRuntime/tree/main/deepseek-harness)。离线环境应为 Lite 独立域名配置通配 DNS 与证书。
 

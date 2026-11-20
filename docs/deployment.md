@@ -42,7 +42,7 @@ The cluster profile is validated with Longhorn as the example CSI implementation
 2. Choose the storage profile: `single-node` or `cluster`.
 3. Check the storage prerequisites for that profile.
 4. Review the bundled manifest and adjust secrets, images, StorageClass names, and ingress exposure. Prepare the [audit and history credentials](#audit-and-history-credentials).
-5. Deploy the platform components into the cluster.
+5. Use the single-node installer for a fresh HostPath deployment, or apply the cluster profile according to its install guide.
 6. Wait for the core services to become ready.
 7. Validate frontend access, AI Gateway management pages, Security Protection connectivity, and OpenClaw/Hermes/OpenCode/DeepSeek Harness runtime creation flows.
 
@@ -51,7 +51,10 @@ Single-node example:
 ```bash
 kubectl get nodes
 kubectl label node <node> clawmanager.io/storage-node=true --overwrite
-kubectl apply -f deployments/k8s/single-node/clawmanager.yaml
+python3 tools/k8s/install_fresh.py \
+  --manifest deployments/k8s/single-node/clawmanager.yaml \
+  --images-file tools/k8s/single-node/ghcr-images.json \
+  --credentials-dir /secure/clawmanager-first-install
 kubectl get pvc -n clawmanager-system
 kubectl get pods -n clawmanager-system
 ```
@@ -69,11 +72,31 @@ kubectl get pods -n clawmanager-system
 
 Each profile uses one `clawmanager.yaml`, which includes the audit PVC and credential mounts. The single-node profiles store audit logs under `/data/clawmanager/system/observability`. The cluster profiles use a dedicated RWX claim.
 
+The single-node installer prepares the credentials and runs the database migration
+window. For a manually administered deployment:
+
 1. Use the [credential preparation scripts](../tools/k8s/observability/README.md) to generate the audit key and isolated restore account for a new installation. Create the `clawmanager-system` namespace before applying the two Secret objects.
-2. Apply the selected profile. After the bundled MySQL deployment is ready, have the database administrator run the private `bootstrap.sql` for the restore account, then verify application readiness.
+2. Keep CM stopped until MySQL is ready. The database administrator runs the private `bootstrap.sql`
+   for the restore account and temporarily enables `log_bin_trust_function_creators`
+   while CM applies trigger migrations, then restores the prior value even if the rollout fails.
 3. On an existing installation, reuse its audit key, audit volume and restore account. Match the manifest to the StorageClass of any bound audit claim.
 
 Installation details are available for [Kubernetes single-node](./install/k8s/single-node.md), [Kubernetes cluster](./install/k8s/cluster.md), [K3s single-node](./install/k3s/single-node.md) and [K3s cluster](./install/k3s/cluster.md).
+
+## Release verification
+
+The Kubernetes build check uses the documented single-node installer with a
+real HostPath workspace. The release workflow tests the exact GHCR candidate
+digest on a fresh install and on an independent cluster seeded with the
+previous release. The upgrade lane keeps the database, PVCs, instance IDs,
+Runtime images, and workspace files while updating CM.
+
+Both lanes require Lite create, stop, start, workspace readback, and deletion
+for OpenClaw, Hermes, OpenCode, and DeepSeek Harness. They also verify gateway
+key creation and revocation using the returned ID and actual OpenCode and
+DeepSeek Harness pages in Chrome. The browser NodePorts and ready EndpointSlice
+must forward to port `8444`. A failed gate prevents promotion of the candidate
+to the release and `latest` tags.
 
 ## Optional Northbound API
 
@@ -92,23 +115,17 @@ existing installation and use the
 ## OpenCode Lite Public-Origin Strategy
 
 OpenCode Lite serves its web application and APIs from absolute root paths such
-as `/assets` and `/global/health`. Each logical OpenCode instance therefore
-needs a dedicated browser origin even though the runtime Pod is shared. Set:
-
-```text
-CLAWMANAGER_OPENCODE_PUBLIC_URL_TEMPLATE
-```
-
-The value must be an absolute HTTP(S) URL containing `{instance_id}`. The
-bundled manifests expose the variable with an empty value; installers must set
-it to a hostname covered by wildcard DNS and TLS, for example:
+as `/assets` and `/global/health`. Each OpenCode instance needs a dedicated
+browser origin. For Chrome, use the
+[same-host HTTPS port pool](./browser-origin-ports.md). For per-instance DNS,
+set `CLAWMANAGER_OPENCODE_PUBLIC_URL_TEMPLATE` to an absolute HTTP(S) URL that
+includes `{instance_id}` and a hostname covered by wildcard DNS and TLS.
 
 ```text
 CLAWMANAGER_OPENCODE_PUBLIC_URL_TEMPLATE=https://opencode-{instance_id}.172-16-1-12.nip.io:39443/
 ```
 
-The value must be an absolute HTTP(S) URL containing `{instance_id}`. For
-instance `172`, the example above produces:
+For instance `172`, the example above produces the following URL.
 
 ```text
 https://opencode-172.172-16-1-12.nip.io:39443/
@@ -117,9 +134,7 @@ https://opencode-172.172-16-1-12.nip.io:39443/
 The browser remains at the root of that origin; it never receives the legacy
 `/api/v1/instances/{id}/proxy/` URL. The edge gateway validates the short-lived
 instance token, stores it in an origin-scoped secure cookie, and routes the
-request to the instance's current shared-pool process. An empty or invalid
-template is a deployment error and OpenCode Lite access URL generation fails
-instead of falling back to the legacy subpath proxy.
+request to the instance's current shared-pool process.
 
 `nip.io` supplies wildcard DNS only. The TLS certificate served by the
 ClawManager gateway must cover the generated names, for example
@@ -164,7 +179,8 @@ Cordis patch exposes only that managed provider and disables the direct public
 DeepSeek web-search provider.
 
 The DeepSeek Harness browser uses root-relative HTTP and websocket routes. Lite
-therefore requires a dedicated origin template:
+requires a dedicated origin. Use the [same-host HTTPS port pool](./browser-origin-ports.md)
+for Chrome or set a per-instance DNS template.
 
 ```text
 CLAWMANAGER_DEEPSEEK_HARNESS_PUBLIC_URL_TEMPLATE=https://deepseek-harness-{instance_id}.172-16-1-12.nip.io:39443/
