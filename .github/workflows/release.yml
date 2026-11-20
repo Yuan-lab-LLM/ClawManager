@@ -117,15 +117,6 @@ jobs:
           echo "should_release=true" >> "$GITHUB_OUTPUT"
           echo "tag_name=$TAG_NAME" >> "$GITHUB_OUTPUT"
 
-      - name: Create and push release tag
-        if: steps.decision.outputs.should_release == 'true'
-        shell: bash
-        run: |
-          TAG_NAME="${{ steps.decision.outputs.tag_name }}"
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -a "$TAG_NAME" -m "Release $TAG_NAME"
-          git push origin "$TAG_NAME"
 
   release:
     name: Publish Release
@@ -154,10 +145,6 @@ jobs:
           fi
           echo "IMAGE_URI=ghcr.io/${REPOSITORY_OWNER_LOWER}/clawmanager" >> "$GITHUB_ENV"
           echo "BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_ENV"
-
-      - name: Checkout release tag
-        if: github.event_name != 'push'
-        run: git checkout "${TAG_NAME}"
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -195,7 +182,8 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Push multi-platform release image
+      - name: Push immutable release candidate
+        id: candidate
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -206,19 +194,67 @@ jobs:
             VERSION=${{ env.TAG_NAME }}
             VCS_REF=${{ github.sha }}
             BUILD_DATE=${{ env.BUILD_DATE }}
-          tags: |
-            ${{ env.IMAGE_URI }}:${{ env.TAG_NAME }}
-            ${{ env.IMAGE_URI }}:latest
+          tags: ${{ env.IMAGE_URI }}:candidate-${{ github.run_id }}-${{ github.run_attempt }}
 
-      - name: Read pushed image digest
+      - name: Resolve previous release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PREVIOUS_TAG=$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName)
+          PREVIOUS_DIGEST=$(docker buildx imagetools inspect "$IMAGE_URI:$PREVIOUS_TAG" |
+            awk '$1 == "Digest:" && !digest {digest=$2} END {print digest}')
+          [[ $PREVIOUS_DIGEST =~ ^sha256:[0-9a-f]{64}$ ]]
+          echo "PREVIOUS_IMAGE=$IMAGE_URI@$PREVIOUS_DIGEST" >> "$GITHUB_ENV"
+
+      - name: Install kind
+        uses: helm/kind-action@v1.12.0
+        with:
+          install_only: true
+          version: v0.31.0
+          kubectl_version: v1.35.0
+
+      - name: Setup browser tests
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: e2e/package-lock.json
+
+      - name: Install browser test dependencies
+        working-directory: e2e
+        run: |
+          npm ci
+          npx playwright install --with-deps chrome
+
+      - name: Verify candidate with fresh and upgrade fixtures
+        env:
+          IMAGE_DIGEST: ${{ steps.candidate.outputs.digest }}
+        run: |
+          [[ $IMAGE_DIGEST =~ ^sha256:[0-9a-f]{64}$ ]]
+          bash .github/scripts/run-k8s-smoke.sh "$IMAGE_URI@$IMAGE_DIGEST" "$PREVIOUS_IMAGE"
+
+      - name: Promote verified candidate
+        shell: bash
+        env:
+          IMAGE_DIGEST: ${{ steps.candidate.outputs.digest }}
+        run: |
+          docker buildx imagetools create --tag "$IMAGE_URI:$TAG_NAME" --tag "$IMAGE_URI:latest" "$IMAGE_URI@$IMAGE_DIGEST"
+          for tag in "$TAG_NAME" latest; do
+            PROMOTED=$(docker buildx imagetools inspect "$IMAGE_URI:$tag" |
+              awk '$1 == "Digest:" && !digest {digest=$2} END {print digest}')
+            test "$PROMOTED" = "$IMAGE_DIGEST"
+          done
+          echo "IMAGE_DIGEST=$IMAGE_DIGEST" >> "$GITHUB_ENV"
+
+      - name: Create and push scheduled release tag
+        if: github.event_name != 'push'
         shell: bash
         run: |
-          IMAGE_DIGEST="$(docker buildx imagetools inspect "${IMAGE_URI}:${TAG_NAME}" | sed -n 's/^Digest:[[:space:]]*//p' | head -n1)"
-          if [ -z "${IMAGE_DIGEST}" ]; then
-            echo "Failed to resolve image digest for ${IMAGE_URI}:${TAG_NAME}" >&2
-            exit 1
-          fi
-          echo "IMAGE_DIGEST=${IMAGE_DIGEST}" >> "$GITHUB_ENV"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG_NAME" -m "Release $TAG_NAME"
+          git push origin "$TAG_NAME"
 
       - name: Build release notes
         shell: bash

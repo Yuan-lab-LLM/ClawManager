@@ -157,146 +157,27 @@ jobs:
       - name: Build local application image
         run: docker build --build-arg VERSION=ci-${GITHUB_SHA} --build-arg VCS_REF=${GITHUB_SHA} -t clawmanager:ci .
 
-      - name: Create kind cluster
+      - name: Install kind
         uses: helm/kind-action@v1.12.0
         with:
-          cluster_name: clawmanager-ci
-          ignore_failed_clean: true
+          install_only: true
+          version: v0.31.0
+          kubectl_version: v1.35.0
 
-      - name: Load image into kind
-        run: kind load docker-image clawmanager:ci --name clawmanager-ci
+      - name: Setup browser tests
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: e2e/package-lock.json
 
-      - name: Deploy manifest to cluster
-        shell: bash
+      - name: Install browser test dependencies
+        working-directory: e2e
         run: |
-          kubectl label node clawmanager-ci-control-plane clawmanager.io/storage-node=true --overwrite
-          cp deployments/k8s/single-node/clawmanager.yaml /tmp/clawmanager-ci.yaml
+          npm ci
+          npx playwright install --with-deps chrome
 
-          python - <<'PY'
-          from pathlib import Path
-          import re
-
-          path = Path("/tmp/clawmanager-ci.yaml")
-          text = path.read_text(encoding="utf-8")
-
-          text = text.replace(
-              "image: ghcr.io/yuan-lab-llm/clawmanager:latest",
-              "image: clawmanager:ci",
-          )
-          text = text.replace(
-              "image: minio/minio:latest",
-              "image: ghcr.io/coollabsio/minio@sha256:69b55a1c1c5dc285ce04db96689f5b2102317fc77a50680a1874ca6efd1c87f9",
-          )
-
-          text = re.sub(
-              r"(kind: Deployment\s+metadata:\s+name: mysql\s+namespace: clawmanager-system\s+spec:\s+replicas: 1\s+selector:\s+matchLabels:\s+app: mysql\s+template:\s+metadata:\s+labels:\s+app: mysql\s+spec:\s+containers:\s+- name: mysql.*?volumeMounts:\s+- name: mysql-data\s+mountPath: /var/lib/mysql\s+- name: mysql-init\s+mountPath: /docker-entrypoint-initdb.d\s+readinessProbe:.*?periodSeconds: 10\s+)volumes:\s+- name: mysql-data\s+persistentVolumeClaim:\s+claimName: mysql-data\s+- name: mysql-init\s+configMap:\s+name: clawmanager-mysql-init",
-              r"\1volumes:\n        - name: mysql-data\n          emptyDir: {}\n        - name: mysql-init\n          configMap:\n            name: clawmanager-mysql-init",
-              text,
-              flags=re.S,
-          )
-
-          text = re.sub(
-              r"(kind: Deployment\s+metadata:\s+name: clawmanager-app\s+namespace: clawmanager-system\s+spec:\s+)replicas: 1",
-              r"\1replicas: 0",
-              text,
-              count=1,
-              flags=re.S,
-          )
-
-          text = re.sub(
-              r"(kind: Service\s+metadata:\s+name: clawmanager-frontend\s+namespace: clawmanager-system\s+spec:\s+)type: NodePort",
-              r"\1type: ClusterIP",
-              text,
-              count=1,
-              flags=re.S,
-          )
-
-          text = re.sub(
-              r"\n\s+nodePort:\s+\d+",
-              "",
-              text,
-              count=1,
-          )
-
-          text = re.sub(
-              r"(\n\s+- name: workspaces\s+)nfs:\s+server: workspace-store\.clawmanager-system\.svc\.cluster\.local\s+path: /exports/workspaces",
-              r"\1emptyDir: {}",
-              text,
-          )
-
-          text = re.sub(
-              r"(\n\s+- name: workspaces\s+)persistentVolumeClaim:\s+claimName: clawmanager-workspaces",
-              r"\1emptyDir: {}",
-              text,
-          )
-
-          path.write_text(text, encoding="utf-8")
-          PY
-
-          kubectl apply -f /tmp/clawmanager-ci.yaml
-
-      - name: Wait for MySQL and MinIO
+      - name: Verify fresh single-node installation
         run: |
-          kubectl -n clawmanager-system rollout status deployment/mysql --timeout=300s
-          kubectl -n clawmanager-system rollout status deployment/minio --timeout=300s
-
-      - name: Start ClawManager after MySQL is ready
-        shell: bash
-        run: |
-          private_dir=$(mktemp -d "${RUNNER_TEMP}/cm-audit.XXXXXX")
-          trap 'rm -rf -- "$private_dir"' EXIT
-          python3 tools/k8s/observability/prepare-observability-secret.py --initialize \
-            --key-file "$private_dir/master.key" --output "$private_dir/audit-secret.json"
-          python3 tools/k8s/observability/prepare-history-restore.py \
-            --output "$private_dir/restore" --tls skip-verify
-          kubectl apply -f "$private_dir/audit-secret.json" -f "$private_dir/restore/secret.json"
-          {
-            # Allow trigger migrations in the disposable kind database.
-            printf '%s\n' 'SET GLOBAL log_bin_trust_function_creators = ON;'
-            cat "$private_dir/restore/bootstrap.sql"
-          } | kubectl -n clawmanager-system exec -i deployment/mysql -- sh -c \
-            'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql --protocol=TCP --host=127.0.0.1 -uroot'
-          kubectl -n clawmanager-system scale deployment/clawmanager-app --replicas=1
-
-      - name: Wait for ClawManager deployment
-        run: |
-          kubectl -n clawmanager-system rollout status deployment/clawmanager-app --timeout=300s
-          kubectl -n clawmanager-system exec deployment/mysql -- sh -c \
-            'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql --protocol=TCP --host=127.0.0.1 -uroot -e "SET GLOBAL log_bin_trust_function_creators = OFF"'
-
-      - name: Start port-forward
-        run: |
-          kubectl -n clawmanager-system port-forward svc/clawmanager-frontend 8443:443 > /tmp/clawmanager-port-forward.log 2>&1 &
-          echo $! > /tmp/clawmanager-port-forward.pid
-          sleep 10
-
-      - name: Verify health endpoint
-        run: curl --fail --insecure https://127.0.0.1:8443/healthz
-
-      - name: Verify version endpoint
-        run: curl --fail --insecure https://127.0.0.1:8443/api/v1/version | grep -F "ci-${GITHUB_SHA}"
-
-      - name: Verify web page is reachable
-        run: curl --fail --insecure https://127.0.0.1:8443/ | grep -i "<!doctype html>"
-
-      - name: Show cluster status on failure
-        if: failure()
-        run: |
-          kubectl get pods -A || true
-          kubectl get pvc -A || true
-          kubectl get events -A --sort-by=.lastTimestamp || true
-          kubectl -n clawmanager-system describe deployment mysql || true
-          kubectl -n clawmanager-system describe deployment clawmanager-app || true
-          kubectl -n clawmanager-system describe pod -l app=mysql || true
-          kubectl -n clawmanager-system describe pod -l app=clawmanager-app || true
-          kubectl -n clawmanager-system logs deployment/mysql --tail=200 || true
-          kubectl -n clawmanager-system logs deployment/clawmanager-app --tail=200 || true
-          kubectl -n clawmanager-system logs deployment/clawmanager-app --previous --tail=200 || true
-          cat /tmp/clawmanager-port-forward.log 2>/dev/null || true
-
-      - name: Stop port-forward
-        if: always()
-        run: |
-          if [ -f /tmp/clawmanager-port-forward.pid ]; then
-            kill "$(cat /tmp/clawmanager-port-forward.pid)" || true
-          fi
+          python3 -B -m unittest discover -s tools/k8s -p test_install_fresh.py
+          bash .github/scripts/run-k8s-smoke.sh clawmanager:ci
