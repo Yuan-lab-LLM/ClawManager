@@ -19,7 +19,7 @@ func unavailableInventoryError() error {
 }
 
 func TestRuntimeLeaseRetriesWholeGroupOnlyForInventoryUnavailable(t *testing.T) {
-	for _, scenario := range []string{"recover-initial", "recover-model", "recover-egress", "recover-services", "recover-complete", "persistent", "generation", "missing", "arbitrary-error", "peer", "cancel"} {
+	for _, scenario := range []string{"recover-initial", "recover-signing", "recover-complete", "persistent", "generation", "missing", "arbitrary-error", "peer", "cancel"} {
 		t.Run(scenario, func(t *testing.T) {
 			a, _, _, cm, pod := securityFixture(t)
 			calls := 0
@@ -28,7 +28,7 @@ func TestRuntimeLeaseRetriesWholeGroupOnlyForInventoryUnavailable(t *testing.T) 
 			temporary := unavailableInventoryError()
 			a.assignments = securityAssignmentFunc(func(context.Context, int) (*corev1.ConfigMap, []corev1.Pod, error) {
 				calls++
-				failAt := map[string]int{"recover-initial": 1, "recover-model": 2, "recover-egress": 3, "recover-services": 4, "recover-complete": 5}[scenario]
+				failAt := map[string]int{"recover-initial": 1, "recover-signing": 2, "recover-complete": 3}[scenario]
 				if calls == failAt || scenario == "persistent" {
 					return nil, nil, temporary
 				}
@@ -59,7 +59,7 @@ func TestRuntimeLeaseRetriesWholeGroupOnlyForInventoryUnavailable(t *testing.T) 
 				if err != nil || lease.ModelToken == "" || lease.EgressToken == "" || lease.ServicesToken == "" {
 					t.Fatalf("temporary observation did not recover full group: calls=%d lease=%+v err=%v", calls, lease.Identity(), err)
 				}
-				want := map[string]int{"recover-initial": 6, "recover-model": 7, "recover-egress": 8, "recover-services": 9, "recover-complete": 10}[scenario]
+				want := map[string]int{"recover-initial": 4, "recover-signing": 5, "recover-complete": 6}[scenario]
 				if calls != want {
 					t.Fatalf("did not restart whole group: calls=%d want=%d", calls, want)
 				}
@@ -120,7 +120,7 @@ func TestRuntimeLeaseKnownInstanceRefusalNeverRetriesInventory(t *testing.T) {
 }
 
 func TestRuntimeLeaseNeverRetriesMidIssuanceIdentityConflict(t *testing.T) {
-	for _, failAt := range []int{2, 3, 4, 5} {
+	for _, failAt := range []int{2, 3} {
 		t.Run(fmt.Sprint(failAt), func(t *testing.T) {
 			a, _, _, cm, pod := securityFixture(t)
 			reads := 0
@@ -153,7 +153,7 @@ func TestRuntimeLeaseChecksPeerAgainAfterIssuingWholeGroup(t *testing.T) {
 		return observed, []corev1.Pod{*observedPod}, nil
 	})
 	lease, err := a.IssueLease(context.Background(), runtimeauth.Identity{InstanceID: 7, UserID: 3, Generation: 2, PodUID: "pod-7"}, netip.MustParseAddr("10.2.0.3"))
-	if err == nil || reads != 5 || lease != (RuntimeSecurityLease{}) {
+	if err == nil || reads != 3 || lease != (RuntimeSecurityLease{}) {
 		t.Fatalf("peer change escaped completion validation: reads=%d err=%v", reads, err)
 	}
 }

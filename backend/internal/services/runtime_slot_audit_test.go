@@ -1175,3 +1175,59 @@ func TestRuntimeSlotAuditDisplaysOnlyCurrentUIDLegacyEnvelope(t *testing.T) {
 		}
 	}
 }
+
+func TestSlotAuditBatchChecksTwoAndEightSlotsWithoutSerialWait(t *testing.T) {
+	for _, slotCount := range []int{2, 8} {
+		t.Run(fmt.Sprint(slotCount), func(t *testing.T) {
+			parallelism := min(slotCount, 4)
+			entered := make(chan struct{}, slotCount)
+			release := make(chan struct{})
+			var active atomic.Int32
+			var exceeded atomic.Bool
+			client := NewSlotRuntimeAgentClientWithHTTPClient("token", fake.NewSimpleClientset(), "runtime", &http.Client{Transport: slotRoundTripper(func(req *http.Request) (*http.Response, error) {
+				if active.Add(1) > int32(parallelism) {
+					exceeded.Store(true)
+				}
+				defer active.Add(-1)
+				entered <- struct{}{}
+				select {
+				case <-release:
+				case <-req.Context().Done():
+					return nil, req.Context().Err()
+				}
+				body := `{"pod_uid":"pod","worker_epoch":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","idle_confirmed":true,"quarantined":false,"gateways":[]}`
+				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(body))}, nil
+			})}).(*slotRuntimeAgentClient)
+			slots := make([]runtimeSlotAuditObservation, slotCount)
+			for i := range slots {
+				slots[i].Name = fmt.Sprintf("slot-%d", i)
+			}
+			done := make(chan struct{})
+			go func() {
+				client.observeRuntimeSlotBatch(t.Context(), models.RuntimePod{PodUID: ptrString("pod"), AgentEndpoint: ptrString("https://10.0.0.2:19090")}, slots)
+				close(done)
+			}()
+			timeout := time.NewTimer(time.Second)
+			defer timeout.Stop()
+			for i := 0; i < parallelism; i++ {
+				select {
+				case <-entered:
+				case <-timeout.C:
+					close(release)
+					<-done
+					t.Fatal("a slow slot serialized the probe batch")
+				}
+			}
+			close(release)
+			<-done
+			if exceeded.Load() {
+				t.Fatal("probe concurrency exceeded its bound")
+			}
+			for _, slot := range slots {
+				if !slot.free() {
+					t.Fatalf("%s proof is unavailable: %v", slot.Name, slot.Err)
+				}
+			}
+		})
+	}
+}

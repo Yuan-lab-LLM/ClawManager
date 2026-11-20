@@ -1,0 +1,170 @@
+/* Approved Team-only presentation. Keep the existing rail, full Kanban,
+   workspace browser, pagination and container breakpoints. The explicit scope
+   also wins over the older northbound color restoration without changing CM. */
+.team-chat-workspace[data-team-presentation=classic],.team-classic-surface {
+  --cm-ink:#173255;
+  --cm-text:#30425e;
+  --cm-muted:#62738d;
+  --cm-border:#dce5f2;
+  --cm-border-subtle:#e7edf6;
+  --cm-subtle:#f7faff;
+  --cm-selected:#edf5ff;
+  --cm-success:#008268;
+  --cm-radius-control:10px;
+  --cm-radius-panel:16px;
+  --cm-radius-dialog:18px;
+  --team-header-start:#f0f7ff;
+  --team-header-end:#f3fbfa;
+  --team-badge-background:#f0f6ff;
+  --team-badge-border:#dce9ff;
+  --team-badge-color:#2875d5;
+  --team-leader-background:#fff2ec;
+  --team-leader-border:#f4ddd1;
+  --team-leader-color:#c65336;
+  --team-user-background:#f0f9f6;
+  --team-user-border:#d8ece4;
+  --team-user-color:#087f6d;
+  color:var(--cm-text);
+}
+
+.team-chat-workspace[data-team-presentation=classic][data-mode] {border-radius:22px}
+.team-chat-workspace[data-team-presentation=classic][data-mode] .team-chat-topbar {
+  height:64px;padding:12px 20px;
+  background:linear-gradient(105deg,var(--team-header-start),var(--team-header-end) 55%,var(--cm-surface));
+  border-bottom:1px solid var(--cm-border);
+}
+.team-chat-workspace[data-team-presentation=classic][data-mode] .team-chat-main {padding-top:64px}
+.team-chat-workspace[data-team-presentation=classic][data-mode] .team-chat-identity {
+  display:flex;align-items:center;gap:14px;min-width:0;
+}
+.team-chat-workspace[data-team-presentation=classic][data-mode] .team-chat-heading {
+  display:flex;align-items:center;gap:9px;min-width:0;font-size:var(--cm-font-title);
+  color:var(--cm-ink);font-weight:600;
+}
+.team-chat-workspace[data-team-presentation=classic][data-mode] .team-chat-heading>.team-chat-heading-icon {
+  display:grid;place-items:center;width:32px;height:32px;flex:none;border-radius:9px;
+  background:var(--team-leader-background);border:1px solid var(--team-leader-border);color:var(--team-leader-color);
+}
+.team-chat-workspace[data-team-presentation=classic][data-mode] .team-chat-heading>.team-chat-title-text {
+  display:block;min-width:0;width:auto;height:auto;border:0;border-radius:0;background:transparent;
+  color:inherit;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.team-chat-workspace[data-team-presentation=classic][data-mode] .team-chat-subtitle {
+  font-size:13px;gap:12px;padding-left:0;margin-top:0;white-space:nowrap;flex:none;color:var(--cm-muted);
+}
+.team-chat-workspace[data-team-presentation=classic][data-mode] .team-chat-online {display:flex;color:var(--cm-success)}
+.team-chat-workspace[data-team-presentation=classic][data-mode] .team-chat-online i {background:var(--cm-success)}
+.team-chat-header-actions {display:flex;align-items:center;gap:8px;flex:none}
+.team-header-files-trigger {
+  display:inline-flex;align-items:center;justify-content:center;gap:7px;
+  min-height:36px;padding:7px 11px;border:1px solid var(--cm-border);border-radius:10px;
+  background:var(--cm-subtle);color:var(--cm-primary);font-size:var(--cm-font-body);white-space:nowrap;
+}
+.team-header-files-trigger:hover,.team-header-files-trigger[aria-expanded=true] {background:var(--cm-selected)}
+
+.team-chat-workspace[data-team-presentation=classic][data-mode] :is(.team-member-rail,.team-members-panel) {
+  top:76px;border-radius:18px;border-color:var(--cm-border);background:var(--cm-surface);box-shadow:none;
+}
+.team-chat-workspace[data-team-presentation=classic][data-mode] .team-members-panel>header {
+  border-radius:18px 18px 0 0;background:linear-gradient(110deg,var(--cm-subtle),var(--cm-surface));
+}
+.team-chat-workspace[data-team-presentation=classic][data-mode] .team-roster-card {border-radius:12px}
+.team-chat-workspace[data-team-presentation=classic][data-mode] .team-roster-quick-entry {border-radius:6px}
+.team-chat-workspace[data-team-presentation=classic][data-mode] .team-roster-rail-heading {gap:4px;font-size:var(--cm-font-label);white-space:nowrap}
+.team-chat-workspace[data-team-presentation=classic][data-mode] .team-roster-rail-heading>svg {flex:none}
+.team-chat-workspace[data-team-presentation=classic][data-mode] .team-roster-rail-heading>span {display:inline-flex;align-items:baseline;gap:3px;flex:none;white-space:nowrap}
+.team-chat-workspace[data-team-presentation=classic][data-mode] .team-roster-rail-heading small {margin-left:0}
+.team-chat-workspace[data-team-presentation=classic][data-mode] .team-tools-panel {
+  top:76px;border-radius:18px;background:var(--cm-surface);border-color:var(--cm-border);box-shadow:var(--cm-shadow-8);
+}
+.team-chat-workspace[data-team-presentation=classic][data-mode][data-right=closed] .team-tools-panel {
+  top:64px;border:0;background:transparent;box-shadow:none;
+}
+.team-chat-workspace[data-team-presentation=classic][data-mode] .team-tools-toolbar {
+  border-bottom:1px solid var(--cm-border);
+  background:linear-gradient(110deg,var(--cm-subtle),var(--cm-surface));color:var(--cm-muted);
+}
+.team-chat-workspace[data-team-presentation=classic][data-mode] .team-tools-toolbar button {
+  border:1px solid transparent;border-radius:9px;min-height:32px;box-shadow:none;
+}
+.team-chat-workspace[data-team-presentation=classic][data-mode] .team-tools-toolbar button:is(:hover,[aria-pressed=true],[aria-expanded=true]) {
+  background:var(--cm-selected);color:var(--cm-primary);box-shadow:none;
+}
+.team-chat-workspace[data-team-presentation=classic][data-mode] .team-workflow-mini {
+  border-radius:16px;background:var(--cm-surface);border-color:var(--cm-border);
+}
+.team-chat-workspace[data-team-presentation=classic][data-mode] .team-workflow-node {border-radius:11px;background:var(--cm-surface)}
+.team-chat-workspace[data-team-presentation=classic][data-mode] .team-workflow-marker {border-radius:7px}
+.team-chat-workspace[data-team-presentation=classic][data-mode] .team-workflow-status>span {border-radius:5px}
+.team-chat-workspace[data-team-presentation=classic][data-mode] .team-workflow-nodes li[data-tone=active] .team-workflow-node {
+  background:linear-gradient(110deg,var(--cm-surface),var(--cm-selected));border-color:var(--cm-primary);
+}
+.team-chat-workspace[data-team-presentation=classic][data-mode] .team-workflow-nodes li[data-tone=done] .team-workflow-marker {background:#e5f6ef;color:var(--cm-success)}
+.team-chat-workspace[data-team-presentation=classic][data-mode] .team-workflow-nodes li[data-tone=done] .team-workflow-state {color:var(--cm-success)}
+.team-chat-workspace[data-team-presentation=classic][data-mode] .team-workflow-handoff {border-top-color:var(--cm-border)}
+.team-chat-workspace[data-team-presentation=classic][data-mode] .team-files-host .app-panel {background:var(--cm-surface)}
+.team-chat-workspace[data-team-presentation=classic][data-mode] .team-file-row {border-radius:11px;background:var(--cm-surface);border-color:var(--cm-border)}
+.team-chat-workspace[data-team-presentation=classic][data-mode] .team-chat-file-chip {
+  border-radius:10px;padding:9px 12px;min-height:46px;background:var(--cm-subtle);border-color:var(--cm-border);color:var(--cm-primary);
+}
+.team-chat-workspace[data-team-presentation=classic][data-mode] .team-chat-author-heading>strong {font-size:17px;font-weight:600}
+.team-chat-workspace[data-team-presentation=classic][data-mode] :is(.team-chat-author-role,.team-chat-time,.team-chat-continuation-time) {font-size:13px}
+.team-chat-workspace[data-team-presentation=classic][data-mode] .team-plain-message {font-size:16px;line-height:1.8}
+.team-chat-workspace[data-team-presentation=classic][data-mode] .team-plain-message pre {font-size:13px}
+.team-chat-workspace[data-team-presentation=classic][data-mode] .team-plain-message table {font-size:14px}
+.team-chat-workspace[data-team-presentation=classic][data-mode] .team-history-menu>summary {border-radius:10px;background:var(--cm-surface);color:var(--cm-muted)}
+.team-chat-workspace[data-team-presentation=classic][data-mode] .team-history-popover {border-radius:14px}
+
+/* Restore the two-row composer as one rounded surface, not a nested form. */
+.team-chat-workspace[data-team-presentation=classic][data-mode] .team-task-composer {
+  margin:0 20px 18px;padding:9px 10px;border:1px solid var(--cm-border);border-radius:16px;background:var(--cm-surface);
+}
+.team-chat-workspace[data-team-presentation=classic][data-mode] .team-chat-transcript form {padding:0;border:0;background:transparent;box-shadow:none}
+.team-chat-workspace[data-team-presentation=classic][data-mode] .team-recipient-trigger {
+  border-radius:11px;border-color:var(--cm-border);background:var(--cm-subtle);
+}
+.team-chat-workspace[data-team-presentation=classic][data-mode] .team-composer-input-row textarea {border-radius:11px;background:var(--cm-surface);border-color:var(--cm-border)}
+.team-chat-workspace[data-team-presentation=classic][data-mode] .team-composer-send {border-radius:11px}
+.team-chat-workspace[data-team-presentation=classic][data-mode] :is(.team-recipient-popover,.team-reference-chip) {border-radius:12px}
+
+:is(.team-chat-workspace[data-team-presentation=classic][data-mode],.team-classic-surface) .team-functional-badge {
+  border-radius:11px;background:var(--team-badge-background);border-color:var(--team-badge-border);color:var(--team-badge-color);
+}
+:is(.team-chat-workspace[data-team-presentation=classic][data-mode],.team-classic-surface) .team-functional-badge[data-identity=leader] {
+  background:var(--team-leader-background);border-color:var(--team-leader-border);color:var(--team-leader-color);
+}
+:is(.team-chat-workspace[data-team-presentation=classic][data-mode],.team-classic-surface) .team-functional-badge[data-identity=user] {
+  background:var(--team-user-background);border-color:var(--team-user-border);color:var(--team-user-color);
+}
+:is(.team-chat-workspace[data-team-presentation=classic][data-mode],.team-classic-surface) .team-functional-badge:is([data-identity=system],[data-identity=unknown]) {
+  background:var(--cm-subtle);border-color:var(--cm-border);color:var(--cm-muted);
+}
+.team-member-dialog.team-classic-surface {border-radius:18px}
+.team-member-dialog.team-classic-surface>header {background:var(--cm-subtle);border-bottom-color:var(--cm-border)}
+.team-workflow-tooltip.team-classic-surface {border-radius:14px}
+
+/* Keep the existing compact rail and drawer behavior at these boundaries. */
+.team-chat-workspace[data-team-presentation=classic][data-mode=drawer] .team-tools-panel {top:12px}
+.team-chat-workspace[data-team-presentation=classic][data-mode=drawer][data-left=true] .team-members-panel {top:12px}
+@container(max-width:900px) {
+  .team-chat-workspace[data-team-presentation=classic][data-mode] .team-chat-main {padding-top:92px}
+  .team-chat-workspace[data-team-presentation=classic][data-mode] .team-chat-topbar {height:92px;padding:10px 12px}
+  .team-chat-workspace[data-team-presentation=classic][data-mode] .team-chat-topbar>div {display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-rows:32px auto;gap:6px 8px;align-content:center}
+  .team-chat-workspace[data-team-presentation=classic][data-mode] .team-chat-identity {display:contents}
+  .team-chat-workspace[data-team-presentation=classic][data-mode] .team-chat-heading {grid-column:1;grid-row:1;max-width:100%;font-size:var(--cm-font-body)}
+  .team-chat-workspace[data-team-presentation=classic][data-mode] .team-chat-subtitle {grid-column:1/-1;grid-row:2;gap:7px;flex-wrap:wrap;white-space:normal;font-size:var(--cm-font-label);margin:0}
+  .team-chat-workspace[data-team-presentation=classic][data-mode] .team-chat-online {display:flex}
+  .team-chat-workspace[data-team-presentation=classic][data-mode] .team-member-rail {top:auto}
+  .team-chat-workspace[data-team-presentation=classic][data-mode][data-right=closed] .team-tools-panel {top:92px}
+  .team-chat-workspace[data-team-presentation=classic][data-mode] .team-chat-header-actions {display:flex;flex-direction:row;flex-wrap:nowrap;grid-column:2;grid-row:1;gap:4px}
+  .team-chat-workspace[data-team-presentation=classic][data-mode] .team-history-menu>summary {padding:7px}
+  .team-chat-workspace[data-team-presentation=classic][data-mode] .team-history-menu>summary>span {display:none}
+}
+@media(max-width:640px) {
+  .team-chat-workspace[data-team-presentation=classic][data-mode] .team-task-composer {margin:0 12px 12px;padding:9px 10px}
+  .team-chat-workspace[data-team-presentation=classic][data-mode] .team-chat-author-heading>strong {font-size:16px}
+  .team-chat-workspace[data-team-presentation=classic][data-mode] .team-plain-message {font-size:15px}
+}
+@media(forced-colors:active) {
+  .team-chat-workspace[data-team-presentation=classic][data-mode] :is(.team-header-files-trigger,.team-tools-toolbar button,.team-functional-badge,.team-workflow-node) {border-color:ButtonText}
+}

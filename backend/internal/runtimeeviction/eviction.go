@@ -113,6 +113,10 @@ type ledger struct {
 }
 
 func readTrusted(p string) ([]byte, error) {
+	return readTrustedOwnedBy(p, os.Geteuid())
+}
+
+func readTrustedOwnedBy(p string, uid int) ([]byte, error) {
 	fd, e := unix.Open(p, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK, 0)
 	if e != nil {
 		return nil, e
@@ -123,7 +127,7 @@ func readTrusted(p string) ([]byte, error) {
 	if e != nil {
 		return nil, e
 	}
-	if !st.Mode().IsRegular() || st.Mode().Perm()&0022 != 0 || int(st.Sys().(*syscall.Stat_t).Uid) != os.Geteuid() {
+	if !st.Mode().IsRegular() || st.Mode().Perm()&0022 != 0 || int(st.Sys().(*syscall.Stat_t).Uid) != uid {
 		return nil, fmt.Errorf("untrusted recovery file")
 	}
 	return io.ReadAll(io.LimitReader(f, 65537))

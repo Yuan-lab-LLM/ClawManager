@@ -52,7 +52,9 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -trimpat
 
 COPY tools/runtime-template-hash/ /app/tools/runtime-template-hash/
 RUN cd /app/tools/runtime-template-hash \
-    && CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -trimpath -buildvcs=false -ldflags="-s -w -buildid=" -o /out/cm-runtime-template-hash-v1.35 .
+    && CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -trimpath -buildvcs=false -ldflags="-s -w -buildid=" -o /out/cm-runtime-template-hash-v1.35 . \
+    && CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -modfile=go.v1.31.14.mod -trimpath -buildvcs=false \
+        -ldflags="-s -w -buildid= -X main.controllerVersion=v1.31.14" -o /out/cm-runtime-template-hash-v1.31.14 .
 
 FROM nginx:1.27-alpine
 
@@ -68,6 +70,7 @@ COPY --from=backend-builder /out/system-backup-controller /usr/local/bin/system-
 COPY --from=backend-builder /out/system-backup-artifact /usr/local/bin/system-backup-artifact
 COPY --from=backend-builder /out/runtime-eviction-helper /usr/local/bin/runtime-eviction-helper
 COPY --from=backend-builder --chmod=0755 /out/cm-runtime-template-hash-v1.35 /usr/local/bin/cm-runtime-template-hash-v1.35
+COPY --from=backend-builder --chmod=0755 /out/cm-runtime-template-hash-v1.31.14 /usr/local/bin/cm-runtime-template-hash-v1.31.14
 COPY --from=frontend-builder /app/frontend/dist /usr/share/nginx/html
 COPY --from=hermes-desktop-builder /app/frontend/public/hermes-desktop-web /usr/share/nginx/html/hermes-desktop-web
 COPY tools/images/nginx/nginx.conf /etc/nginx/nginx.conf

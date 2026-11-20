@@ -38,7 +38,7 @@ const runtimeCommittedDefaultPredicate = `r.status='finished' AND COALESCE(JSON_
 
 func LoadCommittedRuntimeImages(ctx context.Context, sess db.Session) (*RuntimeCommittedImages, error) {
 	result := &RuntimeCommittedImages{Images: map[string]string{}}
-	rows, err := sess.SQL().QueryContext(ctx, `SELECT r.id,r.runtime_type,r.target_image_ref,r.preflight_id,r.preflight_json,r.source_images_json,COALESCE(c.state_json,'') FROM runtime_rollouts r LEFT JOIN runtime_rollout_checkpoints c ON c.rollout_id=r.id WHERE r.runtime_type IN ('openclaw','hermes','deepseek-harness','opencode') AND `+runtimeCommittedDefaultPredicate+` ORDER BY r.id DESC`)
+	rows, err := sess.SQL().QueryContext(ctx, `SELECT r.id,r.runtime_type,r.target_image_ref,r.preflight_id,r.preflight_json,r.source_images_json,COALESCE(c.state_json,''),r.phase,r.plan_fingerprint FROM runtime_rollouts r LEFT JOIN runtime_rollout_checkpoints c ON c.rollout_id=r.id WHERE r.runtime_type IN ('openclaw','hermes','deepseek-harness','opencode') AND `+runtimeCommittedDefaultPredicate+` ORDER BY r.id DESC`)
 	if err != nil {
 		return nil, fmt.Errorf("load committed Runtime images: %w", err)
 	}
@@ -46,13 +46,21 @@ func LoadCommittedRuntimeImages(ctx context.Context, sess db.Session) (*RuntimeC
 	seenSources := map[string]bool{}
 	seenTypes := map[string]bool{}
 	legacyTypes := map[string]bool{}
+	retiredHistory := map[string]bool{}
 	for rows.Next() {
 		var r models.RuntimeRollout
 		var checkpoint string
-		if err = rows.Scan(&r.ID, &r.RuntimeType, &r.TargetImageRef, &r.PreflightID, &r.PreflightJSON, &r.SourceImagesJSON, &checkpoint); err != nil {
+		if err = rows.Scan(&r.ID, &r.RuntimeType, &r.TargetImageRef, &r.PreflightID, &r.PreflightJSON, &r.SourceImagesJSON, &checkpoint, &r.Phase, &r.PlanFingerprint); err != nil {
 			return nil, err
 		}
-		if r.RuntimeType == RuntimeTypeOpenCode && !isOpenCodeNativeRollout(&r) {
+		if retiredHistory[r.RuntimeType] {
+			continue
+		}
+		empty, proofErr := loadEmptyPoolRecovery(&r)
+		if proofErr != nil {
+			return nil, proofErr
+		}
+		if r.RuntimeType == RuntimeTypeOpenCode && empty == nil && !isOpenCodeNativeRollout(&r) {
 			continue
 		}
 		if !seenTypes[r.RuntimeType] {
@@ -66,6 +74,14 @@ func LoadCommittedRuntimeImages(ctx context.Context, sess db.Session) (*RuntimeC
 		// Legacy tag deliveries predate immutable release admission. Preserve
 		// this type's configured defaults; older digests cannot supersede it.
 		if legacyTypes[r.RuntimeType] {
+			continue
+		}
+		if empty != nil {
+			// This verified commit followed complete retirement of this type.
+			// Its old source image is historical, not a retained serving pool.
+			// Newer deliveries above remain authoritative; older source proofs
+			// cannot override the recovered canonical controller on restart.
+			retiredHistory[r.RuntimeType] = true
 			continue
 		}
 		// Only OpenClaw successor flows retain an intentionally different source.

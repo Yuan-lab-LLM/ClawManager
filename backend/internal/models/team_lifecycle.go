@@ -29,7 +29,8 @@ type TeamLifecycleMember struct {
 
 type TeamLifecycleOperation struct {
 	TeamRuntimeState
-	TeamID   int
-	Members  []TeamLifecycleMember
-	Attempts int
+	TeamID                   int
+	Members                  []TeamLifecycleMember
+	Attempts                 int
+	FaultRecoveryOperationID string `json:"-"`
 }

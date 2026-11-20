@@ -294,6 +294,10 @@ func syncRuntimeSlotImageAndIdentity(deployment *appsv1.Deployment, coordinator 
 
 // RuntimeSlotDeploymentSpecs builds only explicitly opted-in container pools.
 // Limits are configurable budgets, not measured density guarantees.
+func RuntimeSlotPoolName(prefix, runtimeType string) string {
+	return prefix + runtimeType + "-runtime"
+}
+
 func RuntimeSlotDeploymentSpecs(cfg config.RuntimePoolConfig, agentSecretName string) ([]RuntimeDeploymentSpec, error) {
 	rootless := cfg.SandboxProfile == RuntimeNFSRootlessProfile
 	if cfg.SandboxProfile != "" && !rootless {
@@ -365,10 +369,10 @@ func RuntimeSlotDeploymentSpecs(cfg config.RuntimePoolConfig, agentSecretName st
 		if strings.TrimSpace(runtime.image) == "" {
 			return nil, fmt.Errorf("container slots require %s image", runtime.kind)
 		}
-		if problems := validation.IsDNS1123Label(cfg.SlotPoolPrefix + runtime.kind + "-runtime"); len(problems) != 0 {
+		if problems := validation.IsDNS1123Label(RuntimeSlotPoolName(cfg.SlotPoolPrefix, runtime.kind)); len(problems) != 0 {
 			return nil, fmt.Errorf("invalid slot pool prefix")
 		}
-		specs = append(specs, RuntimeDeploymentSpec{Name: cfg.SlotPoolPrefix + runtime.kind + "-runtime", Namespace: namespace, RuntimeType: runtime.kind, Image: runtime.image, Replicas: 1, WorkspacePVCClaimName: cfg.WorkspacePVCClaimName, WorkspaceMountPath: cfg.WorkspaceRoot, GatewayPortStart: cfg.GatewayPortStart, GatewayPortEnd: cfg.GatewayPortEnd, SlotCount: cfg.ContainerSlots, SlotAppArmorProfile: cfg.SlotAppArmorProfile, SlotResources: *resources.DeepCopy(), PodResources: podResources.DeepCopy(), PodUserNamespaces: cfg.PodUserNamespaces, SandboxProfile: cfg.SandboxProfile, NetworkIsolation: cfg.NetworkIsolation, AgentTokenSecretName: agentSecretName, HermesDesktopWeb: runtime.kind == "hermes"})
+		specs = append(specs, RuntimeDeploymentSpec{Name: RuntimeSlotPoolName(cfg.SlotPoolPrefix, runtime.kind), Namespace: namespace, RuntimeType: runtime.kind, Image: runtime.image, Replicas: 1, WorkspacePVCClaimName: cfg.WorkspacePVCClaimName, WorkspaceMountPath: cfg.WorkspaceRoot, GatewayPortStart: cfg.GatewayPortStart, GatewayPortEnd: cfg.GatewayPortEnd, SlotCount: cfg.ContainerSlots, SlotAppArmorProfile: cfg.SlotAppArmorProfile, SlotResources: *resources.DeepCopy(), PodResources: podResources.DeepCopy(), PodUserNamespaces: cfg.PodUserNamespaces, SandboxProfile: cfg.SandboxProfile, NetworkIsolation: cfg.NetworkIsolation, AgentTokenSecretName: agentSecretName, HermesDesktopWeb: runtime.kind == "hermes"})
 	}
 	return specs, nil
 }

@@ -78,21 +78,22 @@ func (a *RuntimeSecurityAuthority) issueLeaseAttempt(ctx context.Context, expect
 		return empty, fail("peer_conflict", "lease", nil)
 	}
 	lease := RuntimeSecurityLease{InstanceID: identity.InstanceID, UserID: identity.UserID, Generation: identity.Generation, PodUID: identity.PodUID, ExpiresAt: time.Now().UTC().Truncate(time.Second).Add(15 * time.Minute)}
-	for _, entry := range []struct {
-		audience string
-		token    *string
-	}{{runtimeauth.AudienceModel, &lease.ModelToken}, {runtimeauth.AudienceEgress, &lease.EgressToken}, {runtimeauth.AudienceServices, &lease.ServicesToken}} {
-		*entry.token, err = a.capabilities.Issue(ctx, identity, entry.audience)
-		if err != nil {
-			if ctx.Err() != nil {
-				return empty, ctx.Err()
-			}
-			if errors.Is(err, runtimeinventory.ErrUnavailable) {
-				return empty, fail("inventory_unavailable", "issue_"+entry.audience, runtimeinventory.ErrUnavailable)
-			}
-			return empty, fail("authorization_denied", "issue_"+entry.audience, nil)
+	started := time.Now()
+	tokens, err := a.capabilities.IssueAll(ctx, identity)
+	runtimeauth.RecordStage(ctx, "capability_sign", started, err)
+	if err != nil {
+		if ctx.Err() != nil {
+			return empty, ctx.Err()
 		}
+		if errors.Is(err, runtimeinventory.ErrUnavailable) {
+			return empty, fail("inventory_unavailable", "issue", runtimeauth.Unavailable(err))
+		}
+		if runtimeauth.IsUnavailable(err) {
+			return empty, fail("authority_unavailable", "issue", err)
+		}
+		return empty, fail("authorization_denied", "issue", nil)
 	}
+	lease.ModelToken, lease.EgressToken, lease.ServicesToken = tokens[0], tokens[1], tokens[2]
 	final, err := a.validatedSnapshotForIdentity(ctx, expected.InstanceID, &expected)
 	if err != nil {
 		return empty, err

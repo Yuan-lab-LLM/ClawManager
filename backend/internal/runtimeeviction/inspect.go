@@ -11,11 +11,15 @@ import (
 )
 
 func trustedDirectory(p string) error {
+	return trustedDirectoryOwnedBy(p, os.Geteuid())
+}
+
+func trustedDirectoryOwnedBy(p string, uid int) error {
 	info, e := os.Lstat(p)
 	if e != nil {
 		return e
 	}
-	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm()&0022 != 0 || int(info.Sys().(*syscall.Stat_t).Uid) != os.Geteuid() {
+	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm()&0022 != 0 || int(info.Sys().(*syscall.Stat_t).Uid) != uid {
 		return fmt.Errorf("untrusted recovery directory")
 	}
 	return nil

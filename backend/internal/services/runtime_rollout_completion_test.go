@@ -298,6 +298,67 @@ func TestPoolCompletionIgnoresRemovedHistoricalRegistration(t *testing.T) {
 	}
 }
 
+func TestPoolCompletionRejectsBindingsToRemovedPod(t *testing.T) {
+	s, repo, _, r := completionFixture(t)
+	ctx := t.Context()
+	if err := s.bindingRepo.Create(ctx, &models.InstanceRuntimeBinding{
+		InstanceID: 609, Generation: 8, RuntimePodID: 306, State: "running",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.finishRolloutIfReady(ctx, *r); err != nil {
+		t.Fatal(err)
+	}
+	if len(repo.statuses) != 0 {
+		t.Fatalf("finished with a running binding on the removed source: %+v", repo.statuses)
+	}
+}
+
+func TestPoolCompletionAllowsOtherPoolsWithBindings(t *testing.T) {
+	s, repo, dep, r := completionFixture(t)
+	dep.targets = append(dep.targets, k8s.RuntimeRolloutTarget{Namespace: "tenant", Name: "other", UID: "other-uid"})
+	s.podRepo.(*fakeRuntimePodRepo).pods[306].DeploymentName = "other"
+	if err := s.bindingRepo.Create(t.Context(), &models.InstanceRuntimeBinding{
+		InstanceID: 609, Generation: 8, RuntimePodID: 306, State: "running",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.finishRolloutIfReady(t.Context(), *r); err != nil {
+		t.Fatal(err)
+	}
+	if len(repo.statuses) != 1 || repo.statuses[0].status != "finished" {
+		t.Fatalf("unrelated binding blocked completion: %+v", repo.statuses)
+	}
+}
+
+func TestPoolRolloutChecksSourceOccupancyBeforeChangingImage(t *testing.T) {
+	for _, runtime := range []string{RuntimeTypeHermes, RuntimeTypeDeepSeekHarness} {
+		t.Run(runtime, func(t *testing.T) {
+			s, repo, dep, r := completionFixture(t)
+			r.RuntimeType, r.Status, r.Phase = runtime, "pending", "requested"
+			dep.targets[0].Image = "repo:old"
+			dep.pods[0].RuntimeType, dep.pods[0].ImageRef = runtime, "repo:old"
+			for _, pod := range s.podRepo.(*fakeRuntimePodRepo).pods {
+				pod.RuntimeType = runtime
+			}
+			repo.raw = ""
+			if err := s.bindingRepo.Create(t.Context(), &models.InstanceRuntimeBinding{
+				InstanceID: 609, Generation: 8, RuntimePodID: 306, State: "running",
+			}); err != nil {
+				t.Fatal(err)
+			}
+			handled, err := s.startPoolRollout(t.Context(), r)
+			if !handled || err != nil || len(repo.statuses) != 1 || repo.statuses[0].status != "error" || repo.raw != "" {
+				t.Fatalf("occupied pool was admitted: %t %v %+v", handled, err, repo.statuses)
+			}
+			p := &RuntimePoolProgress{Version: 1, Targets: dep.targets, Applying: true, StepStarted: time.Now()}
+			if err := s.advancePoolRollout(t.Context(), *r, p); err == nil || len(dep.rolloutImageCalls) != 0 {
+				t.Fatalf("resumed rollout was not fenced: %v %+v", err, dep.rolloutImageCalls)
+			}
+		})
+	}
+}
+
 // Damaged/future native plans cannot be classified as harmless legacy requests.
 // Keep their active status and all maintenance protections for operator review.
 func TestLiveCompletionUncertainOpenCodeStrategyRemainsProtected(t *testing.T) {

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"clawreef/internal/models"
+	"clawreef/internal/runtimeauth"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/validation"
@@ -75,9 +76,14 @@ func ConfigureManagedTeamRedisNetwork(m *ManagedTeamRedis, a *RuntimeSecurityAut
 		defer cancel()
 		// Team membership is an independent SQL relation. Removing or editing an
 		// environment override cannot turn an existing Team member into a bypass.
+		started := time.Now()
 		member, err := associations.GetRuntimeMemberByInstanceContext(ctx, instance.ID)
+		runtimeauth.RecordStage(ctx, "team_association", started, err)
 		teamID, idErr := runtimeTeamID(instance)
-		if err != nil || idErr != nil {
+		if err != nil {
+			return runtimeAuthorityDependency(ctx, err)
+		}
+		if idErr != nil {
 			return errManagedRedis
 		}
 		if member == nil {
@@ -91,13 +97,21 @@ func ConfigureManagedTeamRedisNetwork(m *ManagedTeamRedis, a *RuntimeSecurityAut
 		}
 		team, err := m.authorizeTeam(ctx, instance, 0)
 		if err != nil {
-			return errManagedRedis
+			return err
 		}
 		bus, err := m.resolve(ctx, team)
-		if err != nil || bus == nil {
+		if err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			return err
+		}
+		if bus == nil {
 			return errManagedRedis
 		}
+		started = time.Now()
 		_, err = m.protectedTarget(ctx, bus)
+		runtimeauth.RecordStage(ctx, "redis_target", started, err)
 		return err
 	}
 	return nil
@@ -139,7 +153,10 @@ func managedRedisProtectedTarget(ctx context.Context, client kubernetes.Interfac
 			return "", errManagedRedis
 		}
 		service, err := client.CoreV1().Services(ns).Get(ctx, name, metav1.GetOptions{})
-		if err != nil || service.DeletionTimestamp != nil || service.Spec.Type != corev1.ServiceTypeClusterIP || service.Spec.ExternalName != "" || len(service.Spec.ExternalIPs) != 0 || len(service.Status.LoadBalancer.Ingress) != 0 {
+		if err != nil {
+			return "", runtimeAuthorityDependency(ctx, err)
+		}
+		if service.DeletionTimestamp != nil || service.Spec.Type != corev1.ServiceTypeClusterIP || service.Spec.ExternalName != "" || len(service.Spec.ExternalIPs) != 0 || len(service.Status.LoadBalancer.Ingress) != 0 {
 			return "", errManagedRedis
 		}
 		address, err = netip.ParseAddr(service.Spec.ClusterIP)
@@ -148,8 +165,20 @@ func managedRedisProtectedTarget(ctx context.Context, client kubernetes.Interfac
 		}
 	}
 	address = address.Unmap()
-	if !address.IsValid() || address.Zone() != "" || deny(ctx, address) != nil || ctx.Err() != nil {
+	if ctx.Err() != nil {
+		return "", ctx.Err()
+	}
+	if !address.IsValid() || address.Zone() != "" {
 		return "", errManagedRedis
+	}
+	if err := deny(ctx, address); err != nil {
+		if runtimeauth.IsUnavailable(err) {
+			return "", err
+		}
+		return "", errManagedRedis
+	}
+	if err := ctx.Err(); err != nil {
+		return "", err
 	}
 	return net.JoinHostPort(address.String(), port), nil
 }

@@ -1,6 +1,7 @@
 package services
 
 import (
+	"clawreef/internal/repository"
 	"context"
 	"encoding/json"
 	"errors"
@@ -101,6 +102,11 @@ func (s *RuntimeManagementService) completeRecoveryEviction(ctx context.Context,
 		}
 		if _, err = tx.SQL().ExecContext(ctx, "UPDATE runtime_management_operations SET status=?,items_json=?,updated_at=? WHERE id=?", op.Status, string(data), time.Now().UTC(), op.ID); err != nil {
 			return err
+		}
+		if len(op.Items) != 0 && op.Items[0].Recovery != nil && op.Items[0].Recovery.TeamID != 0 {
+			if err := repository.ReleaseTeamFaultRecovery(ctx, tx, op.Items[0].Recovery.TeamID, op.ID); err != nil {
+				return err
+			}
 		}
 		_, err = tx.SQL().ExecContext(ctx, "DELETE FROM instance_lifecycle_manual_guards WHERE token=?", op.ID)
 		return err

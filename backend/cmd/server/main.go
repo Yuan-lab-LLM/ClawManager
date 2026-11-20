@@ -573,7 +573,10 @@ func main() {
 		}
 		managedRedis, err := services.NewManagedTeamRedis(teamService, contextInstances, runtimeSecurity.CurrentIdentity, func(ctx context.Context, address netip.Addr) error {
 			denied, err := runtimeInventory.Deny(ctx, address)
-			if err != nil || !denied {
+			if err != nil {
+				return runtimeauth.Unavailable(err)
+			}
+			if !denied {
 				return services.ErrInstanceGatewayUnavailable
 			}
 			return nil
@@ -585,10 +588,25 @@ func main() {
 			log.Fatal("Failed to configure protected Team network admission")
 		}
 		managedPreview, err := services.NewManagedTeamPreview(managedRedis, runtimeSecurity, cfg.Runtime.WorkspaceRoot, teamPreviewOrigin, func(ctx context.Context, identity runtimeauth.Identity) error {
-			return runtimeSecurity.VerifyManagedPreviewImage(ctx, identity, map[string]string{
+			images := map[string]string{
 				"openclaw": cfg.Runtime.OpenClawImage, "hermes": cfg.Runtime.HermesImage,
 				"opencode": cfg.Runtime.OpenCodeImage, "deepseek-harness": cfg.Runtime.DeepSeekHarnessImage,
-			})
+			}
+			runtimeType, poolImage, err := runtimeUpgradeService.ManagedPreviewPoolImage(ctx, identity)
+			if err != nil {
+				return err
+			}
+			if poolImage != "" {
+				images[runtimeType] = poolImage
+			}
+			upgradeImage, err := runtimeUpgradeService.ManagedPreviewUpgradeImage(ctx, identity)
+			if err != nil {
+				return err
+			}
+			if upgradeImage != "" {
+				images["openclaw"] = upgradeImage
+			}
+			return runtimeSecurity.VerifyManagedPreviewImage(ctx, identity, images)
 		})
 		if err != nil {
 			log.Fatal("Failed to configure managed Team preview")
@@ -734,6 +752,7 @@ func main() {
 				services.WithRuntimeSchedulerWorkspaceRoot(cfg.Runtime.WorkspaceRoot),
 				services.WithRuntimeSchedulerAutoStopRepository(autoStopRepo),
 				services.WithRuntimeSchedulerNamespace(cfg.Runtime.Namespace),
+				services.WithRuntimeSchedulerPoolPrefix(cfg.Runtime.SlotPoolPrefix),
 				services.WithRuntimeSchedulerGatewayPortRange(cfg.Runtime.GatewayPortStart, cfg.Runtime.GatewayPortEnd),
 				services.WithRuntimeSchedulerHeartbeatTimeout(cfg.Runtime.HeartbeatTimeout),
 				services.WithRuntimeSchedulerMaxGatewaysPerPod(cfg.Runtime.MaxGatewaysPerPod),
@@ -941,6 +960,7 @@ func main() {
 
 		ieiSystem := api.Group("/ieisystem")
 		ieiSystemHandler.RegisterOwnerTeamRoutes(ieiSystem)
+		ieiSystemHandler.RegisterWorkbenchRoutes(ieiSystem, instanceWorkbenchService)
 		{
 			ieiSystem.POST("/session", ieiSystemHandler.ExchangeSession)
 			ieiSystem.GET("/session", ieiSystemHandler.GetSession)
@@ -956,6 +976,7 @@ func main() {
 			ieiSystem.GET("/instances", ieiSystemHandler.ListInstances)
 			ieiSystem.GET("/instances/:id", ieiSystemHandler.GetInstance)
 			ieiSystem.POST("/instances/:id/restart", ieiSystemHandler.RestartInstance)
+			ieiSystem.POST("/instances/:id/start", ieiSystemHandler.StartInstance)
 			ieiSystem.POST("/instances/:id/reset", ieiSystemHandler.ResetInstance)
 			ieiSystem.GET("/instances/:id/lifecycle-operation", ieiSystemHandler.GetLatestLifecycleOperation)
 			ieiSystem.GET("/instances/:id/lifecycle-operations/:operationID", ieiSystemHandler.GetLifecycleOperation)
@@ -1156,6 +1177,7 @@ func main() {
 			adminRuntime.PUT("/runtime-auto-stop", autoStopHandler.Update)
 			adminRuntime.PUT("/instances/:id/auto-stop", autoStopHandler.SetDisabled)
 			adminRuntime.POST("/instances/:id/recover-stopped-source", runtimePoolHandler.RecoverStoppedSource)
+			adminRuntime.POST("/instances/:id/fresh-runtime-capacity", runtimePoolHandler.FreshRuntimeCapacity)
 			adminRuntime.GET("/instances/:id/runtime-recovery", runtimePoolHandler.InspectInstanceRecovery)
 			adminRuntime.POST("/instances/:id/runtime-recovery", runtimePoolHandler.RetryInstanceRecovery)
 			adminRuntime.POST("/runtime-pods/:id/recheck", runtimePoolHandler.RecheckPod)
@@ -1184,6 +1206,8 @@ func main() {
 			adminRuntime.POST("/runtime-rollouts/prepare", runtimeManagementHandler.PrepareRollout)
 			adminRuntime.POST("/runtime-rollouts", runtimePoolHandler.StartRollout)
 			adminRuntime.POST("/runtime-rollouts/preflight", runtimePoolHandler.PreflightOpenClawRollout)
+			adminRuntime.POST("/runtime-rollouts/:id/recover-compatibility-reservation", runtimePoolHandler.RecoverCompatibilityReservation)
+			adminRuntime.POST("/runtime-rollouts/:id/retire-failed-compatibility-pool", runtimePoolHandler.RetireFailedCompatibilityPool)
 			adminRuntime.POST("/runtime-rollouts/:id/force-retry/preflight", runtimePoolHandler.PreflightOpenCodeForceRetry)
 			adminRuntime.POST("/runtime-rollouts/:id/force-retry", runtimePoolHandler.ConfirmOpenCodeForceRetry)
 			adminRuntime.GET("/runtime-rollouts/:id", runtimePoolHandler.GetRollout)

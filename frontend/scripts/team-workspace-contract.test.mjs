@@ -24,6 +24,8 @@ assert.equal(workspaceMode(1539), 'single');
 assert.equal(workspaceMode(1248), 'single');
 assert.equal(workspaceMode(1247), 'drawer');
 assert.equal(workspaceMode(390), 'drawer');
+assert.equal(workspaceMode(1024, true), 'single');
+assert.equal(workspaceMode(1023, true), 'drawer');
 const cards = [1, 2, 3].map(id => ({ id: `work-item-${id}`, owner: `worker-${id}`, title: `Work ${id}`, summary: 'details', column: 'doing', statusLabel: '执行中', eventType: 'progress', time: id }));
 const items = [{ id: 1, work_id: 'a', status: 'running', depends_on: ['b'] }, { id: 2, work_id: 'b', status: 'running' }, { id: 3, status: 'waiting' }];
 const nodes = buildMiniWorkflow(cards, items, [], false);

@@ -46,12 +46,30 @@ func (s *RuntimePodMaintenanceService) scaleKube() (k8s.RuntimePodScaleDeploymen
 // OpenClaw retains serving old pools after scoped upgrades. Only committed,
 // approved source inventories establish which descendants are current defaults.
 // Registration order, replicas and names alone never select an upgrade pool.
-func runtimeDefaultScaleTargets(namespace, runtimeType string, rollouts []models.RuntimeRollout, checkpoints map[int64]string) ([]k8s.RuntimePodScaleTarget, error) {
-	base := runtimeType + "-runtime"
-	if runtimeType == "deepseek-harness" {
-		base = "deepseek-harness-runtime"
-	}
+func runtimeDefaultScaleTargets(namespace, runtimeType, base string, rollouts []models.RuntimeRollout, checkpoints map[int64]string) ([]k8s.RuntimePodScaleTarget, error) {
 	targets := []k8s.RuntimePodScaleTarget{{RuntimeType: runtimeType, Namespace: namespace, DeploymentName: base, ApprovalSource: "canonical-default"}}
+	var epoch *models.RuntimeRollout
+	for i := range rollouts {
+		r := &rollouts[i]
+		if r.RuntimeType == runtimeType && r.Status == "finished" && r.Phase == RuntimeEmptyPoolRecoveryPhase && (epoch == nil || r.ID > epoch.ID) {
+			epoch = r
+		}
+	}
+	if epoch != nil {
+		target, err := emptyRecoveryScaleTarget(namespace, runtimeType, *epoch)
+		if err != nil {
+			return nil, err
+		}
+		base = target.DeploymentName
+		targets = []k8s.RuntimePodScaleTarget{*target}
+		newer := []models.RuntimeRollout{}
+		for _, r := range rollouts {
+			if r.ID > epoch.ID {
+				newer = append(newer, r)
+			}
+		}
+		rollouts = newer
+	}
 	if runtimeType == RuntimeTypeOpenCode {
 		ordered := append([]models.RuntimeRollout(nil), rollouts...)
 		sort.Slice(ordered, func(i, j int) bool { return ordered[i].ID < ordered[j].ID })
@@ -107,6 +125,21 @@ func runtimeDefaultScaleTargets(namespace, runtimeType string, rollouts []models
 	for _, rollout := range ordered {
 		if rollout.RuntimeType != "openclaw" || rollout.Status != "finished" {
 			continue
+		}
+		// Keep the expansion lineage on the same ordinary releases as
+		// defaultPlacementRollout. Recovery and lab results only govern their
+		// own instances, even when they used an ordinary pool as a source.
+		if rollout.PreflightJSON != nil {
+			var scope struct {
+				RecoveryMode    string `json:"recovery_mode"`
+				UpgradeLabRunID *int64 `json:"upgrade_lab_run_id"`
+			}
+			if err := json.Unmarshal([]byte(*rollout.PreflightJSON), &scope); err != nil {
+				return nil, fmt.Errorf("finished OpenClaw rollout %d has invalid scope: %w", rollout.ID, err)
+			}
+			if scope.RecoveryMode != "" || scope.UpgradeLabRunID != nil {
+				continue
+			}
 		}
 		proof, proofErr := coldSuccessorProof(&rollout)
 		if proofErr != nil {
@@ -262,7 +295,7 @@ func (s *RuntimePodMaintenanceService) defaultScaleSnapshot(ctx context.Context,
 	if err != nil {
 		return k8s.RuntimePodScaleTarget{}, nil, err
 	}
-	targets, err := runtimeDefaultScaleTargets(s.scheduler.runtimeNamespace, runtimeType, rollouts, checkpoints)
+	targets, err := runtimeDefaultScaleTargets(s.scheduler.runtimeNamespace, runtimeType, s.scheduler.DefaultRuntimePoolName(runtimeType), rollouts, checkpoints)
 	if err != nil {
 		return k8s.RuntimePodScaleTarget{}, nil, err
 	}

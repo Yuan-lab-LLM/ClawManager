@@ -112,7 +112,7 @@ func TestGatewayActivityPublicProtocolsRejectStoppedAndStaleMySQL(t *testing.T) 
 			t.Fatal("localhost port required")
 		}
 	}
-	url := mysql.ConnectionURL{Host: "127.0.0.1:" + port, User: "root", Database: "mysql", Options: map[string]string{"parseTime": "true"}}
+	url := mysql.ConnectionURL{Host: "127.0.0.1:" + port, User: "root", Password: os.Getenv("TEST_IDLE_MYSQL_PASSWORD"), Database: "mysql", Options: map[string]string{"parseTime": "true"}}
 	root, err := mysql.Open(url)
 	if err != nil {
 		t.Fatal(err)

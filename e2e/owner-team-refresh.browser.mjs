@@ -34,8 +34,12 @@ try {
   await page.clock.install();
   await page.goto(`http://127.0.0.1:${server.httpServer.address().port}/__owner_refresh__?selected_team_id=144&team_q=fixture`);
   await page.getByRole('link', { name: '进入团队对话' }).waitFor();
-  assert.equal(await page.getByRole('button', { name: '刷新团队', exact: true }).count(), 0);
   const draft = page.getByRole('textbox', { name: 'Unsent draft' }); await draft.fill('retained owner draft');
+  // The owner Team page retains its explicit refresh entry alongside auto-sync.
+  const beforeManual = listCalls;
+  await Promise.all([page.waitForResponse(response => new URL(response.url()).pathname.endsWith('/ieisystem/teams')), page.getByRole('button', { name: '刷新团队', exact: true }).click()]);
+  assert(listCalls > beforeManual, 'manual refresh updates the original owner list');
+  assert.equal(await draft.inputValue(), 'retained owner draft');
   for (const type of ['focus', 'online']) {
     const before = listCalls;
     await Promise.all([page.waitForResponse(response => new URL(response.url()).pathname.endsWith('/ieisystem/teams')), page.evaluate(type => window.dispatchEvent(new Event(type)), type)]);

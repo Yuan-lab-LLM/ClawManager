@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"clawreef/internal/runtimeauth"
+	"clawreef/internal/services/k8s"
 )
 
 // VerifyManagedPreviewImage binds rollout readiness to the administrator's
@@ -18,6 +19,13 @@ func (a *RuntimeSecurityAuthority) VerifyManagedPreviewImage(ctx context.Context
 		return errRuntimeSecurity
 	}
 	image := images[snapshot.request.AgentType]
+	freshImage, err := k8s.FreshRuntimePreviewImage(ctx, a.kube, snapshot.pod, expected.InstanceID, snapshot.request.AgentType)
+	if err != nil {
+		return errRuntimeSecurity
+	}
+	if freshImage != "" {
+		image = freshImage
+	}
 	parts := strings.Split(image, "@sha256:")
 	if len(parts) != 2 || parts[0] == "" || strings.Contains(parts[0], "@") || len(parts[1]) != 64 || strings.ToLower(parts[1]) != parts[1] {
 		return errRuntimeSecurity

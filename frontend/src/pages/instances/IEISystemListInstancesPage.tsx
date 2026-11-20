@@ -2,26 +2,32 @@ import axios from "axios";
 import {OWNER_SESSION_INVALID,OWNER_SESSION_MESSAGE,isOwnerSessionFailure,isPersistentReadFailure,nextReadFailure,type ReadFailure} from "../../lib/ownerReadNotice";
 import {useOwnerPortalVisit} from '../../hooks/useOwnerPortalVisit';
 import { OwnerInstanceCard } from "../../components/OwnerInstanceCard";
+import { OwnerAgentStateIcon } from "../../components/OwnerAgentStateIcon";
 import { getInstanceDisplayStatus } from "../../lib/instanceStatus";
-import { expandedInstanceFromSearch } from "../../lib/ownerPortalNavigation";
+import { ownerDashboardSection, ownerInstanceURL, ownerWorkspaceURL, type OwnerWorkspaceOutlet } from "../../lib/ownerPortalNavigation";
+import { beforePageRefresh } from "../../components/PageVersionNotice";
 import { OwnerDashboard } from "../../components/OwnerDashboard";
 import { useOwnerTeams } from '../../hooks/useOwnerTeams';
 import { OwnerTeamSidebar, OwnerTeamDashboard } from '../../components/teams/OwnerTeamWorkspace';
 import {
   ArrowRight,
+  BarChart3,
   Briefcase,
   Box,
   CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+  CircleUserRound,
   LogOut,
-  House,
   Power,
   RefreshCw,
   Search,
   SlidersHorizontal,
   Sparkles,
+  Users,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, Outlet, useLocation, useMatch, useNavigate } from "react-router-dom";
 import { useExpiringResourceRenewal } from "../../hooks/useExpiringResourceRenewal";
 import { getIEIRuntimePresentation } from "../../lib/ieiRuntimeCatalog";
 import {
@@ -30,8 +36,14 @@ import {
   type IEISystemLifecycleOperation,
   type IEISystemSession,
 } from "../../services/ieiSystemService";
+import "../../styles/owner-portal-workspace.css";
 
 const PAGE_SIZE = 100;
+const portalPath = "/ieisystem/list-instances";
+const dashboardTabs = [
+  { id: "overview", name: "总览", icon: BarChart3, primary: true },
+  { id: "team", name: "Team 设置", icon: Users, primary: true },
+] as const;
 
 const EMPTY_STATE_RUNTIMES = [
   { type: "openclaw", description: "通用智能体工作台" },
@@ -79,10 +91,17 @@ function statusLabel(status: string, stoppedReason?: string) {
 function InstanceTypeIcon({
   type,
   className = "h-full w-full",
+  status,
+  stoppedReason,
+  size = 40,
 }: {
   type: string;
   className?: string;
+  status?: string;
+  stoppedReason?: string;
+  size?: number;
 }) {
+  if (status) return <OwnerAgentStateIcon type={type} status={status} stoppedReason={stoppedReason} size={size} className={className}/>;
   const normalizedType = type.trim().toLowerCase();
   if (normalizedType === "openclaw") {
     return <img src="/openclaw.png" alt="OpenClaw" className={`${className} object-contain`} />;
@@ -175,31 +194,42 @@ function selectedInstanceIDFromURL() {
 }
 
 export default function IEISystemListInstancesPage() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const teamMatch = useMatch("/ieisystem/teams/:id");
+  const instanceMatch = useMatch("/ieisystem/instances/:id");
+  const routeInstanceID = Number(instanceMatch?.params.id) || null;
+  const isWorkspace = !!(teamMatch || instanceMatch);
+  const params = new URLSearchParams(location.search);
+  const rawView = params.get("view");
+  const dashboard = ownerDashboardSection(params);
+  const view = isWorkspace ? "workspace" : rawView === "overview" || dashboard.legacy ? "overview" : rawView === "instance" || params.has("selected_instance_id") ? "instance" : "overview";
+  const dashboardTab = dashboard.tab;
+  const [workspaceInstance, setWorkspaceInstance] = useState<IEISystemInstance | null>(null);
+  const activeTeamID = Number(teamMatch?.params.id) || (workspaceInstance?.id === routeInstanceID ? workspaceInstance.team_id ?? null : null);
+  const [directoryOpen, setDirectoryOpen] = useState(false);
+  const [navigationError, setNavigationError] = useState("");
+  const [listError, setListError] = useState("");
   const initialized = useRef(false);
+  const account = useRef<HTMLDetailsElement>(null);
   const sessionInvalid = useRef(false);
   const [session, setSession] = useState<IEISystemSession | null>(null);
   const ownerTeams = useOwnerTeams(session?.owner);
-  useOwnerPortalVisit(session?.owner);
-  const [expandedInstanceID, setExpandedInstanceID] = useState<number|null>(()=>expandedInstanceFromSearch(window.location.search));
+  useOwnerPortalVisit(isWorkspace ? undefined : session?.owner);
+  const showTeams = ownerTeams.enabled && (params.has("workspace_tab") ? ownerTeams.leftTab === "teams" : !!activeTeamID);
   const [instances, setInstances] = useState<IEISystemInstance[]>([]);
+  const reportInstance = useCallback((instance: IEISystemInstance) => {
+    setWorkspaceInstance(instance);
+    setInstances(items => items.some(item => item.id === instance.id)
+      ? items.map(item => item.id === instance.id ? { ...item, ...instance } : item)
+      : items);
+  }, []);
   const [selectedID, setSelectedID] = useState<number | null>(null);
-  const [view, setView] = useState(() => {
-    const saved=new URLSearchParams(window.location.search).get('view');
-    return saved==='overview'?'overview':saved==='instance'||selectedInstanceIDFromURL()?'instance':'overview';
-  });
-  const [query, setQuery] = useState(() => new URLSearchParams(window.location.search).get('q') || '');
-  const [runtimeFilter, setRuntimeFilter] = useState(() => new URLSearchParams(window.location.search).get('runtime') || 'all');
+  const query = params.get("q") || "";
+  const runtimeFilter = params.get("runtime") || "all";
   const [showFilters, setShowFilters] = useState(false);
   const [menuInstanceID, setMenuInstanceID] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
-  const restoreExpandedCard = useRef(expandedInstanceID);
-  useEffect(() => {
-    if (loading || !restoreExpandedCard.current) return;
-    const card = document.querySelector(`[data-instance-id="${restoreExpandedCard.current}"]`);
-    if (!card) return;
-    card.scrollIntoView({block:'nearest'});
-    restoreExpandedCard.current = null;
-  }, [loading, instances]);
   const [refreshing,setRefreshing]=useState(false);
   const [refreshError,setRefreshError]=useState('');
   const refreshInFlight=useRef(false);
@@ -211,6 +241,31 @@ export default function IEISystemListInstancesPage() {
   const [lifecycleWarnings, setLifecycleWarnings] = useState<Record<number, string>>({});
   const [error, setError] = useState<string | null>(null);
   const refreshFailure = useRef<ReadFailure|null>(null);
+  const canNavigate = useCallback(() => {
+    const allowed = window.dispatchEvent(new Event(beforePageRefresh, { cancelable: true }));
+    setNavigationError(allowed ? "" : "请先保存或关闭当前编辑，再切换工作区。");
+    return allowed;
+  }, []);
+  const updatePresentation = (updates: Record<string, string | null>) => {
+    const next = ownerWorkspaceURL(location.pathname, window.location.search, updates);
+    if (next !== location.pathname + location.search) navigate(next, { replace: true, state: location.state });
+  };
+  const openDashboard = (tab: string) => {
+    if (view === "overview" && dashboardTab === tab && !dashboard.detail) return;
+    if (!canNavigate()) return;
+    setMenuInstanceID(null);
+    setDirectoryOpen(false);
+    navigate(ownerWorkspaceURL(portalPath, window.location.search, {
+      view: "overview", dashboard_tab: tab, dashboard_detail: null,
+      ...(tab === "team" && activeTeamID ? { workspace_tab: "teams", selected_team_id: String(activeTeamID) } : {}),
+    }));
+  };
+  const openDetails = (id: number) => {
+    if (!canNavigate()) return;
+    setSelectedID(id);
+    setDirectoryOpen(false);
+    navigate(ownerWorkspaceURL(portalPath, window.location.search, { view: "instance", selected_instance_id: String(id) }));
+  };
   useEffect(()=>{
     const invalidate=()=>{
       sessionInvalid.current=true;
@@ -224,13 +279,14 @@ export default function IEISystemListInstancesPage() {
   const loadInstances = useCallback(async (preferredID?: number | null) => {
     const first = await ieiSystemService.listInstances(1, PAGE_SIZE);
     const items = [...(first.instances ?? [])];
-    const pages = Math.ceil(first.total / PAGE_SIZE);
+    const pages = Math.ceil(first.total / (first.limit || PAGE_SIZE));
     for (let page = 2; page <= pages; page += 1) {
       const next = await ieiSystemService.listInstances(page, PAGE_SIZE);
       items.push(...(next.instances ?? []));
     }
     if(sessionInvalid.current)return;
     setInstances(items);
+    setListError("");
     setSelectedID((current) => {
       const candidate = preferredID ?? current;
       return candidate && items.some((instance) => instance.id === candidate)
@@ -266,18 +322,16 @@ export default function IEISystemListInstancesPage() {
       if (token) {
         params.delete("token");
         const queryString = params.toString();
-        window.history.replaceState(
-          {},
-          "",
-          `${window.location.pathname}${queryString ? `?${queryString}` : ""}${window.location.hash}`,
-        );
+        navigate(`${window.location.pathname}${queryString ? `?${queryString}` : ""}${window.location.hash}`, { replace: true, state: window.history.state?.usr });
       }
       const nextSession = token
         ? await ieiSystemService.exchangeSession(token)
         : await ieiSystemService.getSession();
       if(sessionInvalid.current)return;
       setSession(nextSession);
-      await loadInstances(preferredID);
+      await loadInstances(preferredID).catch(error => {
+        if (!sessionInvalid.current) setListError(errorMessage(error));
+      });
     } catch (loadError) {
       setSession(null);
       setInstances([]);
@@ -286,7 +340,7 @@ export default function IEISystemListInstancesPage() {
     } finally {
       setLoading(false);
     }
-  }, [loadInstances]);
+  }, [loadInstances, navigate]);
 
   useEffect(() => {
     if (initialized.current) return;
@@ -304,24 +358,6 @@ export default function IEISystemListInstancesPage() {
   });
 
   useEffect(() => installNoReferrerPolicy(), []);
-
-  useEffect(() => {
-    if (!initialized.current) return;
-    const params = new URLSearchParams(window.location.search);
-    params.set('view', view);
-    if(expandedInstanceID)params.set('expanded_instance_id',String(expandedInstanceID));else params.delete('expanded_instance_id');
-    if (query) params.set('q', query); else params.delete('q');
-    if (runtimeFilter !== 'all') params.set('runtime', runtimeFilter); else params.delete('runtime');
-    if (selectedID) params.set("selected_instance_id", String(selectedID));
-    else params.delete("selected_instance_id");
-    params.delete("token");
-    const queryString = params.toString();
-    window.history.replaceState(
-      {},
-      "",
-      `${window.location.pathname}${queryString ? `?${queryString}` : ""}${window.location.hash}`,
-    );
-  }, [selectedID, view, query, runtimeFilter, expandedInstanceID]);
 
   const runtimeOptions = useMemo(() => {
     const types = [...new Set(instances.map((instance) => instance.type.trim().toLowerCase()))];
@@ -343,6 +379,7 @@ export default function IEISystemListInstancesPage() {
   }, [instances, query, runtimeFilter]);
 
   const selectedInstance =
+    instances.find((instance) => instance.id === Number(params.get("selected_instance_id"))) ??
     instances.find((instance) => instance.id === selectedID) ??
     visibleInstances[0] ??
     instances[0] ??
@@ -366,8 +403,9 @@ export default function IEISystemListInstancesPage() {
     ? lifecycleWarnings[selectedInstance.id]
     : undefined;
 
-  const selectedInstanceID = selectedInstance?.id;
-  const selectedInstanceStatus = selectedInstance?.status;
+  const selectedCard = isWorkspace ? instances.find(instance => instance.id === routeInstanceID) : selectedInstance;
+  const selectedInstanceID = selectedCard?.id;
+  const selectedInstanceStatus = selectedCard?.status;
   useEffect(() => {
     if (!selectedInstanceID) return;
     let cancelled = false;
@@ -544,70 +582,130 @@ export default function IEISystemListInstancesPage() {
     }
   };
 
-  return (
-    <main className={`flex min-h-screen flex-col bg-[#f4f7fb] text-slate-900 ${view==='overview'?'portal-overview':''}`}>
-      <header className="shrink-0 border-b border-slate-200 bg-white/95 shadow-sm backdrop-blur">
-        <div className="flex min-h-[64px] flex-wrap items-center justify-between gap-3 px-4 py-2 sm:flex-nowrap sm:gap-6 sm:px-7 lg:px-9">
-          <div className="flex min-w-0 shrink-0 items-center gap-4">
-            <img
-              src="/inspur-information.png"
-              alt="浪潮信息"
-              className="h-auto w-[145px] object-contain object-left"
-            />
-            <div className="hidden h-8 w-px bg-slate-200 sm:block" />
-            <div className="hidden whitespace-nowrap text-sm font-medium tracking-[0.08em] text-slate-400 sm:block">
-              智慧协作门户
-            </div>
-          </div>
-          {session ? (
-            <div className="flex items-center gap-2 sm:gap-4">
-              <div className="hidden min-w-0 text-right lg:block">
-                <div className="flex items-center justify-end gap-2 text-sm font-semibold text-slate-800">
-                  <CheckCircle2 className="h-4 w-4 text-emerald-500" />
-                  已验证所有者
-                </div>
-                <p className="mt-1 max-w-64 truncate text-sm text-slate-500">{session.owner}</p>
-              </div>
-              <div className="hidden h-8 w-px bg-slate-200 lg:block" />
-              {instances.length>0&&<button type="button" onClick={() => {setView('overview');setMenuInstanceID(null);}} aria-pressed={view==='overview'} className="inline-flex h-8 items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:border-blue-300 hover:text-blue-700">
-                <House className="h-4 w-4" />我的总览
-              </button>}
-              <button
-                type="button"
-                className="inline-flex h-8 items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:border-blue-300 hover:text-blue-700 disabled:opacity-60"
-                onClick={() => void refreshPortal()}
-                disabled={loading||refreshing}
-              >
-                <RefreshCw className={`h-4 w-4 ${loading||refreshing ? "animate-spin" : ""}`} />
-                刷新
-              </button>
-              <button
-                type="button"
-                className="inline-flex h-8 items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:border-red-200 hover:text-red-600"
-                onClick={() => void handleLogout()}
-              >
-                <LogOut className="h-4 w-4" />
-                退出
-              </button>
-            </div>
-          ) : null}
-        </div>
-      </header>
+  useEffect(() => {
+    setDirectoryOpen(false);
+    setMenuInstanceID(null);
+    setNavigationError("");
+    if (account.current) account.current.open = false;
+  }, [location.pathname]);
 
-      {refreshError&&<p role="alert" className="fixed right-4 top-16 z-30 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800">{refreshError}</p>}
-      <section className="portal-content min-h-0 flex-1 p-4 lg:p-5">
+  useEffect(() => {
+    // Static menu text does not receive focus. Closing <details> on its blur
+    // can hide the pointer target during the same click/focus transaction.
+    const closeOutside = (event: Event) => {
+      const menu = account.current;
+      if (menu?.open && event.target instanceof Node && !menu.contains(event.target)) menu.open = false;
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      const menu = account.current;
+      if (event.key !== "Escape" || event.defaultPrevented || !menu?.open) return;
+      event.preventDefault();
+      menu.open = false;
+      menu.querySelector("summary")?.focus();
+    };
+    document.addEventListener("pointerdown", closeOutside);
+    document.addEventListener("focusin", closeOutside);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOutside);
+      document.removeEventListener("focusin", closeOutside);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, []);
+
+  const workspaceContext: OwnerWorkspaceOutlet = { owner: session?.owner ?? "", reportInstance };
+  const directory = session && !error && !loading;
+
+  return (
+    <div className={`portal-unified ${view === "overview" ? "portal-overview" : ""}`} onClickCapture={event => {
+      const link = (event.target as Element).closest<HTMLAnchorElement>("a[href]");
+      if (!link || event.button !== 0 || link.target === "_blank" || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
+      if (link.origin !== window.location.origin || !link.pathname.startsWith("/ieisystem/")) return;
+      if (link.pathname === location.pathname && link.search === location.search) return;
+      if (!canNavigate()) event.preventDefault();
+    }}>
+      <aside id="owner-workspace-rail" className="portal-unified-rail portal-instance-sidebar" aria-label="导航和工作区">
+        <div className="portal-unified-brand">
+          <img src="/inspur-information.png" alt="浪潮信息" />
+          {session && <details ref={account} className="portal-unified-account">
+            <summary aria-label="账户与会话" title="账户与会话"><CircleUserRound size={18} /></summary>
+            <div className="portal-unified-account-menu">
+              <p className="flex items-center gap-2 text-sm font-medium"><CheckCircle2 size={16} className="text-emerald-600" /> 已验证所有者</p>
+              <p className="break-all text-xs text-slate-600">{session.owner}</p>
+              <button type="button" className="app-button-secondary" onClick={() => void refreshPortal()} disabled={loading || refreshing}><RefreshCw size={15} className={refreshing ? "animate-spin" : ""} /> 刷新</button>
+              <button type="button" className="app-button-secondary" onClick={() => { if (canNavigate()) void handleLogout(); }}><LogOut size={15} /> 退出</button>
+            </div>
+          </details>}
+        </div>
+        {directory && <>
+          <nav className="portal-unified-nav" role="tablist" aria-label="我的总览栏目">
+            {dashboardTabs.filter(tab => tab.id !== "team" || ownerTeams.enabled).map(({id, name, icon: Icon, primary}) => (
+              <button key={id} id={`owner-tab-${id}`} type="button" role="tab" data-primary={primary} aria-selected={view === "overview" && id === dashboardTab} aria-controls="owner-workspace-content" onClick={() => openDashboard(id)}>
+                <span className="portal-unified-nav-icon"><Icon size={16} aria-hidden="true" /></span>
+                {name}
+                {primary && <ChevronRight className="portal-unified-nav-tail" size={14} aria-hidden="true" />}
+              </button>
+            ))}
+          </nav>
+          <button type="button" className="portal-unified-directory-toggle app-button-secondary" aria-expanded={directoryOpen} aria-controls="owner-workspace-directory" onClick={() => setDirectoryOpen(open => !open)}>工作区列表<ChevronDown size={16} /></button>
+          <div className="portal-unified-directory" data-open={directoryOpen} id="owner-workspace-directory">
+            {ownerTeams.enabled && <div className="ot-instance-tabs" role="tablist" aria-label="我的工作空间">
+              <button type="button" role="tab" aria-selected={!showTeams} onClick={() => ownerTeams.setLeftTab("instances")}>我的实例 · {instances.length}</button>
+              <button type="button" role="tab" aria-selected={showTeams} onClick={() => ownerTeams.setLeftTab("teams")}>Team · {ownerTeams.total}</button>
+            </div>}
+            {showTeams ? <OwnerTeamSidebar key={ownerTeams.owner} state={ownerTeams} activeTeamID={activeTeamID} activeInstanceID={routeInstanceID} /> : <>
+              <div className="portal-unified-search">
+                <label className="relative block min-w-0 flex-1">
+                  <Search className="pointer-events-none absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                  <input
+                    type="search"
+                    aria-label="搜索实例"
+                    value={query}
+                    onChange={event => updatePresentation({q: event.target.value})}
+                    placeholder="搜索名称、类型或 ID"
+                  />
+                </label>
+                <button type="button" className="cm-icon-button" aria-label="筛选运行时" title="筛选运行时" aria-expanded={showFilters} onClick={() => setShowFilters(current => !current)}>
+                  <SlidersHorizontal size={16} />
+                </button>
+              </div>
+              {showFilters && <select className="portal-unified-runtime-filter" aria-label="筛选运行时" value={runtimeFilter} onChange={event => updatePresentation({runtime: event.target.value === "all" ? null : event.target.value})}>
+                <option value="all">全部 Runtime</option>
+                {runtimeOptions.map(option => <option key={option.type} value={option.type}>{option.label}</option>)}
+              </select>}
+              <div className="portal-unified-cards">
+                {listError && <p role="alert" className="portal-unified-list-error">{listError}<button type="button" className="app-button-secondary" onClick={() => void refreshPortal()}>重试</button></p>}
+                {!listError && visibleInstances.length === 0 && <p className="px-2 py-6 text-sm text-slate-500">没有符合条件的实例</p>}
+                {visibleInstances.map(instance => {
+                  const selected = isWorkspace ? instance.id === routeInstanceID : view === "instance" && instance.id === selectedInstance?.id;
+                  const displayStatus = lifecycleDisplayStatus(instance, lifecycleOperations[instance.id]);
+                  return <div key={instance.id}>
+                    <OwnerInstanceCard instance={instance} selected={selected} status={statusLabel(displayStatus, instance.stopped_reason)} pending={operationIsPending(lifecycleOperations[instance.id], instance.status)} menuOpen={menuInstanceID === instance.id}
+                      onMenu={() => setMenuInstanceID(current => current === instance.id ? null : instance.id)} onCloseMenu={() => setMenuInstanceID(null)}
+                      onDetails={() => openDetails(instance.id)}
+                      onRestart={() => void handleRestart(instance)} onReset={() => void handleReset(instance)} />
+                    {lifecycleErrors[instance.id] && <p role="alert" className="px-2 py-1 text-xs text-rose-600">{lifecycleErrors[instance.id]}</p>}
+                  </div>;
+                })}
+              </div>
+            </>}
+          </div>
+        </>}
+      </aside>
+      <div className="portal-unified-content" id="owner-workspace-content" role={view === "overview" && directory ? "tabpanel" : undefined} aria-labelledby={view === "overview" && directory ? `owner-tab-${dashboardTab}` : undefined}>
+        {(navigationError || refreshError) && <p role="alert" className="portal-unified-alert">{navigationError || refreshError}</p>}
         {error ? (
           <div className="mx-auto mt-16 max-w-lg rounded-2xl border border-red-200 bg-white p-7 text-center shadow-sm">
             <h2 className="text-lg font-semibold">访问验证失败</h2>
             <p className="mt-2 text-sm leading-6 text-slate-600">{error}</p>
           </div>
-        ) : loading ? (
+        ) : isWorkspace && session ? <Outlet context={workspaceContext} /> : loading ? (
           <div className="flex h-[65vh] items-center justify-center text-sm text-slate-600">
             <RefreshCw className="mr-2 h-5 w-5 animate-spin" />
             正在验证身份并加载实例…
           </div>
-        ) : instances.length === 0 && !ownerTeams.enabled ? (
-          <div className="relative mx-auto flex min-h-[calc(100vh-132px)] max-w-6xl items-center justify-center overflow-hidden rounded-2xl border border-blue-100 bg-[#f3f7ff] px-5 py-10 text-center shadow-sm sm:px-8">
+        ) : instances.length === 0 && !ownerTeams.enabled && !listError ? (
+          <div className="relative mx-auto flex min-h-[calc(100vh-110px)] max-w-6xl items-center justify-center overflow-hidden rounded-2xl border border-blue-100 bg-[#f3f7ff] px-5 py-10 text-center shadow-sm sm:px-8">
             <div className="pointer-events-none absolute -left-24 -top-24 h-64 w-64 rounded-full bg-blue-100/60" />
             <div className="pointer-events-none absolute -bottom-36 -right-28 h-72 w-72 rounded-full bg-blue-100/60" />
             <div className="relative flex w-full max-w-4xl flex-col items-center">
@@ -677,75 +775,15 @@ export default function IEISystemListInstancesPage() {
               </div>
             </div>
           </div>
-        ) : (view === 'overview' || selectedInstance && selectedRuntime) ? (
-          <div className={view==='overview'?'portal-overview-grid grid items-start gap-3 lg:grid-cols-[320px_minmax(0,1fr)] xl:grid-cols-[350px_minmax(0,1fr)]':'grid gap-4 lg:h-[calc(100vh-132px)] lg:min-h-[640px] lg:grid-cols-[minmax(280px,330px)_minmax(460px,1fr)_minmax(280px,320px)] 2xl:grid-cols-[minmax(320px,380px)_minmax(560px,1fr)_minmax(320px,360px)]'}>
-            <aside className={`portal-instance-sidebar flex flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm lg:min-h-0 ${view==='overview'?'max-h-[360px] lg:max-h-[calc(100vh-132px)]':'min-h-[680px]'}`}>
-              <div className="flex items-center justify-between border-b border-slate-100 px-5 py-5">
-                <h2 className="text-base font-bold text-[#14213a]">{ownerTeams.enabled ? '我的工作空间' : `我的实例 · ${instances.length}`}</h2>
-                <button
-                  type="button"
-                  className={`cm-icon-button h-9 w-9 ${showFilters ? "border-blue-200 bg-blue-50 text-blue-600" : ""}`}
-                  title="筛选运行时"
-                  onClick={() => setShowFilters((current) => !current)}
-                >
-                  <SlidersHorizontal className="h-4 w-4" />
-                </button>
-              </div>
-              {ownerTeams.enabled && <div className="ot-instance-tabs" role="tablist" aria-label="我的工作空间"><button role="tab" aria-selected={ownerTeams.leftTab==='instances'} onClick={()=>ownerTeams.setLeftTab('instances')}>实例 · {instances.length}</button><button role="tab" aria-selected={ownerTeams.leftTab==='teams'} onClick={()=>ownerTeams.setLeftTab('teams')}>Team · {ownerTeams.total}</button></div>}
-              {ownerTeams.enabled && ownerTeams.leftTab==='teams' ? <OwnerTeamSidebar key={ownerTeams.owner} state={ownerTeams} onSelect={()=>setView('overview')}/> : <><div className="space-y-3 px-4 py-4">
-                <label className="relative block">
-                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                  <input
-                    value={query}
-                    onChange={(event) => setQuery(event.target.value)}
-                    placeholder="搜索实例名称或 ID…"
-                    className="h-11 w-full rounded-lg border border-slate-200 bg-slate-50/60 pl-10 pr-3 text-sm outline-none transition placeholder:text-slate-400 focus:border-blue-300 focus:bg-white focus:ring-2 focus:ring-blue-100"
-                  />
-                </label>
-                {showFilters ? (
-                  <select
-                    aria-label="筛选运行时"
-                    value={runtimeFilter}
-                    onChange={(event) => setRuntimeFilter(event.target.value)}
-                    className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none focus:border-blue-300"
-                  >
-                    <option value="all">全部 Runtime</option>
-                    {runtimeOptions.map((option) => (
-                      <option key={option.type} value={option.type}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                ) : null}
-              </div>
-              <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
-                {visibleInstances.length === 0 ? (
-                  <div className="rounded-xl border border-dashed border-slate-200 px-4 py-10 text-center text-sm text-slate-500">
-                    没有符合条件的实例
-                  </div>
-                ) : (
-                  visibleInstances.map((instance) => {
-                    const selected = view === 'instance' && instance.id === selectedInstance.id;
-                    const displayStatus = lifecycleDisplayStatus(
-                      instance,
-                      lifecycleOperations[instance.id],
-                    );
-                    return (
-                      <div key={instance.id}>
-                        <OwnerInstanceCard instance={instance} expanded={expandedInstanceID===instance.id} selected={selected} status={statusLabel(displayStatus, instance.stopped_reason)} pending={operationIsPending(lifecycleOperations[instance.id],instance.status)} menuOpen={menuInstanceID===instance.id}
-                          onToggle={()=>{setExpandedInstanceID(current=>current===instance.id?null:instance.id);setMenuInstanceID(null)}}
-                          onMenu={()=>setMenuInstanceID(current=>current===instance.id?null:instance.id)} onCloseMenu={()=>setMenuInstanceID(null)}
-                          onDetails={()=>{setSelectedID(instance.id);setView('instance')}}
-                          onRestart={()=>void handleRestart(instance)} onReset={()=>void handleReset(instance)}/>
-                      {lifecycleErrors[instance.id]&&<p role="alert" className="px-2 py-1 text-xs text-rose-600">{lifecycleErrors[instance.id]}</p>}
-                      </div>
-                    );
-                  })
-                )}
-              </div></>}
-            </aside>
-
-            {view==='overview' ? <div className="portal-dashboard-host min-w-0"><OwnerDashboard teamContent={ownerTeams.enabled ? <OwnerTeamDashboard key={ownerTeams.owner} state={ownerTeams}/> : undefined} refreshAction={dashboardRefresh} owner={session?.owner??''} instances={instances} onSelect={id=>{if(instances.some(i=>i.id===id)){setSelectedID(id);setView('instance');}}}/></div> : selectedInstance && selectedRuntime ? <>
+        ) : view === "overview" || !selectedInstance ? (
+          <div className="portal-dashboard-host min-w-0">
+            <OwnerDashboard teamContent={ownerTeams.enabled ? <OwnerTeamDashboard key={ownerTeams.owner} state={ownerTeams} /> : undefined} refreshAction={dashboardRefresh} owner={session?.owner ?? ""} instances={instances} onSelect={id => {
+              if (!instances.some(instance => instance.id === id) || !canNavigate()) return;
+              navigate(ownerInstanceURL(id, window.location.search), { state: { portalReturnSearch: window.location.search } });
+            }} />
+          </div>
+        ) : selectedRuntime ? (
+          <div className="portal-unified-instance-info">
             <section className="flex min-h-[680px] flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm lg:min-h-0">
               <div className="border-b border-slate-100 px-6 py-5">
                 <h2 className="text-base font-bold text-[#14213a]">运行时说明</h2>
@@ -770,7 +808,7 @@ export default function IEISystemListInstancesPage() {
                   <div
                     className={`flex h-24 w-24 shrink-0 items-center justify-center rounded-2xl border ${selectedRuntime.theme.border} ${selectedRuntime.theme.accentSoft} p-4`}
                   >
-                    <InstanceTypeIcon type={selectedInstance.type} />
+                    <InstanceTypeIcon type={selectedInstance.type} status={selectedDisplayStatus} stoppedReason={selectedInstance.stopped_reason} size={64}/>
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-3">
@@ -827,10 +865,10 @@ export default function IEISystemListInstancesPage() {
                   ) : (
                     <Link
                       to={`/ieisystem/instances/${selectedInstance.id}`}
-                      state={{portalReturnSearch:window.location.search}}
+                      state={{portalReturnSearch:window.location.search,startStopped:selectedInstance.status.toLowerCase()==='stopped'}}
                       className="inline-flex h-12 shrink-0 items-center justify-center gap-2 rounded-lg bg-[var(--cm-primary)] px-6 text-sm font-semibold text-white shadow-sm transition "
                     >
-                      进入实例
+                      {selectedInstance.status.toLowerCase()==='stopped'?'启动实例':'进入实例'}
                       <ArrowRight className="h-4 w-4" />
                     </Link>
                   )}
@@ -930,7 +968,7 @@ export default function IEISystemListInstancesPage() {
                   <div
                     className={`mx-auto flex h-16 w-16 items-center justify-center rounded-2xl border ${selectedRuntime.theme.border} ${selectedRuntime.theme.accentSoft} p-3`}
                   >
-                    <InstanceTypeIcon type={selectedInstance.type} />
+                    <InstanceTypeIcon type={selectedInstance.type} status={selectedInstance.status} stoppedReason={selectedInstance.stopped_reason}/>
                   </div>
                   <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
                     <h3 className="max-w-full truncate text-lg font-bold text-[#10203b]">
@@ -971,10 +1009,9 @@ export default function IEISystemListInstancesPage() {
                 </div>
               </div>
             </aside>
-            </> : null}
           </div>
         ) : null}
-      </section>
-    </main>
+      </div>
+    </div>
   );
 }

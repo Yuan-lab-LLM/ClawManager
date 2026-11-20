@@ -15,8 +15,18 @@ import (
 	"time"
 )
 
-const runtimeTemplateHashBinary = "/usr/local/bin/cm-runtime-template-hash-v1.35"
 const runtimeTemplateMaxBytes = 1 << 20
+
+func runtimeTemplateHashBinary(version string) string {
+	switch version {
+	case "v1.31.14":
+		return "/usr/local/bin/cm-runtime-template-hash-v1.31.14"
+	case "v1.35.0":
+		return "/usr/local/bin/cm-runtime-template-hash-v1.35"
+	default:
+		return ""
+	}
+}
 
 // Controller-owned metadata is trusted against malicious administrators. The
 // original controller hash detects accidental edits, including storage changes.
@@ -29,8 +39,9 @@ func verifyRetainedRuntimeTemplate(ctx context.Context, client kubernetes.Interf
 	if err != nil {
 		return err
 	}
-	if version.GitVersion != "v1.35.0" {
-		return fmt.Errorf("source template hash requires verified controller v1.35.0")
+	binary := runtimeTemplateHashBinary(version.GitVersion)
+	if binary == "" {
+		return fmt.Errorf("source template hash has no pinned helper for controller %s", version.GitVersion)
 	}
 	raw, err := client.AppsV1().RESTClient().Get().Namespace(rs.Namespace).Resource("replicasets").Name(rs.Name).DoRaw(ctx)
 	if err != nil {
@@ -40,7 +51,7 @@ func verifyRetainedRuntimeTemplate(ctx context.Context, client kubernetes.Interf
 	if err != nil {
 		return err
 	}
-	info, err := os.Lstat(runtimeTemplateHashBinary)
+	info, err := os.Lstat(binary)
 	if err != nil {
 		return fmt.Errorf("pinned template hash helper unavailable")
 	}
@@ -50,7 +61,7 @@ func verifyRetainedRuntimeTemplate(ctx context.Context, client kubernetes.Interf
 	}
 	bounded, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
-	hash, err := runRuntimeTemplateHashHelper(bounded, runtimeTemplateHashBinary, template)
+	hash, err := runRuntimeTemplateHashHelper(bounded, binary, version.GitVersion, template)
 	if err != nil {
 		return err
 	}
@@ -84,7 +95,7 @@ func (b *runtimeHashOutput) Write(p []byte) (int, error) {
 	}
 	return b.data.Write(p)
 }
-func runRuntimeTemplateHashHelper(ctx context.Context, binary string, raw []byte) (string, error) {
+func runRuntimeTemplateHashHelper(ctx context.Context, binary, expectedVersion string, raw []byte) (string, error) {
 	if len(raw) > runtimeTemplateMaxBytes {
 		return "", fmt.Errorf("template input exceeds bound")
 	}
@@ -107,7 +118,7 @@ func runRuntimeTemplateHashHelper(ctx context.Context, binary string, raw []byte
 	if err := decoder.Decode(&result); err != nil {
 		return "", fmt.Errorf("template hash helper returned invalid output")
 	}
-	if err := decoder.Decode(new(any)); err != io.EOF || result.APIVersion != "v1.35.0" || result.Hash == "" || len(result.Hash) > 32 {
+	if err := decoder.Decode(new(any)); err != io.EOF || result.APIVersion != expectedVersion || result.Hash == "" || len(result.Hash) > 32 {
 		return "", fmt.Errorf("template hash helper identity or output is invalid")
 	}
 	return result.Hash, nil

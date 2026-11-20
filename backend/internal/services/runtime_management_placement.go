@@ -2,6 +2,7 @@ package services
 
 import (
 	"clawreef/internal/models"
+	"clawreef/internal/runtimeeviction"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -80,9 +81,14 @@ func (s *RuntimeManagementService) forceEvictionExcludedPorts(ctx context.Contex
 		return nil, fmt.Errorf("%w: decode eviction placement: %v", errRuntimeControlPlanePending, err)
 	}
 	var policy *RuntimeEvictionPlacement
+	allowAgentOverlay := false
 	for _, item := range items {
 		if item.InstanceID == instance.ID && item.SourceGeneration+1 == instance.RuntimeGeneration {
 			policy = item.SourcePlacement
+			j := item.Recovery
+			allowAgentOverlay = j != nil && j.TeamID > 0 && j.Phase == "released" && j.ResultState == "waiting_capacity" &&
+				j.Scope.InstanceID == instance.ID && j.Scope.UserID == instance.UserID && j.Scope.Generation == item.SourceGeneration &&
+				j.Receipt != nil && runtimeeviction.ValidateReceipt(j.Scope, j.Receipt) == nil
 			break
 		}
 	}
@@ -107,8 +113,13 @@ func (s *RuntimeManagementService) forceEvictionExcludedPorts(ctx context.Contex
 		// The caller already owns one SQL admission claim. Capacity/port occupancy
 		// is checked by the reservation repository; do not count our own claim twice.
 		target.UsedSlots = 0
-		if !target.KubernetesReady || target.KubernetesPodUID == nil || stringValue(pod.PodUID) != *target.KubernetesPodUID || validateRuntimeManagementTarget(source, target) != nil || runtimeManagementResourceBudget(target) != nil {
+		if !target.KubernetesReady || target.KubernetesPodUID == nil || stringValue(pod.PodUID) != *target.KubernetesPodUID || runtimeManagementResourceBudget(target) != nil {
 			break
+		}
+		if err := validateRuntimeManagementTarget(source, target); err != nil {
+			if !allowAgentOverlay || !s.compatibleFaultRecoveryAgentOverlay(ctx, source, target) {
+				break
+			}
 		}
 		blocked := make(map[int]struct{}, len(excluded)+target.Capacity)
 		for port := range excluded {

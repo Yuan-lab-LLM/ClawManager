@@ -12,6 +12,7 @@ import (
 	"net/netip"
 	"net/url"
 	"strconv"
+	"time"
 
 	"clawreef/internal/models"
 	"clawreef/internal/runtimeauth"
@@ -128,8 +129,13 @@ func (a *RuntimeSecurityAuthority) validatedSnapshotForIdentity(ctx context.Cont
 	if err := ctx.Err(); err != nil {
 		return runtimeSecuritySnapshot{}, err
 	}
+	started := time.Now()
 	instance, err := a.instances.GetByIDContext(ctx, id)
-	if err != nil || instance == nil {
+	runtimeauth.RecordStage(ctx, "instance_lookup", started, err)
+	if err != nil {
+		return runtimeSecuritySnapshot{}, runtimeSecurityError("instance_unavailable", "instance", nil, runtimeAuthorityDependency(ctx, err))
+	}
+	if instance == nil {
 		return runtimeSecuritySnapshot{}, runtimeSecurityError("instance_unavailable", "instance", nil, nil)
 	}
 	instanceCopy := *instance
@@ -146,32 +152,39 @@ func (a *RuntimeSecurityAuthority) validatedSnapshotForIdentity(ctx context.Cont
 	if expected != nil && (instanceCopy.ID != expected.InstanceID || instanceCopy.UserID != expected.UserID || instanceCopy.RuntimeGeneration != expected.Generation) {
 		return runtimeSecuritySnapshot{}, runtimeSecurityError("identity_conflict", "instance", nil, nil)
 	}
-	if a.checkTeamNetwork(ctx, &instanceCopy) != nil {
-		return runtimeSecuritySnapshot{}, runtimeSecurityError("team_network_denied", "instance", nil, nil)
+	started = time.Now()
+	err = a.checkTeamNetwork(ctx, &instanceCopy)
+	runtimeauth.RecordStage(ctx, "team_network", started, err)
+	if err != nil {
+		return runtimeSecuritySnapshot{}, runtimeSecurityError("team_network_denied", "instance", nil, err)
 	}
 	if a.assignments != nil {
+		started = time.Now()
 		cm, pods, err := a.assignments.Assignment(ctx, id)
+		runtimeauth.RecordStage(ctx, "assignment_observation", started, err)
 		if ctx.Err() != nil {
 			return runtimeSecuritySnapshot{}, ctx.Err()
 		}
 		if err != nil {
 			if errors.Is(err, runtimeinventory.ErrUnavailable) {
-				return runtimeSecuritySnapshot{}, runtimeSecurityError("inventory_unavailable", "inventory", nil, runtimeinventory.ErrUnavailable)
+				return runtimeSecuritySnapshot{}, runtimeSecurityError("inventory_unavailable", "inventory", nil, runtimeauth.Unavailable(err))
 			}
-			reason := "inventory_denied"
 			if errors.Is(err, runtimeinventory.ErrAssignmentNotFound) {
-				reason = "assignment_missing"
+				return runtimeSecuritySnapshot{}, runtimeSecurityError("assignment_missing", "inventory", nil, nil)
 			}
-			return runtimeSecuritySnapshot{}, runtimeSecurityError(reason, "inventory", nil, nil)
+			return runtimeSecuritySnapshot{}, runtimeSecurityError("inventory_denied", "inventory", nil, nil)
 		}
 		return validateRuntimeSecuritySnapshot(ctx, id, &instanceCopy, cm, pods)
 	}
 	cm, err := a.kube.CoreV1().ConfigMaps(a.namespace).Get(ctx, fmt.Sprintf("lite-instance-%d", id), metav1.GetOptions{})
 	if err != nil {
-		return runtimeSecuritySnapshot{}, errRuntimeSecurity
+		return runtimeSecuritySnapshot{}, runtimeAuthorityDependency(ctx, err)
 	}
 	pods, err := a.kube.CoreV1().Pods(a.namespace).List(ctx, metav1.ListOptions{LabelSelector: "clawmanager.io/runtime-protocol=container-slots-v1"})
-	if err != nil || pods == nil {
+	if err != nil {
+		return runtimeSecuritySnapshot{}, runtimeAuthorityDependency(ctx, err)
+	}
+	if pods == nil {
 		return runtimeSecuritySnapshot{}, errRuntimeSecurity
 	}
 	return validateRuntimeSecuritySnapshot(ctx, id, &instanceCopy, cm, pods.Items)

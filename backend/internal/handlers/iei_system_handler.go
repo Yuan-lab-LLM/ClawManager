@@ -57,6 +57,8 @@ type ieiSessionExchangeRequest struct {
 }
 
 type ieiInstanceView struct {
+	RuntimeGeneration  int        `json:"runtime_generation"`
+	TeamID             int        `json:"team_id,omitempty"`
 	WorkspaceAvailable bool       `json:"workspace_available"`
 	WorkspaceRoot      string     `json:"workspace_root"`
 	ID                 int        `json:"id"`
@@ -259,8 +261,14 @@ func (h *IEISystemHandler) GetInstance(c *gin.Context) {
 	if !ok {
 		return
 	}
+	teamID, ok := h.instanceTeamID(c, instance)
+	if !ok {
+		return
+	}
+	view := newIEIInstanceView(instance)
+	view.TeamID = teamID
 	utils.Success(c, http.StatusOK, "IEI instance retrieved", gin.H{
-		"instance": newIEIInstanceView(instance),
+		"instance": view,
 	})
 }
 
@@ -725,6 +733,7 @@ func newIEIInstanceView(instance *models.Instance) ieiInstanceView {
 		owner = *instance.Owner
 	}
 	return ieiInstanceView{
+		RuntimeGeneration:  instance.RuntimeGeneration,
 		WorkspaceAvailable: isDesktopWorkspaceInstance(instance) || (instance.WorkspacePath != nil && strings.TrimSpace(*instance.WorkspacePath) != ""),
 		WorkspaceRoot: func() string {
 			if isDesktopWorkspaceInstance(instance) {

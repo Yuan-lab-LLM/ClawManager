@@ -88,7 +88,7 @@ export default function TeamWorkflowMini({ nodes, taskId, status, title, termina
         <div className="team-workflow-handoff-row"><span>{t("teams.to")}</span><strong>{handoff.to}</strong></div>
       </div>
     </div>}
-    {hovered && current && createPortal(<div id={tooltipId} role="tooltip" className="team-workflow-tooltip" style={{ left: hovered.x, top: hovered.y, width: hovered.width }}
+    {hovered && current && createPortal(<div id={tooltipId} role="tooltip" className="team-workflow-tooltip team-classic-surface" style={{ left: hovered.x, top: hovered.y, width: hovered.width }}
       onMouseEnter={() => clearTimeout(hoverTimer.current)} onMouseLeave={clearHover}>
       <div className="team-workflow-tooltip-caption">{current.owner} · {current.role || t("teams.member")}</div>
       <strong>{current.title}</strong>

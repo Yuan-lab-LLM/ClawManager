@@ -3641,12 +3641,8 @@ func buildTeamRuntimePrompt(rawPrompt string, memberContext map[string]string) s
 
 func (s *teamService) DeleteTeam(userID, teamID int) error {
 	if s.power != nil {
-		v, e := s.TeamPower(context.Background(), teamID)
-		if e != nil {
-			return e
-		}
-		if v.State != "running" && v.State != "stopped" {
-			return fmt.Errorf("请先完成或核实原团队启停操作后删除")
+		if err := s.power.store.CheckDeletion(context.Background(), teamID); err != nil {
+			return err
 		}
 	}
 
@@ -3687,10 +3683,41 @@ func (s *teamService) DeleteTeam(userID, teamID int) error {
 		}
 	}
 	now := time.Now().UTC()
+	if s.power != nil {
+		if err := s.power.store.MarkDeleting(context.Background(), teamID); err != nil {
+			return err
+		}
+	}
 	team.Status = models.TeamStatusDeleting
 	team.UpdatedAt = now
 	if err := s.repo.UpdateTeam(team); err != nil {
 		return err
+	}
+
+	if queue, ok := s.instanceService.(interface{ QueueDeleteForOwnerTeam(int, int) error }); ok {
+		for idx := range members {
+			member := &members[idx]
+			if member.Status == models.TeamMemberStatusDeleted {
+				continue
+			}
+			member.Status = models.TeamMemberStatusDeleting
+			member.UpdatedAt = time.Now().UTC()
+			if err := s.repo.UpdateMember(member); err != nil {
+				return err
+			}
+			if member.InstanceID != nil && *member.InstanceID > 0 {
+				current, err := s.instanceService.GetByID(*member.InstanceID)
+				if err != nil {
+					return err
+				}
+				if current == nil || current.Status == "deleted" {
+					continue
+				}
+				if err := queue.QueueDeleteForOwnerTeam(teamID, *member.InstanceID); err != nil {
+					return fmt.Errorf("prepare Team member %s deletion: %w", member.MemberKey, err)
+				}
+			}
+		}
 	}
 
 	for idx := range members {
@@ -3704,7 +3731,15 @@ func (s *teamService) DeleteTeam(userID, teamID int) error {
 			return fmt.Errorf("failed to mark Team %d member %s deleting: %w", teamID, member.MemberKey, err)
 		}
 		if member.InstanceID != nil && *member.InstanceID > 0 {
-			if err := s.deleteTeamMemberInstance(team, *member.InstanceID); err != nil {
+			if _, queued := s.instanceService.(interface{ QueueDeleteForOwnerTeam(int, int) error }); queued {
+				current, err := s.instanceService.GetByID(*member.InstanceID)
+				if err != nil {
+					return err
+				}
+				if current != nil && current.Status != "deleted" {
+					return fmt.Errorf("Team member instance %d deletion pending; waiting for confirmed native teardown", *member.InstanceID)
+				}
+			} else if err := s.deleteTeamMemberInstance(team, *member.InstanceID); err != nil {
 				return fmt.Errorf("failed to delete Team %d member %s instance %d: %w", teamID, member.MemberKey, *member.InstanceID, err)
 			}
 			member.InstanceID = nil
@@ -6245,7 +6280,7 @@ func (s *teamService) redisBusForTeam(ctx context.Context, team *models.Team) (*
 		}
 		value, err := s.secretService.GetSecretValue(ctx, client.GetNamespace(team.UserID), *team.RedisURLSecretName, *team.RedisURLSecretKey)
 		if err != nil {
-			return nil, err
+			return nil, runtimeAuthorityDependency(ctx, err)
 		}
 		redisURL = strings.TrimSpace(value)
 	}

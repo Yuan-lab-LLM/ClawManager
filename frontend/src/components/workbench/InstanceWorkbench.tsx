@@ -65,6 +65,9 @@ function navigateTabs(event: KeyboardEvent<HTMLDivElement>) {
   tabs[next].focus();
 }
 interface Props {
+  presentation?: "default" | "portal";
+  programKind?: "browser" | "terminal" | "git";
+  hideHeader?: boolean;
   instanceId: number;
   runtimeGeneration: number;
   isRunning: boolean;
@@ -76,6 +79,9 @@ interface Props {
   onWorkbenchEvent?: (event: WorkbenchEvent) => void;
 }
 export function InstanceWorkbench({
+  presentation = "default",
+  programKind,
+  hideHeader = false,
   instanceId,
   runtimeGeneration,
   isRunning,
@@ -94,6 +100,13 @@ export function InstanceWorkbench({
   );
   const state = sharedState ?? localState;
   const dispatch = onWorkbenchEvent ?? localDispatch;
+  const [kind, setKind] = useState<"browser" | "terminal">(programKind === "terminal" ? "terminal" : "browser");
+  useEffect(() => {
+    if (programKind) {
+      if (programKind !== "git") setKind(programKind);
+      dispatch({ type: "panel", panel: programKind === "git" ? "git" : "preview" });
+    }
+  }, [programKind, dispatch]);
   const full = state.full && visible;
   const showSessions = state.showSessions;
   const setFull = useCallback((full: boolean) => dispatch({ type: "view.patch", patch: { full } }), [dispatch]);
@@ -194,9 +207,11 @@ export function InstanceWorkbench({
       });
     }
   }, [service, ready, caps.data?.preview, state.generation, state.tabs, generation, instanceId, dispatch, t]);
-  const selected = state.tabs.find(
-    (tab) => tab.id === state.active && !tab.hidden,
-  );
+  // Embedded Team tools can select a program kind externally. The full
+  // workbench shares one preview panel and tab strip for websites and PTYs.
+  const filterProgramKind = presentation === "portal" && hideHeader && !!programKind && programKind !== "git";
+  const selected = state.tabs.find(tab => tab.id === state.active && !tab.hidden && (!filterProgramKind || tab.kind === kind))
+    ?? (filterProgramKind ? state.tabs.find(tab => !tab.hidden && tab.kind === kind) : undefined);
   const hidden = state.tabs.filter((tab) => tab.hidden);
   useEffect(() => {
     const strip = programTabsRef.current;
@@ -220,6 +235,7 @@ export function InstanceWorkbench({
     return () => observer.disconnect();
   }, [state.active, state.panel, state.tabs, visible, rendered]);
   const createTerminal = async () => {
+    setKind("terminal");
     if (state.tabs.length >= MAX_WORKBENCH_TABS) {
       setError(t("workbench.sessionLimit"));
       setNewMenu(false);
@@ -293,6 +309,7 @@ export function InstanceWorkbench({
     }
   };
   const newBrowser = () => {
+    setKind("browser");
     setNewMenu(false);
     if (state.tabs.length >= MAX_WORKBENCH_TABS) {
       setError(t("workbench.sessionLimit"));
@@ -306,7 +323,8 @@ export function InstanceWorkbench({
       ? workbenchError(caps.error)
       : caps.isLoading
         ? t("workbench.loading")
-        : null;
+        : filterProgramKind && state.panel === "preview" && caps.data && !(kind === "terminal" ? caps.data.terminal : caps.data.preview)
+          ? t("workbench.upgrade") : null;
   return (
     <section
       ref={rootRef}
@@ -320,20 +338,18 @@ export function InstanceWorkbench({
         }
       }}
     >
-      <header className="wb-header">
+      {!hideHeader && <header className="wb-header">
         <div
           className="wb-panels"
           onKeyDown={navigateTabs}
           role="tablist"
           aria-label={t("workbench.emptyTitle")}
         >
-          {(
-            [
+          {([
               { id: "files", icon: Files },
               { id: "git", icon: GitBranch },
               { id: "preview", icon: Globe },
-            ] as const
-          ).map(({ id, icon: Icon }) => (
+            ] as const).map(({ id, icon: Icon }) => (
             <button
               key={id}
               id={`wb-tab-${viewID}-${id}`}
@@ -357,7 +373,7 @@ export function InstanceWorkbench({
         >
           {full ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
         </button>
-      </header>
+      </header>}
       <div
         id={`wb-panel-${viewID}-files`}
         role="tabpanel"
@@ -370,7 +386,8 @@ export function InstanceWorkbench({
       <div
         id={`wb-panel-${viewID}-git`}
         role="tabpanel"
-        aria-labelledby={`wb-tab-${viewID}-git`}
+        aria-labelledby={hideHeader ? undefined : `wb-tab-${viewID}-git`}
+        aria-label={hideHeader ? t("workbench.git") : undefined}
         hidden={state.panel !== "git"}
         className="wb-panel"
       >
@@ -399,7 +416,8 @@ export function InstanceWorkbench({
       <div
         id={`wb-panel-${viewID}-preview`}
         role="tabpanel"
-        aria-labelledby={`wb-tab-${viewID}-preview`}
+        aria-labelledby={hideHeader ? undefined : `wb-tab-${viewID}-preview`}
+        aria-label={hideHeader ? t(kind === "terminal" ? "workbench.terminal" : "workbench.web") : undefined}
         hidden={state.panel !== "preview"}
         className="wb-panel wb-runtime"
       >
@@ -412,7 +430,7 @@ export function InstanceWorkbench({
             aria-label={t("workbench.preview")}
           >
             {state.tabs
-              .filter((tab) => !tab.hidden)
+              .filter((tab) => !tab.hidden && (!filterProgramKind || tab.kind === kind))
               .map((tab) => (
                 <div
                   key={tab.id}
@@ -474,7 +492,7 @@ export function InstanceWorkbench({
               >
                 <button disabled={!caps.data?.preview} onClick={newBrowser}>
                   <Globe size={16} />
-                  <span>{t("workbench.browser")}</span>
+                  <span>{t(presentation === "portal" ? "workbench.web" : "workbench.browser")}</span>
                 </button>
                 <button
                   disabled={!caps.data?.terminal}
@@ -745,7 +763,7 @@ export function InstanceWorkbench({
                   onClick={newBrowser}
                 >
                   <Globe size={14} />
-                  {t("workbench.newBrowser")}
+                  {t(presentation === "portal" ? "workbench.newWeb" : "workbench.newBrowser")}
                 </button>
                 <button
                   className="wb-button"

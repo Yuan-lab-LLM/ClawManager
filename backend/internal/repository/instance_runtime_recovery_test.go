@@ -132,6 +132,37 @@ func TestRuntimeRecoveryBindingMySQLExactSourceAssignment(t *testing.T) {
 	}
 }
 
+func TestRuntimeRecoveryBindingMySQLPendingSourceRequiresExactAdmittedRecovery(t *testing.T) {
+	r := runtimeSecurityMySQL(t)
+	createRecoveryJournalForTest(t, r)
+	for _, stmt := range []string{
+		`CREATE TABLE runtime_pods (id BIGINT PRIMARY KEY,used_slots INT,updated_at DATETIME(6))`,
+		`CREATE TABLE instance_runtime_bindings (instance_id INT PRIMARY KEY,runtime_pod_id BIGINT,generation INT,gateway_id VARCHAR(255),gateway_port INT,state VARCHAR(32))`,
+		`INSERT INTO runtime_pods VALUES (9,1,NOW(6))`,
+		`INSERT INTO instance_runtime_bindings VALUES (7,9,2,'pending-7-2',19000,'creating')`,
+		`INSERT INTO instance_runtime_recovery(instance_id,attempts,reason,generation,source_pod_id,source_gateway_port,updated_at) VALUES(7,1,'other',2,9,19000,NOW(6))`,
+	} {
+		if _, err := r.sess.SQL().Exec(stmt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	bindings := &instanceRuntimeBindingRepository{sess: r.sess}
+	expected := models.InstanceRuntimeBinding{InstanceID: 7, RuntimePodID: 9, Generation: 2, GatewayID: "pending-7-2", GatewayPort: 19000, State: "creating"}
+	if deleted, err := bindings.DeleteConfirmedRecoveryBinding(t.Context(), expected); deleted || err != nil {
+		t.Fatalf("released reservation without the admitted recovery: %v %v", deleted, err)
+	}
+	if _, err := r.sess.SQL().Exec("UPDATE instance_runtime_recovery SET reason=? WHERE instance_id=7", PendingPublishedStartRecoveryReason); err != nil {
+		t.Fatal(err)
+	}
+	if deleted, err := bindings.DeleteConfirmedRecoveryBinding(t.Context(), expected); !deleted || err != nil {
+		t.Fatalf("did not finish exact admitted recovery: %v %v", deleted, err)
+	}
+	journal, err := r.GetRuntimeRecovery(t.Context(), 7)
+	if err != nil || journal.Phase != "source_stopped" {
+		t.Fatalf("release did not checkpoint stopped source: %+v %v", journal, err)
+	}
+}
+
 func TestRuntimeRecoveryMySQLDesiredStopAfterAdvanceBlocksPublication(t *testing.T) {
 	r := runtimeSecurityMySQL(t)
 	createRecoveryJournalForTest(t, r)
