@@ -84,7 +84,15 @@ def wait_for_state(api, instance_id, desired, timeout=150):
         last = "absent" if status == 404 else reply["instance"]["status"]
         if last == desired:
             return
-        if last == "error" or (last == "absent" and desired != "absent"):
+        if last == "error":
+            # The list API redacts credentials in runtime errors.
+            items = api.call("GET", "/instances?status=error")["instances"]
+            failed = next((item for item in items if item["id"] == instance_id), {})
+            reason = " ".join(filter(None, (failed.get("runtime_error_code"), failed.get("runtime_error_message"))))
+            name = reply["instance"]["type"]
+            raise RuntimeError(f"{name} instance {instance_id} reached error, expected {desired}: "
+                               f"{reason or 'no runtime failure details reported'}")
+        if last == "absent" and desired != "absent":
             raise RuntimeError(f"instance {instance_id} reached {last}, expected {desired}")
         time.sleep(3)
     raise RuntimeError(f"instance {instance_id} stayed {last}, expected {desired}")
