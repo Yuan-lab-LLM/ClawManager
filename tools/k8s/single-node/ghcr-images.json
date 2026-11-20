@@ -1,0 +1,10 @@
+{
+  "mysql": "ghcr.io/proteanhq/mirror/mysql@sha256:a81d043930e51745522bd5c430961cf8286f0a23f0a9a2a6e0108f7ea71b0902",
+  "minio": "ghcr.io/netvark/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e",
+  "clawmanager-team-redis": "ghcr.io/proteanhq/mirror/redis@sha256:2e3eb11462c4e3759e6972678dd051d150ff54b1e60714b3c33b701260172a90",
+  "skill-scanner": "ghcr.io/yuan-lab-llm/skill-scanner@sha256:05dcd709f7800c6e5e575040622a7b6c25b334f720cdf0194ef5b947109a81b7",
+  "openclaw-runtime": "ghcr.io/yuan-lab-llm/agentsruntime/openclaw-lite@sha256:1750b4a9ce9d9f89c8dc02018ed41d90cc9c8ef6974a12d766ea14ac9d42d2de",
+  "hermes-runtime": "ghcr.io/yuan-lab-llm/agentsruntime/hermes-lite@sha256:dc442f9373756639e41287ff3d847dba265915c01c535208895aa64ea15d571b",
+  "opencode-runtime": "ghcr.io/yuan-lab-llm/agentsruntime/opencode-lite@sha256:82ff692aad445362ab0daaa134341ede7e763ec8b2330b85c2197792e394b37e",
+  "deepseek-harness-runtime": "ghcr.io/yuan-lab-llm/agentsruntime/deepseek-harness-lite@sha256:bb76a82069c649c3a36736b62628a3d5cc398faa6efd7668dcfccdb847032999"
+}

@@ -8,6 +8,9 @@ p.add_argument('--node', default='cm-elastic-control-plane')
 p.add_argument('--cluster', default='cm-elastic')
 p.add_argument('--kubeconfig', required=True)
 p.add_argument('--kubectl', default='kubectl')
+p.add_argument('--skip-private-registry', action='store_true')
+p.add_argument('--workspace-subdirectory', action='store_true',
+               help='Prepare a separate workspace data directory inside the ext4 filesystem')
 p.add_argument('--proxy', help='Optional proxy address reachable from the VM, never host loopback')
 a = p.parse_args()
 docker = ['docker', '--context', a.docker_context, 'exec']
@@ -24,14 +27,17 @@ def shell(script):
 
 # Only trusted kind-node mounts are changed. Business containers retain their
 # private namespaces, restricted capabilities and hidden sysfs/management paths.
-shell('''
-chmod 755 /kind /kind/bin
+if not a.skip_private_registry:
+    shell('''
 mkdir -p /etc/containerd/certs.d/172.16.1.12:5010
 cat > /etc/containerd/certs.d/172.16.1.12:5010/hosts.toml <<'EOF'
 server = "http://172.16.1.12:5010"
 [host."http://172.16.1.12:5010"]
   capabilities = ["pull", "resolve"]
 EOF
+''')
+shell('''
+chmod 755 /kind /kind/bin
 mkdir -p /unmasked-sys /data/clawmanager/system/workspaces
 cat > /etc/systemd/system/cm-kind-sysfs.service <<'EOF'
 [Unit]
@@ -67,6 +73,11 @@ WantedBy=multi-user.target
 EOF
 systemctl daemon-reload
 systemctl enable --now cm-kind-sysfs.service cm-kind-workspaces.service
+''')
+if a.workspace_subdirectory:
+    shell('''
+mountpoint -q /data/clawmanager/system/workspaces
+mkdir -p /data/clawmanager/system/workspaces/data
 ''')
 if a.proxy:
     # JSON is systemd's quoted Environment= syntax, not shell interpolation.

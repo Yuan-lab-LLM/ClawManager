@@ -1,0 +1,24 @@
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+featureGates:
+  UserNamespacesSupport: true
+kubeadmConfigPatches:
+  - |
+    kind: KubeletConfiguration
+    featureGates:
+      UserNamespacesSupport: true
+    userNamespaces:
+      idsPerPod: 1048576
+nodes:
+  - role: control-plane
+    image: kindest/node:v1.35.0@sha256:452d707d4862f52530247495d180205e029056831160e22870e37e3f6c1ac31f
+    extraPortMappings:
+      - containerPort: 30443
+        hostPort: 30443
+        listenAddress: 127.0.0.1
+      - containerPort: 32100
+        hostPort: 32100
+        listenAddress: 127.0.0.1
+      - containerPort: 32101
+        hostPort: 32101
+        listenAddress: 127.0.0.1
