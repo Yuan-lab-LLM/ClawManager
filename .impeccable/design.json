@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-11-12T05:05:25.397887+00:00",
+  "generatedAt": "2026-11-23T02:21:36Z",
   "title": "Design System: ClawManager · Fluent 2 Web",
   "extensions": {
     "baseline": {
@@ -8,11 +8,21 @@
       "approvedAt": "2026-11-12",
       "status": "approved-target",
       "sourceOfTruth": "DESIGN.md",
-      "implementationStatus": "规范已更新；不代表页面已迁移或部署",
+      "defaultTheme": "webLightTheme",
+      "implementationStatus": "组件选型目录覆盖 Fluent 2 Web UI Kit 的全部组件页，并给出 CM 专用部件的选型规则。页面实施状态以逐页验收记录为准。",
+      "designReference": {
+        "title": "Microsoft Fluent 2 Web",
+        "kitChangelogThrough": "2025-09-25",
+        "pageIndex": "DESIGN.md#fluent-2-web-样例索引"
+      },
       "sources": [
         "https://fluent2.microsoft.design/",
         "https://raw.githubusercontent.com/microsoft/fluentui/master/packages/tokens/src/global/brandColors.ts",
-        "https://raw.githubusercontent.com/microsoft/fluentui/master/packages/tokens/src/alias/lightColor.ts"
+        "https://raw.githubusercontent.com/microsoft/fluentui/master/packages/tokens/src/alias/lightColor.ts",
+        "https://fluent2.microsoft.design/get-started/design",
+        "https://fluent2.microsoft.design/get-started/develop",
+        "https://fluent2.microsoft.design/color-tokens/",
+        "https://www.w3.org/TR/WCAG22/"
       ]
     },
     "teamChatPresentation": {
@@ -149,6 +159,21 @@
         "displayName": "error-background",
         "fluentAlias": "colorStatusDangerBackground1"
       },
+      "danger-action": {
+        "role": "status",
+        "displayName": "danger-action",
+        "fluentAlias": "colorStatusDangerBackground3"
+      },
+      "danger-action-hover": {
+        "role": "status",
+        "displayName": "danger-action-hover",
+        "fluentAlias": "colorStatusDangerBackground3Hover"
+      },
+      "danger-action-pressed": {
+        "role": "status",
+        "displayName": "danger-action-pressed",
+        "fluentAlias": "colorStatusDangerBackground3Pressed"
+      },
       "data-blue": {
         "role": "data",
         "displayName": "data-blue",
@@ -236,7 +261,7 @@
       },
       "subtitle": {
         "displayName": "subtitle",
-        "purpose": "欢迎语及复杂弹窗标题"
+        "purpose": "对话或复杂弹窗标题"
       },
       "page-title": {
         "displayName": "page-title",
@@ -263,32 +288,32 @@
       {
         "name": "shadow2",
         "value": "0 0 2px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.14)",
-        "purpose": "交互卡片基础层"
+        "purpose": "自有轻浮表面的低层级"
       },
       {
         "name": "shadow4",
         "value": "0 0 2px rgba(0,0,0,0.12), 0 2px 4px rgba(0,0,0,0.14)",
-        "purpose": "卡片悬停"
+        "purpose": "Fluent 填充 Card 默认阴影"
       },
       {
         "name": "shadow8",
         "value": "0 0 2px rgba(0,0,0,0.12), 0 4px 8px rgba(0,0,0,0.14)",
-        "purpose": "局部 Popover"
+        "purpose": "交互卡片悬停与 Tooltip 阴影的层级对照"
       },
       {
         "name": "shadow16",
         "value": "0 0 2px rgba(0,0,0,0.12), 0 8px 16px rgba(0,0,0,0.14)",
-        "purpose": "菜单与选择列表"
+        "purpose": "菜单、选择列表与默认 Popover 阴影的层级对照"
       },
       {
         "name": "shadow28",
         "value": "0 0 8px rgba(0,0,0,0.12), 0 14px 28px rgba(0,0,0,0.14)",
-        "purpose": "覆盖式抽屉"
+        "purpose": "CM 自有的中等高度浮层"
       },
       {
         "name": "shadow64",
         "value": "0 0 8px rgba(0,0,0,0.12), 0 32px 64px rgba(0,0,0,0.14)",
-        "purpose": "模态 Dialog"
+        "purpose": "模态 Dialog 和覆盖式 Drawer"
       }
     ],
     "breakpoints": [
@@ -308,28 +333,36 @@
     "radiusAliases": {
       "control": "borderRadiusMedium",
       "panel": "borderRadiusXLarge",
-      "dialog": "borderRadius2XLarge",
+      "dialog": "borderRadiusXLarge",
       "small": "borderRadiusSmall",
       "circular": "borderRadiusCircular"
     },
     "motion": {
+      "durationUltraFast": "50ms",
       "durationFaster": "100ms",
       "durationFast": "150ms",
       "durationNormal": "200ms",
+      "durationGentle": "250ms",
       "durationSlow": "300ms",
+      "durationSlower": "400ms",
+      "durationUltraSlow": "500ms",
       "curveEasyEase": "cubic-bezier(0.33,0,0.67,1)",
       "curveDecelerateMid": "cubic-bezier(0,0,0,1)",
-      "reducedMotion": "关闭非必要动画，直接呈现最终状态；后台暂停持续动画"
+      "curveAccelerateMid": "cubic-bezier(1,0,1,1)",
+      "curveAccelerateMin": "cubic-bezier(0.8,0,0.78,1)",
+      "curveLinear": "cubic-bezier(0,0,1,1)",
+      "scenarioRules": "DESIGN.md#场景时长与缓动",
+      "reducedMotion": "直接呈现最终状态。加载保留文本或静态进度，离屏和后台暂停持续动画。"
     },
     "focus": {
-      "token": "--cm-focus",
-      "compositeSearch": "外层统一蓝色焦点提示，内部输入不叠加轮廓",
-      "outline": "2px solid #0f6cbd",
-      "outlineOffset": "2px",
-      "isolation": "0 0 0 2px #ffffff",
+      "tokens": [
+        "colorStrokeFocus1",
+        "colorStrokeFocus2"
+      ],
+      "officialComponents": "沿用 Fluent 内建键盘焦点",
+      "compositeSearch": "展开后接收焦点，控件显示一套可见焦点指示",
       "forcedColors": "使用系统色，边框与焦点始终可见"
     },
-    "previewScope": "以下仅为文档控件样例，不是已部署页面或真实业务数据",
     "unifiedInstanceCreation": {
       "approvedAt": "2026-11-12",
       "sourceOfTruth": "DESIGN.md",
@@ -395,71 +428,42 @@
       "source": "verified display-only start_pending",
       "safety": "original reconciliation and binding fences preserved",
       "skillHub": "no repeated body introduction card"
+    },
+    "componentLibrary": {
+      "provider": "FluentProvider",
+      "theme": "webLightTheme",
+      "runtimeTokens": "tokens from @fluentui/react-components",
+      "sharedCssVariablePrefix": "--cm-",
+      "implementationRules": "DESIGN.md#公共实现策略",
+      "selectionRules": "DESIGN.md#组件选型目录",
+      "interactionStates": "DESIGN.md#组件状态与交互",
+      "scenarioRules": {
+        "buttons": "DESIGN.md#按钮与操作菜单",
+        "buttonStates": "DESIGN.md#按钮颜色和动效",
+        "forms": "DESIGN.md#搜索表单与选择",
+        "tables": "DESIGN.md#表格列表与数据网格",
+        "tableStates": "DESIGN.md#表格视觉与状态",
+        "navigationAndCards": "DESIGN.md#导航卡片与面板",
+        "identityAndTags": "DESIGN.md#图标头像和品牌",
+        "charts": "DESIGN.md#图表状态与数据真实性",
+        "overlaysAndFeedback": "DESIGN.md#浮层消息与加载",
+        "pagePatterns": "DESIGN.md#关键页面的组合规则",
+        "workbench": "DESIGN.md#工作台与嵌入内容"
+      },
+      "reviewChecklist": "DESIGN.md#ui-评审清单",
+      "referencePackages": {
+        "@fluentui/react-components": "9.75.2",
+        "@fluentui/react-icons": "2.0.347",
+        "@fluentui/react-charts": "9.3.29"
+      }
     }
   },
-  "components": [
-    {
-      "name": "主要动作",
-      "kind": "button",
-      "refersTo": "button-primary",
-      "description": "Fluent Web 蓝色；含悬停、按下、焦点和禁用状态。",
-      "html": "<button type=\"button\" class=\"ds-primary\">创建实例</button>",
-      "css": ".ds-primary{font:14px/20px \"Segoe UI\", -apple-system, BlinkMacSystemFont, \"PingFang SC\", \"Microsoft YaHei\", sans-serif;box-sizing:border-box;height:32px;padding:0 12px;border:1px solid transparent;border-radius:4px;background:#0f6cbd;color:#fff;cursor:pointer}.ds-primary:hover{background:#115ea3}.ds-primary:active{background:#0c3b5e}.ds-primary:focus-visible{outline:2px solid #0f6cbd;outline-offset:2px;box-shadow:0 0 0 2px #fff;}.ds-primary:disabled{background:#f0f0f0;color:#bdbdbd;cursor:default}"
-    },
-    {
-      "name": "次要动作",
-      "kind": "button",
-      "refersTo": "button-secondary",
-      "description": "独立的批量创建入口，与筛选分开。",
-      "html": "<button type=\"button\" class=\"ds-secondary\">批量创建</button>",
-      "css": ".ds-secondary{font:14px/20px \"Segoe UI\", -apple-system, BlinkMacSystemFont, \"PingFang SC\", \"Microsoft YaHei\", sans-serif;box-sizing:border-box;height:32px;padding:0 12px;border:1px solid #d1d1d1;border-radius:4px;background:#fff;color:#242424;cursor:pointer}.ds-secondary:hover{background:#f5f5f5}.ds-secondary:active{background:#e0e0e0}.ds-secondary:focus-visible{outline:2px solid #0f6cbd;outline-offset:2px;box-shadow:0 0 0 2px #fff;}"
-    },
-    {
-      "name": "展开后的搜索",
-      "kind": "input",
-      "refersTo": "field",
-      "description": "只预览展开后的输入；产品默认仍是图标入口。",
-      "html": "<label class=\"ds-search\"><span>搜索实例</span><input type=\"search\" placeholder=\"名称或 ID\" /></label>",
-      "css": ".ds-search{font:14px/20px \"Segoe UI\", -apple-system, BlinkMacSystemFont, \"PingFang SC\", \"Microsoft YaHei\", sans-serif;box-sizing:border-box;display:inline-flex;align-items:center;gap:8px;color:#424242}.ds-search input{font:14px/20px \"Segoe UI\", -apple-system, BlinkMacSystemFont, \"PingFang SC\", \"Microsoft YaHei\", sans-serif;box-sizing:border-box;height:32px;padding:0 12px;border:1px solid #616161;border-radius:4px;background:#fff;color:#242424}.ds-search input::placeholder{color:#616161}.ds-search input:focus-visible{outline:2px solid #0f6cbd;outline-offset:2px;box-shadow:0 0 0 2px #fff;}"
-    },
-    {
-      "name": "导航选中态",
-      "kind": "navigation",
-      "refersTo": "navigation-item-selected",
-      "description": "浅蓝表面、强调文字与选中指示。",
-      "html": "<a class=\"ds-nav\" href=\"#workspace\" aria-current=\"page\">Workspace</a>",
-      "css": ".ds-nav{font:14px/20px \"Segoe UI\", -apple-system, BlinkMacSystemFont, \"PingFang SC\", \"Microsoft YaHei\", sans-serif;box-sizing:border-box;position:relative;display:flex;align-items:center;height:40px;width:200px;padding:0 12px;border-radius:4px;background:#ebf3fc;color:#0f6cbd;font-weight:600;text-decoration:none}.ds-nav:before{content:\"\";position:absolute;left:0;top:10px;height:20px;width:3px;border-radius:2px;background:#0f6cbd}.ds-nav:focus-visible{outline:2px solid #0f6cbd;outline-offset:2px;box-shadow:0 0 0 2px #fff;}"
-    },
-    {
-      "name": "运行状态",
-      "kind": "badge",
-      "refersTo": "table-row",
-      "description": "点与文字共同表达状态，不只依赖颜色。",
-      "html": "<span class=\"ds-status\"><span aria-hidden=\"true\">●</span>运行中</span>",
-      "css": ".ds-status{font:14px/20px \"Segoe UI\", -apple-system, BlinkMacSystemFont, \"PingFang SC\", \"Microsoft YaHei\", sans-serif;box-sizing:border-box;display:inline-flex;gap:8px;align-items:center;color:#0e700e;background:#f1faf1;padding:2px 8px;border-radius:2px}.ds-status>span{font-size:10px}"
-    },
-    {
-      "name": "轻层级面板",
-      "kind": "panel",
-      "refersTo": "panel",
-      "description": "白色表面、8px 圆角；交互卡片按需要使用 shadow2。",
-      "html": "<section class=\"ds-panel\" aria-labelledby=\"ds-panel-title\"><h2 id=\"ds-panel-title\">继续工作</h2><p>暂无最近使用记录</p></section>",
-      "css": ".ds-panel{font:14px/20px \"Segoe UI\", -apple-system, BlinkMacSystemFont, \"PingFang SC\", \"Microsoft YaHei\", sans-serif;box-sizing:border-box;background:#fff;color:#424242;border:1px solid #d1d1d1;border-radius:8px;padding:16px;min-width:280px}.ds-panel h2{font-size:16px;line-height:22px;font-weight:600;margin:0 0 16px;color:#242424}.ds-panel p{margin:0;color:#616161}"
-    },
-    {
-      "name": "单行身份表格",
-      "kind": "table",
-      "refersTo": "table-row",
-      "description": "默认 44px 行高；名称、ID 同行，保留原生表格语义。",
-      "html": "<div class=\"ds-table-wrap\"><table class=\"ds-table\"><caption>实例列表（文档示例）</caption><thead><tr><th scope=\"col\">实例</th><th scope=\"col\">状态</th></tr></thead><tbody><tr><td><a href=\"#example-agent\">研发助手</a> <span>inst-example</span></td><td>运行中</td></tr></tbody></table></div>",
-      "css": ".ds-table-wrap{overflow-x:auto}.ds-table{font:14px/20px \"Segoe UI\", -apple-system, BlinkMacSystemFont, \"PingFang SC\", \"Microsoft YaHei\", sans-serif;box-sizing:border-box;width:100%;border-collapse:collapse;color:#424242;background:#fff}.ds-table caption{text-align:left;padding:8px 12px;color:#616161}.ds-table th,.ds-table td{height:44px;padding:0 12px;text-align:left;white-space:nowrap;border-bottom:1px solid #e0e0e0}.ds-table th{background:#fafafa;font-weight:600;color:#242424}.ds-table td span{color:#616161;font-size:12px}.ds-table a{color:#115ea3}.ds-table a:focus-visible{outline:2px solid #0f6cbd;outline-offset:2px;box-shadow:0 0 0 2px #fff;}"
-    }
-  ],
+  "components": [],
   "narrative": {
     "northStar": "Fluent 2 Web · 清晰、轻盈、有层次的 Agent 工作台",
-    "overview": "2026-11-12 用户指定的 CM 整体目标设计语言。中性表面、Web 蓝交互、清晰字体层级、4px 间距、轻层级与功能动效共同组织工作。旧 08 方案归档；本文及 DESIGN.md 不构成已迁移或已部署声明。",
+    "overview": "默认外观为 Fluent 2 Web 浅色主题，交互强调色为官方 Web 蓝。使用中性表面、清晰字阶、紧凑但可读的控件和分明的浮层。",
     "keyCharacteristics": [
-      "全平台共享语义 Token、组件状态与浮层层级。",
+      "通过应用主题、共享 --cm-* 语义变量和 Fluent UI React v9 组件统一呈现。",
       "保留真实品牌图标、32px Agent 图标和鲜明可读的数据图表。",
       "保留单行表格、紧凑工具栏、侧栏边缘折叠和现有业务语义。",
       "Dashboard 优先继续工作及运行概览；Token 与费用用蓝橙双轴平滑曲线同时显示，用量卡片独立切换时间并局部加载；移除主卡片解释段落，保留币种、单位与小计标识。三个资源表盘、Agent 环图分别表达，环图中心展示运行数量 / 总数量。",
@@ -468,7 +472,7 @@
     "rules": [
       {
         "name": "Semantic Tokens",
-        "body": "使用 Fluent 2 Web 语义映射；CM 图表扩展独立命名，不冒充微软默认 Token。",
+        "body": "共享组件使用 Fluent 语义 Token 与公开变体。业务页面通过共享组件或 CM 语义变量消费主题，图表与状态使用各自的公共语义。",
         "section": "colors"
       },
       {
@@ -490,6 +494,16 @@
         "name": "Accessible Data",
         "body": "单位、时间范围、图例与文字替代齐全；缺测不是零，运行中不是执行中。",
         "section": "components"
+      },
+      {
+        "name": "Component Scenarios",
+        "body": "按组件选型目录核对适用任务、变体和相近组件的选择边界，再检查该组件的状态、尺寸、Token 与动效。",
+        "section": "components"
+      },
+      {
+        "name": "UI Acceptance",
+        "body": "按 UI 评审清单核对组件与状态、响应式布局、WCAG 2.2 AA 和关键业务回归，并记录实际浏览器结果。",
+        "section": "components"
       }
     ],
     "dos": [
@@ -499,7 +513,7 @@
     ],
     "donts": [
       "不把文档更新当作全站上线。",
-      "不混用旧 08 视觉规则、紫色主题或装饰性全屏玻璃。",
+      "避免页面自建主题、大面积彩色铺底和装饰性渐变。",
       "不以预览常量、缺测补零或循环动画伪造运行情况。"
     ]
   }
