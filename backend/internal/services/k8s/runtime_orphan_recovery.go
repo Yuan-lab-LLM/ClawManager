@@ -44,6 +44,19 @@ type RuntimeOrphanSource struct {
 func (s *RuntimeOrphanSource) Scope(operation string) runtimeeviction.PodScope {
 	return runtimeeviction.PodScope{Version: 1, OperationID: operation, Namespace: s.Namespace, PodName: s.PodName, PodUID: s.PodUID, NodeName: s.NodeName, NodeUID: s.NodeUID, NodeBootID: s.NodeBootID, RuntimeType: s.RuntimeType, WorkspaceRoot: s.WorkspaceRoot, ControllerUID: s.DeploymentUID, StorageDigest: s.StorageDigest, TerminalResourceVersion: s.TerminalResourceVersion}
 }
+
+// InspectLedgerOwners must follow verification of the shared workspace mapping.
+// The pinned source profile determines both this read and the recovery helper's UID.
+func (s *RuntimeOrphanSource) InspectLedgerOwners() ([]runtimeeviction.PodLedgerOwner, error) {
+	switch s.SourcePod.Annotations[RuntimeFaultSandboxProfileAnnotation] {
+	case "":
+		return runtimeeviction.InspectPodLedgerOwners(s.WorkspaceRoot, s.RuntimeType, s.PodUID)
+	case RuntimeNFSRootlessProfile:
+		return runtimeeviction.InspectPodLedgerOwnersOwnedBy(s.WorkspaceRoot, s.RuntimeType, s.PodUID, runtimeNFSRootlessLedgerUID)
+	default:
+		return nil, fmt.Errorf("unsupported source recovery sandbox profile")
+	}
+}
 func (s *runtimeDeploymentService) orphanController(ctx context.Context, source *RuntimeOrphanSource) (*appsv1.Deployment, error) {
 	d, e := s.client.AppsV1().Deployments(source.Namespace).Get(ctx, source.DeploymentName, metav1.GetOptions{})
 	if e != nil {
@@ -92,7 +105,7 @@ func (s *runtimeDeploymentService) PrepareRuntimeOrphanSource(ctx context.Contex
 	if e != nil {
 		return nil, e
 	}
-	if p.DeletionTimestamp != nil || p.Spec.NodeName == "" || p.ResourceVersion == "" {
+	if string(p.UID) != uid || p.DeletionTimestamp != nil || p.Spec.NodeName == "" || p.ResourceVersion == "" {
 		return nil, fmt.Errorf("stable scheduled source Pod required")
 	}
 	ref := metav1.GetControllerOf(p)
@@ -103,6 +116,10 @@ func (s *runtimeDeploymentService) PrepareRuntimeOrphanSource(ctx context.Contex
 	}
 	if *d.Spec.Replicas != 1 {
 		return nil, fmt.Errorf("source controller must have one replica before orphan retirement")
+	}
+	profile := p.Labels["clawmanager.io/sandbox-profile"]
+	if profile != d.Spec.Template.Labels["clawmanager.io/sandbox-profile"] || (profile != "" && profile != RuntimeNFSRootlessProfile) {
+		return nil, fmt.Errorf("source sandbox profile differs from its supported controller profile")
 	}
 	node, e := s.client.CoreV1().Nodes().Get(ctx, p.Spec.NodeName, metav1.GetOptions{})
 	if e != nil {
@@ -143,7 +160,7 @@ func (s *runtimeDeploymentService) PrepareRuntimeOrphanSource(ctx context.Contex
 	}
 	source.HelperImage = image
 	// Journal only the fixed identity and PVC mapping, never ambient credentials.
-	clean := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: p.Name, Namespace: p.Namespace, UID: p.UID, Annotations: map[string]string{RuntimeFaultHelperImageAnnotation: image, RuntimeFaultStorageAnnotation: source.StorageDigest, orphanControllerName: source.DeploymentName}}, Spec: corev1.PodSpec{NodeName: p.Spec.NodeName, Tolerations: p.Spec.Tolerations}}
+	clean := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: p.Name, Namespace: p.Namespace, UID: p.UID, Annotations: map[string]string{RuntimeFaultHelperImageAnnotation: image, RuntimeFaultStorageAnnotation: source.StorageDigest, RuntimeFaultSandboxProfileAnnotation: profile, orphanControllerName: source.DeploymentName}}, Spec: corev1.PodSpec{NodeName: p.Spec.NodeName, Tolerations: p.Spec.Tolerations}}
 	for _, v := range p.Spec.Volumes {
 		if v.PersistentVolumeClaim != nil {
 			clean.Spec.Volumes = append(clean.Spec.Volumes, *v.DeepCopy())
@@ -188,6 +205,13 @@ func (s *runtimeDeploymentService) RetireRuntimeOrphanController(ctx context.Con
 	}
 	if string(p.UID) != source.PodUID || p.Spec.NodeName != source.NodeName {
 		return false, fmt.Errorf("orphan Pod identity changed")
+	}
+	profile := ""
+	if source.SourcePod != nil {
+		profile = source.SourcePod.Annotations[RuntimeFaultSandboxProfileAnnotation]
+	}
+	if profile != p.Labels["clawmanager.io/sandbox-profile"] || profile != d.Spec.Template.Labels["clawmanager.io/sandbox-profile"] {
+		return false, fmt.Errorf("orphan recovery sandbox profile changed")
 	}
 	ref := metav1.GetControllerOf(p)
 	if ref == nil || ref.Kind != "ReplicaSet" || ref.Name != source.ReplicaSetName || string(ref.UID) != source.ReplicaSetUID {

@@ -16,6 +16,8 @@ type ConfirmedRecoveryBindingReleaser interface {
 	DeleteConfirmedRecoveryBinding(context.Context, models.InstanceRuntimeBinding) (bool, error)
 }
 
+const PendingPublishedStartRecoveryReason = "published gateway failed before binding confirmation"
+
 func (r *instanceRuntimeBindingRepository) DeleteConfirmedRecoveryBinding(ctx context.Context, expected models.InstanceRuntimeBinding) (bool, error) {
 	deleted := false
 	err := r.sess.TxContext(ctx, func(tx db.Session) error {
@@ -25,7 +27,13 @@ func (r *instanceRuntimeBindingRepository) DeleteConfirmedRecoveryBinding(ctx co
 		if err := checkRuntimeUpgrade(ctx, tx, expected.InstanceID); err != nil {
 			return err
 		}
-		result, err := tx.SQL().ExecContext(ctx, `DELETE FROM instance_runtime_bindings WHERE instance_id=? AND runtime_pod_id=? AND generation=? AND CAST(gateway_id AS BINARY)=CAST(? AS BINARY) AND gateway_port=? AND state IN ('error','failed','stopped','unhealthy')`, expected.InstanceID, expected.RuntimePodID, expected.Generation, expected.GatewayID, expected.GatewayPort)
+		predicate := "state IN ('error','failed','stopped','unhealthy')"
+		args := []any{expected.InstanceID, expected.RuntimePodID, expected.Generation, expected.GatewayID, expected.GatewayPort}
+		if expected.State == "creating" && expected.GatewayID == fmt.Sprintf("pending-%d-%d", expected.InstanceID, expected.Generation) {
+			predicate = `state='creating' AND EXISTS (SELECT 1 FROM instance_runtime_recovery WHERE instance_id=? AND generation=? AND source_pod_id=? AND source_gateway_port=? AND reason=? AND attempts>0 AND phase='')`
+			args = append(args, expected.InstanceID, expected.Generation, expected.RuntimePodID, expected.GatewayPort, PendingPublishedStartRecoveryReason)
+		}
+		result, err := tx.SQL().ExecContext(ctx, `DELETE FROM instance_runtime_bindings WHERE instance_id=? AND runtime_pod_id=? AND generation=? AND CAST(gateway_id AS BINARY)=CAST(? AS BINARY) AND gateway_port=? AND `+predicate, args...)
 		if err != nil {
 			return err
 		}

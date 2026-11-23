@@ -24,6 +24,8 @@ import (
 
 const runtimeSlotAuditInterval = 60 * time.Second
 
+var errRuntimeSlotOwnerIdentity = errors.New("runtime slot owner identity is invalid")
+
 type runtimeSlotAuditOwner struct {
 	PodUID      string `json:"pod_uid"`
 	WorkerEpoch string `json:"worker_epoch"`
@@ -45,8 +47,9 @@ type runtimeSlotAuditSnapshot struct {
 	MaintenanceOperationID string                 `json:"maintenance_operation_id"`
 	Assignment             *runtimeSlotAuditOwner `json:"assignment"`
 	Gateways               []struct {
-		GatewayID string `json:"gateway_id"`
-		State     string `json:"state"`
+		GatewayID    string `json:"gateway_id"`
+		State        string `json:"state"`
+		ErrorMessage string `json:"error_message"`
 	} `json:"gateways"`
 }
 type runtimeSlotAuditObservation struct {
@@ -212,21 +215,40 @@ func (c *slotRuntimeAgentClient) observeRuntimeSlotsForAudit(ctx context.Context
 			}
 		}
 		if err == nil {
-			for i := range slots {
-				c.observeRuntimeSlot(ctx, pod, &slots[i])
-			}
+			c.observeRuntimeSlotBatch(ctx, pod, slots)
 		}
 	}
 
 	// An IP-reused replacement must not turn an old observation into admission.
 	after, sourceErr := c.containerStopPod(ctx, *pod.AgentEndpoint, *pod.PodUID)
-	if sourceErr != nil || after.UID != current.UID {
+	if sourceErr != nil {
+		// A failed API read is not evidence of replacement. Preserve its cause
+		// so scheduler retries keep the original creation intent and quarantine.
+		return nil, fmt.Errorf("recheck runtime slot Pod identity: %w", sourceErr), false
+	}
+	if after.UID != current.UID {
 		return nil, fmt.Errorf("runtime slot Pod identity changed during inspection"), false
 	}
 	if err != nil {
 		return nil, err, true
 	}
 	return slots, nil, true
+}
+
+func (c *slotRuntimeAgentClient) observeRuntimeSlotBatch(ctx context.Context, pod models.RuntimePod, slots []runtimeSlotAuditObservation) {
+	// Reserve time for the post-probe Pod identity and admission checks. Slow
+	// workers should not consume the whole per-Pod audit budget sequentially.
+	probes, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	var group sync.WaitGroup
+	for worker := 0; worker < min(4, len(slots)); worker++ {
+		group.Go(func() {
+			for i := worker; i < len(slots); i += min(4, len(slots)) {
+				c.observeRuntimeSlot(probes, pod, &slots[i])
+			}
+		})
+	}
+	group.Wait()
 }
 
 func (c *slotRuntimeAgentClient) observeRuntimeSlot(ctx context.Context, pod models.RuntimePod, o *runtimeSlotAuditObservation) {
@@ -246,7 +268,7 @@ func (c *slotRuntimeAgentClient) observeRuntimeSlot(ctx context.Context, pod mod
 	// Preserve upstream's stopped-owner handling, with the full current-worker
 	// empty proof required before accepting a changed historical owner epoch.
 	if a := s.Assignment; a != nil && (a.PodUID != *pod.PodUID || a.InstanceID < 1 || a.UserID < 1 || a.Generation < 1 || a.GatewayID != fmt.Sprintf("gw-%d-%d", a.InstanceID, a.Generation) || !stopTokenValid(a.WorkerEpoch) || !runtimeSlotOwnerEpochConfirmed(s)) {
-		o.Err = fmt.Errorf("runtime slot owner identity is invalid")
+		o.Err = errRuntimeSlotOwnerIdentity
 		o.Diagnostic = "runtime slot owner identity invalid"
 	}
 	if runtimeSlotGatewayOwnershipAmbiguous(s) {

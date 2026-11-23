@@ -12,9 +12,15 @@ func TestSchedulingRetryMySQLExactUnboundErrorCAS(t *testing.T) {
 	if _, err := r.sess.SQL().Exec(`CREATE TABLE instance_runtime_bindings (id INT PRIMARY KEY,instance_id INT)`); err != nil {
 		t.Fatal(err)
 	}
-	for _, scenario := range []string{"recover", "stop", "restart", "binding", "new-error", "new-timestamp", "case-change", "unknown-code", "cancelled"} {
+	if _, err := r.sess.SQL().Exec(`CREATE TABLE instance_desired_state (instance_id INT PRIMARY KEY,desired_power_state VARCHAR(32))`); err != nil {
+		t.Fatal(err)
+	}
+	for _, scenario := range []string{"recover", "stop", "desired-stop", "restart", "binding", "new-error", "new-timestamp", "case-change", "unknown-code", "cancelled"} {
 		t.Run(scenario, func(t *testing.T) {
 			if _, err := r.sess.SQL().Exec(`DELETE FROM instance_runtime_bindings`); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := r.sess.SQL().Exec(`DELETE FROM instance_desired_state`); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := r.sess.SQL().Exec(`UPDATE instances SET status='error',runtime_generation=2,runtime_error_code='RUNTIME_POOL_UNAVAILABLE',runtime_error_message='no schedulable pod',runtime_security_profile='isolated-network-v1',updated_at=? WHERE id=7`, time.Now().UTC().Truncate(time.Microsecond)); err != nil {
@@ -28,6 +34,8 @@ func TestSchedulingRetryMySQLExactUnboundErrorCAS(t *testing.T) {
 			switch scenario {
 			case "stop":
 				_, err = r.sess.SQL().Exec(`UPDATE instances SET status='stopped' WHERE id=7`)
+			case "desired-stop":
+				_, err = r.sess.SQL().Exec(`INSERT INTO instance_desired_state VALUES (7,'stopped')`)
 			case "restart":
 				_, err = r.sess.SQL().Exec(`UPDATE instances SET runtime_generation=3 WHERE id=7`)
 			case "binding":

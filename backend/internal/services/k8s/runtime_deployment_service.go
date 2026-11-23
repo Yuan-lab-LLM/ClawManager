@@ -14,6 +14,7 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -824,6 +825,30 @@ func (s *runtimeDeploymentService) RolloutImage(ctx context.Context, namespace, 
 }
 
 func (s *runtimeDeploymentService) rolloutImage(ctx context.Context, namespace, name, image, upgradeID string, maxUnavailable, maxSurge int, hermesWeb bool, expectedUID ...string) error {
+	return s.rolloutImageWithGuard(ctx, namespace, name, image, upgradeID, maxUnavailable, maxSurge, hermesWeb, expectedUID, nil)
+}
+
+// GuardedRuntimePoolRollout applies only a change authorized against the same
+// Deployment identity and resource version read inside the update retry.
+type GuardedRuntimePoolRollout interface {
+	RolloutGuardedPoolImage(context.Context, RuntimeRolloutTarget, string, string, bool, func(context.Context) error) error
+}
+
+type guardedRuntimePoolReplacement struct {
+	sourceImage string
+	runtimeType string
+	check       func(context.Context) error
+}
+
+func (s *runtimeDeploymentService) RolloutGuardedPoolImage(ctx context.Context, source RuntimeRolloutTarget, runtimeType, image string, hermesWeb bool, check func(context.Context) error) error {
+	if source.UID == "" || source.Image == "" || check == nil {
+		return fmt.Errorf("runtime rollout requires a frozen source and occupancy check")
+	}
+	guard := &guardedRuntimePoolReplacement{sourceImage: source.Image, runtimeType: runtimeType, check: check}
+	return s.rolloutImageWithGuard(ctx, source.Namespace, source.Name, image, "", 0, 1, hermesWeb, []string{source.UID}, guard)
+}
+
+func (s *runtimeDeploymentService) rolloutImageWithGuard(ctx context.Context, namespace, name, image, upgradeID string, maxUnavailable, maxSurge int, hermesWeb bool, expectedUID []string, replacement *guardedRuntimePoolReplacement) error {
 	if s == nil || s.client == nil {
 		return fmt.Errorf("k8s client not initialized")
 	}
@@ -855,6 +880,10 @@ func (s *runtimeDeploymentService) rolloutImage(ctx context.Context, namespace, 
 		}
 
 		container := &updated.Spec.Template.Spec.Containers[containerIndex]
+		if replacement != nil && (existing.Labels["clawmanager.io/runtime-type"] != replacement.runtimeType ||
+			!ordinaryRuntimeDeployment(*existing) || (container.Image != replacement.sourceImage && container.Image != image)) {
+			return fmt.Errorf("runtime rollout source scope changed")
+		}
 		if hermesWeb {
 			if existing.Labels["clawmanager.io/runtime-type"] != "hermes" {
 				return fmt.Errorf("Hermes Web rollout cannot target another runtime")
@@ -903,6 +932,14 @@ func (s *runtimeDeploymentService) rolloutImage(ctx context.Context, namespace, 
 		setRuntimeSlotTLSReadiness(container)
 
 		syncRuntimeSlotImageAndIdentity(updated, container)
+		if replacement != nil {
+			if apiequality.Semantic.DeepEqual(existing.Spec.Template, updated.Spec.Template) {
+				return nil
+			}
+			if err := replacement.check(ctx); err != nil {
+				return err
+			}
+		}
 		updated.Spec.Strategy.Type = appsv1.RollingUpdateDeploymentStrategyType
 		updated.Spec.Strategy.RollingUpdate = &appsv1.RollingUpdateDeployment{
 			MaxUnavailable: intOrStringPtr(nonNegativeRolloutInt(maxUnavailable)),
@@ -1055,6 +1092,12 @@ func (s *runtimeDeploymentService) renderDeploymentPods(ctx context.Context, dep
 		if parsed, parseErr := strconv.ParseBool(strings.TrimSpace(raw)); parseErr == nil {
 			schedulingEnabled = &parsed
 		}
+	}
+	if strings.HasPrefix(deployment.Labels[upgradeLabPurposeLabel], RuntimeFreshPoolPurposePrefix) {
+		// A site may reconcile the general scheduling label during app rollout.
+		// Only an explicit activation bound to this controller admits fresh work.
+		active := freshRuntimeActivated(deployment)
+		schedulingEnabled = &active
 	}
 	result := make([]RuntimeDeploymentPod, 0, len(pods))
 	desiredReplicas := int32(0)

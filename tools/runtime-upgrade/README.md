@@ -20,6 +20,14 @@ python3 tools/runtime-upgrade/upgrade-runtime.py \
 
 ## API 顺序与边界
 
+### 已退役空池恢复
+
+管理员可通过 `POST /api/v1/admin/runtime-rollouts` 显式提交 `strategy=empty_pool_recovery_v1`，同时提供 `runtime_type`、不可变 `target_image_ref`、原默认池的 `source_deployment_uid`、`batch_size=1` 和 `max_unavailable=0`。此入口只适用于同类型 Lite 实例及绑定均已删除、所有旧 Runtime Deployment 已缩至零且 Pod 已全部退出的场景；不能用于绕过现存实例的数据安全升级。
+
+CM 冻结原默认池 UID、存储、原生槽位及安全配置，保留模板并以一个 Pod 接入新镜像。槽位数量沿用原模板，兼容 2 槽和 8 槽。仅在新 Pod 的 Kubernetes 身份、Agent 注册、镜像 digest 和每个原生空槽位均验证通过后，操作才进入 `finished` 并成为新实例默认池。历史升级审计、工作区和 Pro 实例均保留；普通升级入口的兼容性限制保持有效。
+
+原控制器 UID 与目标镜像构成稳定意图，重复请求返回同一操作。响应丢失时先核对升级历史，取得原 ID 后使用 `upgrade-runtime.py --operation-id <id>` 接续只读观察；不得重建控制器、清除保护记录或用缺失 Pod 代替历史实例的真实退出证明。
+
 Runtime 控制操作按类型隔离：其他类型的升级、缩容、恢复或准备预约不会阻止本类型。普通休眠恢复接受当前配置的镜像及镜像身份环境变量，不要求与休眠快照中的镜像相同；资源 UID、存储、操作标记和非镜像启动配置仍须验证。新的升级准备会冻结当前配置，后续预检与发布仍核对该范围以及最终目标 digest。
 
 1. `POST /api/v1/admin/runtime-rollouts/prepare`，请求 `{runtime_type}`；保存返回的 `data.operation.id`，只查询 `GET /api/v1/admin/runtime-scheduling` 的同 ID `rollout_wake` 操作，等待 `pending/processing/starting` 进入 `completed`。准备只能唤醒原生证明通过的自动休眠池；无证明、漂移或业务冲突由 CM 阻塞。`completed/ready` 保留 15 分钟准备预约；CLI 在预检和升级 POST 均携带相同 `preparation_id`，由 CM 在升级入队事务中校验并消费。CLI 退出不会取消或清除预约；过期或不匹配时停止，由管理员经 CM 重新准备/预检。缺少准备接口的旧 CM 会停止，需要先更新 CM。

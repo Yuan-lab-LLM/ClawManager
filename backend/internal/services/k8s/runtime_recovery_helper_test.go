@@ -30,7 +30,7 @@ func TestRuntimeTemplateHelperFailuresRemainUnproven(t *testing.T) {
 			}
 			ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
 			defer cancel()
-			_, err := runRuntimeTemplateHashHelper(ctx, binary, []byte(`{}`))
+			_, err := runRuntimeTemplateHashHelper(ctx, binary, "v1.35.0", []byte(`{}`))
 			if (err == nil) != tc.valid {
 				t.Fatalf("%s: %v", tc.name, err)
 			}

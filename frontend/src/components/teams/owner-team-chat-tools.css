@@ -1,0 +1,93 @@
+.team-chat-workspace[data-owner-view=kanban] {
+  --owner-tool-width:clamp(376px,33cqw,475px);
+}
+.team-chat-workspace[data-owner-view=kanban][data-board-wide=true] {
+  --owner-tool-width:clamp(490px,52cqw,580px);
+}
+.team-chat-workspace[data-owner-view=files] {
+  --owner-tool-width:clamp(376px,38cqw,482px);
+}
+.team-chat-workspace[data-owner-view=instance] {
+  --owner-tool-width:clamp(416px,46cqw,560px);
+}
+.team-chat-workspace[data-owner-view]:not([data-owner-view=closed]):not([data-mode=drawer]) .team-chat-main {
+  padding-right:calc(var(--owner-tool-width) + 32px);
+}
+.team-chat-workspace[data-owner-view]:not([data-owner-view=closed]) .team-tools-panel {
+  width:min(var(--owner-tool-width),calc(100% - 24px));
+  container-type:inline-size;
+}
+.team-chat-workspace[data-owner-view] .team-tools-toolbar {
+  justify-content:flex-start;gap:4px;padding:8px;
+  background:var(--cm-surface);
+}
+.owner-team-tool-views {
+  display:flex;align-items:center;gap:3px;margin-right:auto;min-width:0;
+}
+.team-chat-workspace[data-owner-view] .team-tools-toolbar button {
+  gap:5px;padding:5px 7px;white-space:nowrap;font-size:var(--cm-font-label);
+}
+.team-chat-workspace[data-owner-view] .team-tools-toolbar button>svg {flex:none}
+.team-chat-workspace[data-owner-view] .team-tools-toolbar>button {flex:none}
+.team-chat-workspace[data-owner-view=kanban] .team-board-columns {
+  min-width:0;grid-template-columns:repeat(3,minmax(0,1fr));align-items:stretch;gap:7px;
+}
+.team-chat-workspace[data-owner-view=kanban] .team-kanban-lane {
+  min-width:0;min-height:142px;padding:6px;border-color:var(--cm-border);border-radius:9px;
+}
+.team-chat-workspace[data-owner-view=kanban] .team-kanban-lane-header {gap:2px}
+.team-chat-workspace[data-owner-view=kanban] .team-kanban-lane-count {
+  background:transparent;color:var(--cm-muted);padding-inline:2px;font-variant-numeric:tabular-nums;
+}
+.team-chat-workspace[data-owner-view=kanban] .team-kanban-lane .team-kanban-lane-cards {
+  max-height:clamp(132px,22dvh,176px);overflow:auto;overscroll-behavior:contain;padding:2px;
+  scrollbar-width:thin;
+}
+.team-chat-workspace[data-owner-view=kanban] .team-kanban-lane-empty {
+  background:var(--cm-surface);border-color:var(--cm-border);padding:5px 2px;
+  color:var(--cm-muted);overflow-wrap:anywhere;
+}
+.team-chat-workspace[data-owner-view=kanban] .team-kanban-card {
+  background:var(--cm-surface);border-color:var(--cm-border);border-radius:7px;box-shadow:none;
+}
+.team-chat-workspace[data-owner-view=kanban] .team-kanban-card:is(:hover,[data-selected=true]) {
+  border-color:var(--cm-primary);background:var(--cm-selected);
+}
+.team-chat-workspace[data-owner-view=kanban] .team-kanban-card-title {
+  -webkit-line-clamp:2;overflow-wrap:anywhere;
+}
+.team-chat-workspace[data-owner-view=kanban] .team-board-overview {flex-wrap:wrap}
+.team-chat-workspace[data-owner-view=instance] .team-workspace-tool-tabs {
+  padding:4px 10px 8px;background:var(--cm-surface);border-bottom:1px solid var(--cm-border-subtle);
+}
+.team-chat-workspace[data-owner-view=instance] .team-workspace-tool-tabs button[aria-pressed=true] {
+  background:var(--cm-selected);border-color:transparent;
+}
+.portal-unified-team .team-chat-header-actions .cm-team-header-actions {flex:none}
+.portal-unified-team .team-chat-header-actions .cm-team-header-actions > summary {
+  min-height:36px;padding:6px 9px;border-radius:10px;white-space:nowrap;
+}
+.portal-unified-team .team-chat-topbar:has(.cm-team-header-actions[open]) {z-index:46}
+@container (max-width:449px) {
+  .team-chat-workspace[data-owner-view] .team-chat-header-actions .team-header-files-trigger {min-height:40px;padding:6px 9px}
+  .portal-unified-team .team-chat-header-actions .cm-team-header-actions > summary {min-height:40px;padding:6px 7px}
+}
+@container (max-width:385px) {
+  .team-chat-workspace[data-owner-view=kanban] .team-kanban-lane-subtitle {
+    position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap;
+  }
+}
+@container (max-width:313px) {
+  .team-chat-workspace[data-owner-view] .team-tools-toolbar {gap:2px;padding:6px}
+  .team-chat-workspace[data-owner-view] .team-tools-toolbar button {padding-inline:5px}
+  .owner-team-tool-views button>svg {display:none}
+  .team-chat-workspace[data-owner-view=kanban] .team-docked-kanban>.cm-tech-workspace {padding:8px!important}
+  .team-chat-workspace[data-owner-view=kanban] .team-board-columns {gap:4px}
+  .team-chat-workspace[data-owner-view=kanban] .team-kanban-lane {padding:4px}
+  .team-chat-workspace[data-owner-view=kanban] .team-kanban-lane-header h3 {overflow-wrap:anywhere}
+  .team-chat-workspace[data-owner-view=kanban] .team-kanban-card {padding-inline:3px}
+}
+
+@media (forced-colors:active) {
+  .team-chat-workspace[data-owner-view] button[aria-pressed=true] {outline:1px solid Highlight}
+}

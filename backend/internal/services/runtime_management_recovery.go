@@ -2,6 +2,7 @@ package services
 
 import (
 	"clawreef/internal/models"
+	"clawreef/internal/repository"
 	"clawreef/internal/runtimeauth"
 	"clawreef/internal/runtimeeviction"
 	"clawreef/internal/services/k8s"
@@ -22,6 +23,7 @@ import (
 )
 
 type RuntimeFaultEvictionJournal struct {
+	TeamID              int                           `json:"team_id,omitempty"`
 	SlotRelease         *RuntimeFaultSlotRelease      `json:"slot_release,omitempty"`
 	Phase               string                        `json:"phase"`
 	Scope               runtimeeviction.Scope         `json:"scope"`
@@ -52,6 +54,17 @@ func recoveryEvictionEligible(instance *models.Instance, explicit bool) bool {
 	default:
 		return false
 	}
+}
+
+func requireMissingTeamFaultSource(ctx context.Context, c *slotRuntimeAgentClient, source models.RuntimePod) error {
+	_, err := c.kube.CoreV1().Pods(source.Namespace).Get(ctx, source.PodName, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return fmt.Errorf("Team fault recovery requires the original Pod to be absent")
 }
 
 // A missing source uses the retained original template and independently checked
@@ -140,6 +153,17 @@ func (s *RuntimeManagementService) recoveryEvictionPreflight(ctx context.Context
 	if source == nil || source.PodUID == nil || source.AgentEndpoint == nil {
 		return nil, fmt.Errorf("source Runtime identity unavailable")
 	}
+	if req.RecoveryTeamID != 0 {
+		if req.SourcePodUID != *source.PodUID || req.SourcePodUID == "" {
+			return nil, fmt.Errorf("Team fault recovery source Pod UID changed")
+		}
+		if err := repository.CheckTeamFaultRecovery(ctx, s.sess, req.RecoveryTeamID, req.InstanceIDs, ""); err != nil {
+			return nil, err
+		}
+		if err := requireMissingTeamFaultSource(ctx, c, *source); err != nil {
+			return nil, err
+		}
+	}
 	bindings, err := s.scheduler.bindingRepo.ListByRuntimePodID(ctx, source.ID)
 	if err != nil {
 		return nil, err
@@ -167,7 +191,7 @@ func (s *RuntimeManagementService) recoveryEvictionPreflight(ctx context.Context
 			}
 			continue
 		}
-		item, e := s.prepareRecoveryEviction(ctx, c, *source, *instance, binding)
+		item, e := s.prepareRecoveryEviction(ctx, c, *source, *instance, binding, req.RecoveryTeamID)
 		if e != nil {
 			plan.Allowed = false
 			plan.Blockers = append(plan.Blockers, fmt.Sprintf("instance %d: %s", binding.InstanceID, e))
@@ -186,7 +210,7 @@ func (s *RuntimeManagementService) recoveryEvictionPreflight(ctx context.Context
 	return plan, nil
 }
 
-func (s *RuntimeManagementService) prepareRecoveryEviction(ctx context.Context, c *slotRuntimeAgentClient, source models.RuntimePod, instance models.Instance, binding models.InstanceRuntimeBinding) (RuntimeSchedulingItem, error) {
+func (s *RuntimeManagementService) prepareRecoveryEviction(ctx context.Context, c *slotRuntimeAgentClient, source models.RuntimePod, instance models.Instance, binding models.InstanceRuntimeBinding, teamID int) (RuntimeSchedulingItem, error) {
 	fail := func(e error) (RuntimeSchedulingItem, error) { return RuntimeSchedulingItem{}, e }
 	if binding.Generation < 1 || instance.RuntimeGeneration < binding.Generation || instance.RuntimeGeneration > binding.Generation+1 {
 		return fail(fmt.Errorf("binding belongs to an incompatible generation"))
@@ -199,7 +223,7 @@ func (s *RuntimeManagementService) prepareRecoveryEviction(ctx context.Context, 
 	if err != nil {
 		return fail(err)
 	}
-	if team > 0 {
+	if teamID == 0 && team > 0 || teamID != 0 && team != 1 {
 		return fail(fmt.Errorf("Team members require coordinated writer recovery"))
 	}
 	gateway, err := c.assignments.ResolvePendingGatewayID(ctx, *source.AgentEndpoint, binding.GatewayID)
@@ -319,7 +343,7 @@ func (s *RuntimeManagementService) prepareRecoveryEviction(ctx context.Context, 
 		clean.Annotations["clawmanager.io/retirement-ledger-source"] = "true"
 	}
 	clean.ManagedFields = nil
-	item := RuntimeSchedulingItem{InstanceID: instance.ID, SourcePodID: source.ID, SourceGeneration: binding.Generation, SourceGatewayID: binding.GatewayID, SourcePodUID: *source.PodUID, State: "ready", Recovery: &RuntimeFaultEvictionJournal{Phase: "planned", Scope: scope, SourceUserID: instance.UserID, SourceBinding: binding, SourceEndpoint: *source.AgentEndpoint, DesiredStatus: instance.Status, Assignment: assignment, SourcePod: clean}}
+	item := RuntimeSchedulingItem{InstanceID: instance.ID, SourcePodID: source.ID, SourceGeneration: binding.Generation, SourceGatewayID: binding.GatewayID, SourcePodUID: *source.PodUID, State: "ready", Recovery: &RuntimeFaultEvictionJournal{TeamID: teamID, Phase: "planned", Scope: scope, SourceUserID: instance.UserID, SourceBinding: binding, SourceEndpoint: *source.AgentEndpoint, DesiredStatus: instance.Status, Assignment: assignment, SourcePod: clean}}
 	// A future placement must retain image/storage/resource compatibility. A dead
 	// source without this evidence can still finish stop/delete, never guess a target.
 	if instance.Status != "stopped" && instance.Status != "deleting" {
@@ -382,6 +406,11 @@ func (s *RuntimeManagementService) recoverEvictedSource(ctx context.Context, ope
 	if j.Phase == "released" {
 		return nil
 	}
+	if j.TeamID != 0 {
+		if err := repository.CheckTeamFaultRecovery(ctx, s.sess, j.TeamID, []int{item.InstanceID}, operation); err != nil {
+			return err
+		}
+	}
 	if j.Phase != "source_stopped" {
 		c, ok := s.scheduler.agentClient.(*slotRuntimeAgentClient)
 		if !ok {
@@ -428,8 +457,20 @@ func (s *RuntimeManagementService) recoverEvictedSource(ctx context.Context, ope
 		if e != nil {
 			return e
 		}
-		if protected > 0 {
+		if j.TeamID == 0 && protected > 0 || j.TeamID != 0 && protected != 1 {
 			return fmt.Errorf("Team membership changed; coordinated recovery is required")
+		}
+		if j.TeamID != 0 {
+			source, err := s.scheduler.podRepo.GetByID(ctx, item.SourcePodID)
+			if err != nil {
+				return err
+			}
+			if source == nil || stringValue(source.PodUID) != item.SourcePodUID || source.PodName != j.Scope.PodName || source.Namespace != j.Scope.Namespace {
+				return fmt.Errorf("Team fault recovery source registration changed")
+			}
+			if err := requireMissingTeamFaultSource(ctx, c, *source); err != nil {
+				return err
+			}
 		}
 
 		if j.Phase == "planned" {
@@ -600,7 +641,11 @@ func (s *RuntimeManagementService) processRecoveryEviction(ctx context.Context, 
 		release, err := acquireInstanceLifecycleOperation(ctx, s.scheduler.instanceRepo, item.InstanceID)
 		if err == nil {
 			if s.scheduler.upgrade != nil {
-				err = s.scheduler.upgrade.WithInstanceMutation(ctx, item.InstanceID, run)
+				if item.Recovery.DesiredStatus == "deleting" {
+					err = s.scheduler.upgrade.withDeletingInstanceRecovery(ctx, item.InstanceID, run)
+				} else {
+					err = s.scheduler.upgrade.WithInstanceMutation(ctx, item.InstanceID, run)
+				}
 			} else {
 				err = run()
 			}

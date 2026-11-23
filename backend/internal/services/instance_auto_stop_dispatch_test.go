@@ -60,7 +60,8 @@ func testAutoStopDispatch(t *testing.T, holdLock bool) {
 		}
 	}
 	exec(`ALTER TABLE instance_desired_state ADD desired_config_revision_id INT NULL`)
-	// Candidate selection also excludes active native team members.
+	// Ordinary-instance scans consult Team ownership, even when this fixture
+	// deliberately contains no Teams.
 	exec(`ALTER TABLE instances ADD provisioning_operation_id VARCHAR(64) NULL`)
 	exec(`ALTER TABLE teams ADD status VARCHAR(32), ADD resource_scope VARCHAR(32)`)
 	exec(`ALTER TABLE team_members ADD team_id INT, ADD instance_id INT, ADD member_key VARCHAR(64), ADD status VARCHAR(32)`)

@@ -136,6 +136,7 @@ func (s *RuntimeScheduler) runtimeRolloutCompletionReason(ctx context.Context, r
 		byDeployment[target.Namespace+"/"+target.Name] = target
 	}
 	refs := make([]k8s.RuntimeDeploymentRef, 0, len(targets))
+	targetKeys := make(map[string]bool, len(targets))
 	for _, source := range targets {
 		key := source.Namespace + "/" + source.Name
 		target, exists := byDeployment[key]
@@ -162,6 +163,7 @@ func (s *RuntimeScheduler) runtimeRolloutCompletionReason(ctx context.Context, r
 			}
 		}
 		refs = append(refs, k8s.RuntimeDeploymentRef{Namespace: source.Namespace, Name: source.Name})
+		targetKeys[key] = true
 	}
 	pods, err := s.deployments.ListDeploymentPods(ctx, refs)
 	if err != nil {
@@ -176,6 +178,7 @@ func (s *RuntimeScheduler) runtimeRolloutCompletionReason(ctx context.Context, r
 		timeout = heartbeat.Timeout
 	}
 	cutoff := time.Now().UTC().Add(-timeout)
+	verified := make(map[int64]bool)
 	for _, ref := range refs {
 		count, desired := 0, 0
 		for _, pod := range pods {
@@ -206,9 +209,30 @@ func (s *RuntimeScheduler) runtimeRolloutCompletionReason(ctx context.Context, r
 			if agent.LastSeenAt == nil || agent.LastSeenAt.Before(cutoff) {
 				return fmt.Sprintf("live Runtime Agent %s has no fresh heartbeat", pod.PodName), nil
 			}
+			verified[agent.ID] = true
 		}
 		if count == 0 || desired <= 0 || count != desired {
 			return fmt.Sprintf("deployment %s/%s has %d live Runtime pods, expected %d", ref.Namespace, ref.Name, count, desired), nil
+		}
+	}
+	if r.RuntimeType == RuntimeTypeHermes || r.RuntimeType == RuntimeTypeDeepSeekHarness {
+		if s.bindingRepo == nil {
+			return "", fmt.Errorf("Runtime source binding inventory unavailable")
+		}
+		for _, pod := range reported {
+			if pod.ID <= 0 || verified[pod.ID] {
+				continue
+			}
+			if !targetKeys[pod.Namespace+"/"+pod.DeploymentName] {
+				continue
+			}
+			bindings, err := s.bindingRepo.ListByRuntimePodID(ctx, pod.ID)
+			if err != nil {
+				return "", err
+			}
+			if len(bindings) > 0 {
+				return fmt.Sprintf("instance %d generation %d still bound to unverified source Pod %s", bindings[0].InstanceID, bindings[0].Generation, pod.PodName), nil
+			}
 		}
 	}
 	return "", nil

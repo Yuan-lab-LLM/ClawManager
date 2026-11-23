@@ -53,6 +53,10 @@ func (s *workspaceFileService) SaveText(ctx context.Context, scope WorkspaceFile
 // The same ordered instance-row locks are taken by ConfirmPreflight. Thus an
 // in-flight editor finishes before recovery admission, or is rejected after it.
 func (s *RuntimeUpgradeService) WithWorkspaceMutation(ctx context.Context, scope WorkspaceFileScope, run func() error) error {
+	return s.withWorkspaceMutation(ctx, scope, s.validateInstanceMutation, run)
+}
+
+func (s *RuntimeUpgradeService) withWorkspaceMutation(ctx context.Context, scope WorkspaceFileScope, validate func(context.Context, db.Session, int) error, run func() error) error {
 	var ids []int
 	rows, err := s.sess.SQL().QueryContext(ctx, `SELECT id FROM instances WHERE id=? OR id IN (SELECT instance_id FROM team_members WHERE team_id=? AND status NOT IN ('deleted','deleting')) ORDER BY id`, scope.InstanceID, scope.TeamID)
 	if err != nil {
@@ -99,7 +103,7 @@ func (s *RuntimeUpgradeService) WithWorkspaceMutation(ctx context.Context, scope
 			return ErrWorkspaceUpgradeBusy
 		}
 		for _, id := range lockedIDs {
-			if err := s.validateInstanceMutation(ctx, tx, id); err != nil {
+			if err := validate(ctx, tx, id); err != nil {
 				return err
 			}
 		}
@@ -115,6 +119,38 @@ func (s *RuntimeUpgradeService) WithWorkspaceMutation(ctx context.Context, scope
 
 func (s *RuntimeUpgradeService) WithInstanceMutation(ctx context.Context, id int, run func() error) error {
 	return s.WithWorkspaceMutation(ctx, WorkspaceFileScope{InstanceID: id}, run)
+}
+
+// This is only used by fault eviction to fence/stop a source already marked for
+// deletion. Failed upgrade journals remain intact; they still block editors,
+// starts and resets. Active upgrades and independent orphan owners remain fenced.
+func (s *RuntimeUpgradeService) withDeletingInstanceRecovery(ctx context.Context, id int, run func() error) error {
+	validate := func(ctx context.Context, sess db.Session, id int) error {
+		var status string
+		row, err := sess.SQL().QueryRowContext(ctx, `SELECT status FROM instances WHERE id=?`, id)
+		if err != nil {
+			return err
+		}
+		if err = row.Scan(&status); err != nil {
+			return err
+		}
+		if status != "deleting" {
+			return ErrWorkspaceUpgradeBusy
+		}
+		var active int
+		row, err = sess.SQL().QueryRowContext(ctx, `SELECT COUNT(*) FROM runtime_upgrade_items ui JOIN runtime_rollouts r ON r.id=ui.rollout_id WHERE ui.instance_id=? AND r.status IN ('pending','running')`, id)
+		if err != nil {
+			return err
+		}
+		if err = row.Scan(&active); err != nil {
+			return err
+		}
+		if active != 0 {
+			return ErrWorkspaceUpgradeBusy
+		}
+		return repository.CheckRuntimeOrphanLifecycleGuard(ctx, sess, id)
+	}
+	return s.withWorkspaceMutation(ctx, WorkspaceFileScope{InstanceID: id}, validate, run)
 }
 
 // Called while WithWorkspaceMutation holds the ordered Team workspace fences.

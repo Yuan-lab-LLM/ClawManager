@@ -1,5 +1,7 @@
 import type { Locale, TranslationTree } from "./i18n";
 const en: TranslationTree = {
+  web: "Web",
+  newWeb: "New web page",
   files: "Files",
   git: "Git projects",
   preview: "Preview & terminals",
@@ -136,6 +138,8 @@ const en: TranslationTree = {
     "Too many open tabs. Close a browser tab or end a terminal first.",
 };
 const zh: TranslationTree = {
+  web: "网页",
+  newWeb: "新建网页",
   files: "文件",
   git: "Git 项目",
   preview: "预览与终端",

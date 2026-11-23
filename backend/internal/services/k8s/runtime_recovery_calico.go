@@ -16,11 +16,11 @@ import (
 type recoveryCalicoAffinity struct {
 	metav1.ObjectMeta `json:"metadata"`
 	Spec              struct {
-		CIDR    string `json:"cidr"`
-		Node    string `json:"node"`
-		State   string `json:"state"`
-		Deleted string `json:"deleted"`
-		Type    string `json:"type"`
+		CIDR    string  `json:"cidr"`
+		Node    string  `json:"node"`
+		State   string  `json:"state"`
+		Deleted string  `json:"deleted"`
+		Type    *string `json:"type"`
 	} `json:"spec"`
 }
 
@@ -76,8 +76,10 @@ func resolveCalicoRecoveryNode(source models.RuntimePod, nodes []corev1.Node, bl
 		return fail()
 	}
 	b := match
+	// Older Calico BlockAffinity objects only represented host allocations and
+	// did not have a type field. Any explicit non-host type remains ineligible.
 	expectedName := b.Spec.Node + "-" + strings.NewReplacer(".", "-", "/", "-").Replace(b.Spec.CIDR)
-	if b.Name != expectedName || b.UID == "" || b.DeletionTimestamp != nil || b.CreationTimestamp.IsZero() || b.CreationTimestamp.Time.After(source.CreatedAt) || b.Spec.Deleted != "false" || b.Spec.State != "confirmed" || b.Spec.Type != "host" || b.Spec.Node != *source.NodeName {
+	if b.Name != expectedName || b.UID == "" || b.DeletionTimestamp != nil || b.CreationTimestamp.IsZero() || b.CreationTimestamp.Time.After(source.CreatedAt) || b.Spec.Deleted != "false" || b.Spec.State != "confirmed" || (b.Spec.Type != nil && *b.Spec.Type != "host") || b.Spec.Node != *source.NodeName {
 		return fail()
 	}
 	for i := range nodes {

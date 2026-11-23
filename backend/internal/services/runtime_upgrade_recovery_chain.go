@@ -41,7 +41,13 @@ func (s *RuntimeUpgradeService) recoveryStoppedSource(ctx context.Context, paren
 		}
 		if err == nil && upgradeItemOwnsConfirmedStoppedGateway(prior) && intValue(prior.SourceGeneration, -2)+1 == generation {
 			if err := s.verifyUnstartedUpgradeGeneration(ctx, r, prior, generation); err != nil {
-				return prior, err
+				// A rollback can recreate SQL's generation without ever publishing
+				// a successor. This is restored SOURCE data, not a migrated target.
+				if restoreErr := s.verifyUnpublishedRestoredSource(ctx, r, prior, generation); restoreErr != nil {
+					return prior, err
+				}
+				prior.SourceGeneration = &generation
+				return prior, nil
 			}
 			// No target writer was reserved. The child freezes the current data
 			// version while preserving the original Gateway stop identity.

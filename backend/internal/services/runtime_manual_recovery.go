@@ -146,10 +146,21 @@ func (s *RuntimeScheduler) RetryInstanceRecovery(ctx context.Context, id, genera
 	if err != nil {
 		return nil, err
 	}
-	now := time.Now().UTC()
+	// The journal stores DATETIME(6). Round-trip must not turn an immediate
+	// request into a future retry that the current call silently skips.
+	now := time.Now().UTC().Truncate(time.Microsecond)
 	continuation := state != nil && state.Generation == generation && (state.Phase == "source_stopped" || state.Phase == "placing")
 	if !continuation {
 		reason, failed := runtimeRecoveryFailureReason(*instance, binding)
+		if pendingPublishedStart(*instance, binding) {
+			verified, verifyErr := s.verifyPendingPublishedFailure(ctx, *instance, *binding, ownsPendingStartRecovery(*instance, *binding, state))
+			if verifyErr != nil {
+				return nil, verifyErr
+			}
+			if verified {
+				reason, failed = repository.PendingPublishedStartRecoveryReason, true
+			}
+		}
 		if !failed {
 			return nil, fmt.Errorf("no verified failed source is available; pending starts must reconcile without clearing their reservation")
 		}

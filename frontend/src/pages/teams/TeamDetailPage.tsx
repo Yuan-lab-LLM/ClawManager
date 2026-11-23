@@ -11,6 +11,7 @@ import TeamBadge from '../../components/teams/TeamBadge';
 import { memberIcon } from '../../lib/teamIcons';
 import { chatAuthorType, chatPresentationContext, buildCollaborationPresentation, type ChatAuthorType, type ChatPresentationContext } from '../../components/teams/teamChatPresentation';
 import TeamChatWorkspace from "../../components/teams/TeamChatWorkspace";
+import TeamWorkspaceTools from "../../components/teams/TeamWorkspaceTools";
 import TeamTaskComposer from "../../components/teams/TeamTaskComposer";
 import { memberIsStarting } from '../../components/teams/teamMemberPresentation';
 import { createPortal } from "react-dom";
@@ -1315,34 +1316,36 @@ const TeamDetailPage: React.FC = () => {
     );
   }
 
+  const teamActions = (
+    <TeamHeaderActions>
+      <span className="cm-team-status" data-status={details.team.runtime_state?.state || details.team.status}>{teamPowerLabel(details.team.runtime_state) || teamStatusLabel(locale, details.team.status)}</span>
+      <span>Team #{details.team.id}</span>
+      <span className="cm-team-shared-path">{t("teams.sharedPath", { path: details.team.shared_mount_path })}</span>
+      <div className="cm-team-header-buttons">
+        <TeamPowerControl
+          state={details.team.runtime_state}
+          start={() => teamService.startTeam(details.team.id)}
+          stop={() => teamService.stopTeam(details.team.id)}
+          onChange={() => loadTeam({background:true})}
+        />
+        <button
+          type="button"
+          onClick={() => { setDeleteError(""); setDeleteOpen(true); }}
+          disabled={actionLoading === "delete-team"}
+          className="app-button-secondary text-red-700"
+        >
+          {t(actionLoading === "delete-team" ? "teams.deleting" : "teams.delete")}
+        </button>
+        {!environment.owner && <Link to={environment.returnURL} className="app-button-secondary">{t("teams.back")}</Link>}
+      </div>
+    </TeamHeaderActions>
+  );
+
   return (
     <><ConfirmDialog open={deleteOpen} title={t("teams.delete")} message={`${t(environment.owner ? "teams.deleteOwnerConfirm" : "teams.deleteConfirm", { name: details.team.name })}${deleteError ? `\n${deleteError}` : ""}`} confirmLabel={t("teams.delete")} cancelLabel={t("teams.cancel")} destructive loading={actionLoading === "delete-team"} onConfirm={() => void handleDeleteTeam()} onCancel={() => setDeleteOpen(false)} /><TeamPageLayout
       fillHeight
       title={t("nav.teams")}
-      titleAccessory={
-        <TeamHeaderActions>
-          <span className="cm-team-status" data-status={details.team.runtime_state?.state || details.team.status}>{teamPowerLabel(details.team.runtime_state) || teamStatusLabel(locale, details.team.status)}</span>
-          <span>Team #{details.team.id}</span>
-          <span className="cm-team-shared-path">{t("teams.sharedPath", { path: details.team.shared_mount_path })}</span>
-          <div className="cm-team-header-buttons">
- <TeamPowerControl state={details.team.runtime_state} start={() => teamService.startTeam(details.team.id)} stop={() => teamService.stopTeam(details.team.id)} onChange={() => loadTeam({background:true})}/>
-            <button
-              type="button"
-              onClick={() => { setDeleteError(""); setDeleteOpen(true); }}
-              disabled={actionLoading === "delete-team"}
-              className="app-button-secondary text-red-700"
-            >
-              {t(actionLoading === "delete-team" ? "teams.deleting" : "teams.delete")}
-            </button>
-            <Link
-              to={environment.returnURL}
-              className="app-button-secondary"
-            >
-              {t("teams.back")}
-            </Link>
-          </div>
-        </TeamHeaderActions>
-      }
+      titleAccessory={environment.owner ? undefined : teamActions}
     >
       {error && <div role="alert" className="shrink-0 px-3 py-2 text-sm text-red-700">{t("teams.updateFailed", { error })}</div>}
       {workspaceError && <div role="alert" className="shrink-0 px-3 py-2 text-sm text-[var(--cm-error)]">{workspaceError}</div>}
@@ -1351,12 +1354,14 @@ const TeamDetailPage: React.FC = () => {
         key={details.team.id}
         members={details.members}
         team={details.team}
+        owner={environment.owner}
         leaderKey={details.leader_member_id}
         renderMemberDetails={member => <>
           <section><h3>职责</h3><DescriptionPreview text={getTeamMemberDisplayDescription(member.description)} /></section>
           <section><h3>运行详情</h3><dl><dt>运行状态</dt><dd>{member.runtime_status || "-"}</dd><dt>意图</dt><dd>{member.runtime_intent || "-"}</dd><dt>任务</dt><dd>{member.runtime_task_id || "-"}</dd><dt>最后在线</dt><dd>{formatDateTime(member.last_seen_at)}</dd></dl></section>
         </>}
-        chat={<CollaborationPanel
+        chat={headerTools => <CollaborationPanel
+          headerTools={environment.owner ? <>{headerTools}{teamActions}</> : headerTools}
           team={details.team}
           groups={collaborationGroups}
           members={details.members}
@@ -1391,7 +1396,7 @@ const TeamDetailPage: React.FC = () => {
           mini={mini} onOpen={open}
           onWorkspaceFileOpen={handleOpenWorkspacePath}
         />}
-        files={active => <TeamWorkspaceBrowser key={details.team.id} teamId={details.team.id} rootPath={details.team.shared_mount_path} heightClass="h-full" active={active} refreshKey={workspaceRefreshKey} onMutation={workspaceChanged} />}
+        files={(active, tool, onProgramChange) => <TeamWorkspaceTools key={`${environment.owner || user?.id}:${details.team.id}`} teamId={details.team.id} members={details.members} leaderKey={details.leader_member_id} active={active} tool={tool} onProgramChange={onProgramChange} files={filesActive => <TeamWorkspaceBrowser key={details.team.id} teamId={details.team.id} rootPath={details.team.shared_mount_path} heightClass="h-full" active={filesActive} refreshKey={workspaceRefreshKey} onMutation={workspaceChanged} />} />}
       />
     </TeamPageLayout>
       {workspacePreview && (
@@ -1469,6 +1474,9 @@ function TeamWorkspaceBrowser({
   const folderInputRef = useRef<HTMLInputElement | null>(null);
 
   const loadFiles = useCallback(async (background = false) => {
+    // Keep an unfinished read alive across polling, focus and artifact batches.
+    // Explicit refreshes and directory changes still replace the old request.
+    if (background && listRequest.current && !listRequest.current.signal.aborted) return false;
     listRequest.current?.abort();
     const request = new AbortController(); listRequest.current = request;
     try {
@@ -1480,6 +1488,7 @@ function TeamWorkspaceBrowser({
       if (!request.signal.aborted) setError(err.response?.data?.error || "加载共享目录失败");
       return false;
     } finally {
+      if (listRequest.current === request) listRequest.current = null;
       if (!request.signal.aborted) setLoading(false);
     }
   }, [path, teamId]);
@@ -2286,6 +2295,7 @@ function DescriptionPreview({ text }: { text?: string }) {
 }
 
 function CollaborationPanel({
+  headerTools,
   team,
   groups,
   members,
@@ -2310,6 +2320,7 @@ function CollaborationPanel({
   onSelectGroup,
   onWorkspaceFileOpen,
 }: {
+  headerTools?: React.ReactNode;
   team: TeamDetails["team"];
   groups: CollaborationGroup[];
   members: TeamMember[];
@@ -2346,9 +2357,6 @@ function CollaborationPanel({
   const presentedMessages = messages.map(message => ({...message,
     authorType: message.authorType || (message.kind === 'system' ? 'system' : memberByKey.has(message.senderKey) ? 'member' : message.senderKey === currentUserKey || /^user(?:-\d+)?$/.test(message.senderKey) ? 'user' : ['system','ClawManager','clawmanager'].includes(message.senderKey) ? 'system' : 'unknown') as ChatAuthorType,
   }));
-  const onlineCount = members.filter(
-    (member) => !memberIsStarting(member) && ["idle", "busy"].includes(member.availability || ""),
-  ).length;
   const startingCount = members.filter(memberIsStarting).length;
   const chatEnvironment = useTeamPageEnvironment();
   const { feedRef, capture, unread, jumpToLatest } = useChatReadingPosition(messages.at(-1)?.id, chatEnvironment.owner ? `owner-team-reading:${chatEnvironment.owner}:${team.id}` : undefined);
@@ -2382,17 +2390,20 @@ function CollaborationPanel({
     <section className="team-chat-transcript">
       <div className="team-chat-topbar">
         <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0 flex-1">
-            <h2 className="team-chat-heading" title={team.name}><span><MessagesSquare size={18} /></span>{team.name}</h2>
+          <div className="team-chat-identity min-w-0 flex-1">
+            <h2 className="team-chat-heading" title={team.name}><span className="team-chat-heading-icon"><MessagesSquare size={18} /></span><span className="team-chat-title-text">{team.name}</span></h2>
             <div className="team-chat-subtitle">
-              <span>Team #{team.id}</span><span className="team-chat-online"><i />{t("teams.online", { count: onlineCount })}</span>{startingCount > 0 && <span>{t("teams.starting", { count: startingCount })}</span>}<span className="cm-team-status" data-status={team.runtime_state?.state || team.status}>{teamPowerLabel(team.runtime_state) || teamStatusLabel(locale, team.status)}</span>
+              <span>Team #{team.id}</span>{startingCount > 0 && <span>{t("teams.starting", { count: startingCount })}</span>}{(team.runtime_state?.state || team.status) !== 'running' && <span className="cm-team-status" data-status={team.runtime_state?.state || team.status}>{teamPowerLabel(team.runtime_state) || teamStatusLabel(locale, team.status)}</span>}
             </div>
           </div>
-          {queryAnchors.length >= 2 && <TeamHistoryMenu
-            items={queryAnchors.map(group => ({ key: group.key, title: `${group.task?.payload?.executionType === 'single_member' ? `单成员 · @${memberById.get(group.task.target_member_id)?.display_name || 'Worker'} · ` : ''}${groupQueryText(group)}`, time: formatDateTime(group.task?.created_at) }))}
-            activeKey={activeGroupKey}
-            onSelect={handleSelectAnchor}
-          />}
+          <div className="team-chat-header-actions">
+            {queryAnchors.length >= 2 && <TeamHistoryMenu
+              items={queryAnchors.map(group => ({ key: group.key, title: `${group.task?.payload?.executionType === 'single_member' ? `单成员 · @${memberById.get(group.task.target_member_id)?.display_name || 'Worker'} · ` : ''}${groupQueryText(group)}`, time: formatDateTime(group.task?.created_at) }))}
+              activeKey={activeGroupKey}
+              onSelect={handleSelectAnchor}
+            />}
+            {headerTools}
+          </div>
         </div>
       </div>
 
@@ -2829,7 +2840,7 @@ function InteractionProcessPanel({
               </div>
             ) : (
               <div className="text-xs leading-5 text-slate-500">
-                当前空闲。新的团队任务出现后，这里会自动切换到执行过程。
+                当前暂无任务。新的团队任务出现后，这里会自动切换到执行过程。
               </div>
             )}
           </div>
@@ -3581,7 +3592,7 @@ function buildPeerCollaborationModel(
       label: displayMemberName(normalized, memberByKey, leaderMemberId),
       role: member?.role || "",
       status: member?.status === "busy" ? "working" : "idle",
-      statusLabel: member?.status === "busy" ? "执行中" : "空闲",
+      statusLabel: member?.status === "busy" ? "执行中" : "待命",
       summary: member?.last_summary || "等待协作任务。",
       currentTask: member?.last_summary || "",
       deliverable: "",
@@ -4254,7 +4265,7 @@ function isDispatchOnlyResult(value: string) {
 function processStatusText(status: string) {
   switch (status) {
     case "idle":
-      return "空闲";
+      return "待命";
     case "pending":
       return "等待调度";
     case "dispatched":
@@ -4392,7 +4403,7 @@ function PeerCollaborationMatrix({
                 <div className="min-w-0">
                   <div className="text-xs font-medium text-slate-400">当前任务</div>
                   <div className="mt-0.5 line-clamp-1 text-xs leading-4 text-slate-600">
-                    {lane.currentTask || lane.summary || "空闲，等待任务。"}
+                    {lane.currentTask || lane.summary || "等待任务。"}
                   </div>
                   {(lane.waitingOn || lane.dependencies.length > 0) && (
                     <div className="mt-1 flex flex-wrap gap-1">
@@ -4492,23 +4503,23 @@ function KanbanColumn({
 }) {
   const style = kanbanColumnStyle(tone);
   return (
-    <div className={`min-h-[138px] rounded-xl border p-1.5 shadow-sm transition-all duration-300 hover:shadow-sm ${style.shell}`}>
-      <div className="mb-1 flex items-start justify-between gap-2">
+    <div className={`team-kanban-lane min-h-[138px] rounded-xl border p-1.5 shadow-sm transition-all duration-300 hover:shadow-sm ${style.shell}`}>
+      <div className="team-kanban-lane-header mb-1 flex items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="flex items-center gap-1.5">
             <span className={`h-1.5 w-1.5 rounded-full shadow-sm ${style.dot}`} />
             <h3 className="text-xs font-semibold text-slate-900">{title}</h3>
           </div>
-          <p className="mt-0.5 text-xs leading-3 text-slate-500">{subtitle}</p>
+          <p className="team-kanban-lane-subtitle mt-0.5 text-xs leading-3 text-slate-500">{subtitle}</p>
         </div>
-        <span className={`rounded-full px-1.5 py-0.5 text-xs font-semibold ${style.count}`}>
+        <span className={`team-kanban-lane-count rounded-full px-1.5 py-0.5 text-xs font-semibold ${style.count}`}>
           {cards.length}
         </span>
       </div>
 
-      <div className="max-h-[230px] space-y-1 overflow-y-auto pr-1">
+      <div className="team-kanban-lane-cards max-h-[230px] space-y-1 overflow-y-auto pr-1">
         {cards.length === 0 ? (
-          <div className="rounded-lg border border-dashed border-slate-300/80 bg-white/55 px-2 py-2.5 text-center text-xs leading-5 text-slate-400 backdrop-blur-sm">
+          <div className="team-kanban-lane-empty rounded-lg border border-dashed border-slate-300/80 bg-white/55 px-2 py-2.5 text-center text-xs leading-5 text-slate-400 backdrop-blur-sm">
             暂无卡片
           </div>
         ) : (
@@ -4540,7 +4551,8 @@ function KanbanCard({
     <button
       type="button"
       onClick={onSelect}
-      className={`group w-full rounded-lg border bg-[var(--cm-subtle)] px-1.5 py-1 text-left text-xs shadow-sm transition duration-200 hover:border-sky-300/80 hover:shadow-sm ${
+      data-selected={selected}
+      className={`team-kanban-card group w-full rounded-lg border bg-[var(--cm-subtle)] px-1.5 py-1 text-left text-xs shadow-sm transition duration-200 hover:border-sky-300/80 hover:shadow-sm ${
         selected ? "border-sky-400/80 ring-2 ring-sky-200/70" : style.border
       }`}
     >
@@ -4548,7 +4560,7 @@ function KanbanCard({
         <span className={`mt-1 h-5 w-1 shrink-0 rounded-full ${style.bar}`} />
         <div className="min-w-0 flex-1">
           <div className="flex items-start justify-between gap-1.5">
-            <div className="line-clamp-1 text-xs font-semibold leading-4 text-slate-900">
+            <div className="team-kanban-card-title line-clamp-1 text-xs font-semibold leading-4 text-slate-900">
               {card.title}
             </div>
             {card.column === "doing" && (

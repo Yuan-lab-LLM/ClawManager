@@ -62,6 +62,62 @@ func TestTeamLifecycleReadinessProjectionOffersRepairWithoutRewritingLedgerMySQL
 	}
 }
 
+func TestTeamFaultRecoveryOwnsOnlyIdleTeamUntilExactReleaseMySQL(t *testing.T) {
+	s, r := teamIdleFixture(t)
+	ctx := t.Context()
+	for _, stmt := range []string{
+		`ALTER TABLE teams ADD user_id INT NOT NULL DEFAULT 7`,
+		`ALTER TABLE team_members ADD user_id INT NOT NULL DEFAULT 7`,
+		`INSERT INTO teams (id,status,resource_scope) VALUES(10,'running','northbound')`,
+		`UPDATE team_tasks SET status='running' WHERE id=100`,
+	} {
+		if _, err := s.SQL().Exec(stmt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	reserve := func(ids ...int) error {
+		return s.TxContext(ctx, func(tx db.Session) error {
+			return ReserveTeamFaultRecovery(ctx, tx, 9, ids, "operation")
+		}, nil)
+	}
+	if err := reserve(1); err == nil {
+		t.Fatal("admitted recovery during a live Team task")
+	}
+	if _, err := s.SQL().Exec(`UPDATE team_tasks SET status='succeeded' WHERE id=100`); err != nil {
+		t.Fatal(err)
+	}
+	if err := reserve(3); err == nil {
+		t.Fatal("admitted an instance outside the Team")
+	}
+	if err := reserve(1); err != nil {
+		t.Fatal(err)
+	}
+	if err := RequireTeamRunning(ctx, s, 9); !errors.Is(err, ErrTeamNotRunning) {
+		t.Fatalf("recovery admitted new Team work: %v", err)
+	}
+	if err := RequireTeamRunning(ctx, s, 10); err != nil {
+		t.Fatalf("recovery blocked another Team: %v", err)
+	}
+	if _, err := r.Request(ctx, 9, "stopped", "manual", 0); err == nil {
+		t.Fatal("Team stop took over verified fault recovery")
+	}
+	if err := CheckTeamFaultRecovery(ctx, s, 9, []int{1}, "another-operation"); err == nil {
+		t.Fatal("another operation could take over the guard")
+	}
+	if err := CheckTeamFaultRecovery(ctx, s, 9, []int{1}, "operation"); err != nil {
+		t.Fatal(err)
+	}
+	if err := ReleaseTeamFaultRecovery(ctx, s, 9, "another-operation"); err == nil {
+		t.Fatal("another operation could release the guard")
+	}
+	if err := ReleaseTeamFaultRecovery(ctx, s, 9, "operation"); err != nil {
+		t.Fatal(err)
+	}
+	if err := RequireTeamRunning(ctx, s, 9); err != nil {
+		t.Fatalf("finished recovery blocked Team tasks: %v", err)
+	}
+}
+
 func TestTeamManualStopFencesNewInferenceBeforeDrainingExistingRequestMySQL(t *testing.T) {
 	s, r := teamIdleFixture(t)
 	ctx := t.Context()

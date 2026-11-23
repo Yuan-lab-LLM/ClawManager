@@ -75,7 +75,29 @@ func (s *Service) Issue(ctx context.Context, identity Identity, audience string)
 	if err := s.authorize(ctx, identity); err != nil {
 		return "", err
 	}
+	return s.issueAuthorized(ctx, identity, audience, s.now().Unix())
+}
+
+// IssueAll authorizes once for one request's three audience-separated tokens.
+// Verify still checks the current authority on every use; there is no TTL cache.
+func (s *Service) IssueAll(ctx context.Context, identity Identity) (tokens [3]string, err error) {
+	if !validIdentity(identity) {
+		return tokens, errCapability
+	}
+	if err = s.authorize(ctx, identity); err != nil {
+		return tokens, err
+	}
 	issued := s.now().Unix()
+	for i, audience := range []string{AudienceModel, AudienceEgress, AudienceServices} {
+		tokens[i], err = s.issueAuthorized(ctx, identity, audience, issued)
+		if err != nil {
+			return [3]string{}, err
+		}
+	}
+	return tokens, nil
+}
+
+func (s *Service) issueAuthorized(ctx context.Context, identity Identity, audience string, issued int64) (string, error) {
 	if issued <= 0 || issued > math.MaxInt64-ttlSeconds {
 		return "", errCapability
 	}
@@ -162,6 +184,9 @@ func (s *Service) authorize(ctx context.Context, identity Identity) error {
 		return runtimeinventory.ErrUnavailable
 	}
 	if err != nil || current != identity {
+		if IsUnavailable(err) {
+			return err
+		}
 		return errCapability
 	}
 	return nil
