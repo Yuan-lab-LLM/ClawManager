@@ -1,5 +1,6 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
+import { FluentProvider, webLightTheme } from '@fluentui/react-components'
 import './index.css'
 import './styles/secplane-theme.css'
 import './styles/protection-tokens.css'
@@ -14,6 +15,8 @@ if (!rootElement) {
 
 createRoot(rootElement).render(
   <StrictMode>
-    <App />
+    <FluentProvider theme={webLightTheme} applyStylesToPortals>
+      <App />
+    </FluentProvider>
   </StrictMode>,
 )
