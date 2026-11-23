@@ -1,6 +1,6 @@
 ---
 name: "ClawManager"
-description: "采用 Fluent 2 Web 设计语言的 Agent 管理与协作平台；2026-11-12 批准的目标规范"
+description: "ClawManager 的 Fluent 2 Web 默认外观、公共组件和 UI 验收规范"
 colors:
   primary: "#0f6cbd"
   focus: "#0f6cbd"
@@ -27,6 +27,9 @@ colors:
   warning-background: "#fff9f5"
   error: "#b10e1c"
   error-background: "#fdf3f4"
+  danger-action: "#c50f1f"
+  danger-action-hover: "#b10e1c"
+  danger-action-pressed: "#960b18"
   data-blue: "#2587ed"
   data-blue-text: "#176fc6"
   data-blue-fill: "#e5f2ff"
@@ -44,49 +47,49 @@ colors:
   heat-3: "#216e39"
 typography:
   brand:
-    fontFamily: "\"Segoe UI\", -apple-system, BlinkMacSystemFont, \"PingFang SC\", \"Microsoft YaHei\", sans-serif"
+    fontFamily: "'Segoe UI', 'Segoe UI Web (West European)', -apple-system, BlinkMacSystemFont, Roboto, 'Helvetica Neue', sans-serif"
     fontSize: "16px"
     fontWeight: 600
     lineHeight: 1.375
   title:
-    fontFamily: "\"Segoe UI\", -apple-system, BlinkMacSystemFont, \"PingFang SC\", \"Microsoft YaHei\", sans-serif"
+    fontFamily: "'Segoe UI', 'Segoe UI Web (West European)', -apple-system, BlinkMacSystemFont, Roboto, 'Helvetica Neue', sans-serif"
     fontSize: "16px"
     fontWeight: 600
     lineHeight: 1.375
   subtitle:
-    fontFamily: "\"Segoe UI\", -apple-system, BlinkMacSystemFont, \"PingFang SC\", \"Microsoft YaHei\", sans-serif"
+    fontFamily: "'Segoe UI', 'Segoe UI Web (West European)', -apple-system, BlinkMacSystemFont, Roboto, 'Helvetica Neue', sans-serif"
     fontSize: "20px"
     fontWeight: 600
-    lineHeight: 1.3
+    lineHeight: 1.4
   page-title:
-    fontFamily: "\"Segoe UI\", -apple-system, BlinkMacSystemFont, \"PingFang SC\", \"Microsoft YaHei\", sans-serif"
+    fontFamily: "'Segoe UI', 'Segoe UI Web (West European)', -apple-system, BlinkMacSystemFont, Roboto, 'Helvetica Neue', sans-serif"
     fontSize: "24px"
     fontWeight: 600
     lineHeight: 1.3333333333333333
   body:
-    fontFamily: "\"Segoe UI\", -apple-system, BlinkMacSystemFont, \"PingFang SC\", \"Microsoft YaHei\", sans-serif"
+    fontFamily: "'Segoe UI', 'Segoe UI Web (West European)', -apple-system, BlinkMacSystemFont, Roboto, 'Helvetica Neue', sans-serif"
     fontSize: "14px"
     fontWeight: 400
     lineHeight: 1.4285714285714286
   body-strong:
-    fontFamily: "\"Segoe UI\", -apple-system, BlinkMacSystemFont, \"PingFang SC\", \"Microsoft YaHei\", sans-serif"
+    fontFamily: "'Segoe UI', 'Segoe UI Web (West European)', -apple-system, BlinkMacSystemFont, Roboto, 'Helvetica Neue', sans-serif"
     fontSize: "14px"
     fontWeight: 600
     lineHeight: 1.4285714285714286
   label:
-    fontFamily: "\"Segoe UI\", -apple-system, BlinkMacSystemFont, \"PingFang SC\", \"Microsoft YaHei\", sans-serif"
+    fontFamily: "'Segoe UI', 'Segoe UI Web (West European)', -apple-system, BlinkMacSystemFont, Roboto, 'Helvetica Neue', sans-serif"
     fontSize: "12px"
     fontWeight: 400
     lineHeight: 1.3333333333333333
   metric:
-    fontFamily: "\"Segoe UI\", -apple-system, BlinkMacSystemFont, \"PingFang SC\", \"Microsoft YaHei\", sans-serif"
+    fontFamily: "'Segoe UI', 'Segoe UI Web (West European)', -apple-system, BlinkMacSystemFont, Roboto, 'Helvetica Neue', sans-serif"
     fontSize: "32px"
     fontWeight: 600
     lineHeight: 1.25
 rounded:
   control: "4px"
   panel: "8px"
-  dialog: "12px"
+  dialog: "8px"
   small: "2px"
   circular: "10000px"
 spacing:
@@ -103,7 +106,7 @@ components:
   button-primary:
     backgroundColor: "{colors.primary}"
     textColor: "{colors.on-primary}"
-    typography: "{typography.body}"
+    typography: "{typography.body-strong}"
     rounded: "{rounded.control}"
     padding: "0 12px"
     height: "32px"
@@ -114,10 +117,21 @@ components:
   button-secondary:
     backgroundColor: "{colors.surface}"
     textColor: "{colors.ink}"
-    typography: "{typography.body}"
+    typography: "{typography.body-strong}"
     rounded: "{rounded.control}"
     padding: "0 12px"
     height: "32px"
+  button-danger:
+    backgroundColor: "{colors.danger-action}"
+    textColor: "{colors.on-primary}"
+    typography: "{typography.body-strong}"
+    rounded: "{rounded.control}"
+    padding: "0 12px"
+    height: "32px"
+  button-danger-hover:
+    backgroundColor: "{colors.danger-action-hover}"
+  button-danger-pressed:
+    backgroundColor: "{colors.danger-action-pressed}"
   field:
     backgroundColor: "{colors.surface}"
     textColor: "{colors.ink}"
@@ -132,17 +146,32 @@ components:
     padding: "0 12px"
     height: "40px"
   navigation-item-selected:
-    backgroundColor: "{colors.selected}"
-    textColor: "{colors.primary}"
+    typography: "{typography.body-strong}"
     rounded: "{rounded.control}"
   panel:
     backgroundColor: "{colors.surface}"
     rounded: "{rounded.panel}"
     padding: "16px"
-  table-row:
-    typography: "{typography.body}"
-    textColor: "{colors.text}"
+  table-header:
+    backgroundColor: "{colors.subtle}"
+    textColor: "{colors.muted}"
+    typography: "{typography.body-strong}"
+    padding: "0 12px"
     height: "44px"
+  table-row:
+    backgroundColor: "{colors.surface}"
+    textColor: "{colors.ink}"
+    typography: "{typography.body}"
+    padding: "0 12px"
+    height: "44px"
+  table-row-compact:
+    backgroundColor: "{colors.surface}"
+    textColor: "{colors.ink}"
+    typography: "{typography.body}"
+    padding: "0 8px"
+    height: "36px"
+  table-row-selected:
+    backgroundColor: "{colors.selected}"
   shell-sidebar:
     backgroundColor: "{colors.surface}"
     width: "224px"
@@ -157,39 +186,63 @@ components:
 
 ## Overview
 
-**设计方向：Fluent 2 Web · 清晰、轻盈、有层次的 Agent 工作台。**
+**默认外观为 Fluent 2 Web 浅色主题 `webLightTheme`，交互强调色为官方 Web 蓝。** 使用中性表面、清晰字阶、紧凑但可读的控件和分明的浮层，让用户快速继续工作并掌握 Agent 运行情况。
 
-自 **2026-11-12** 起，CM 整体采用 [Microsoft Fluent 2](https://fluent2.microsoft.design/) 设计语言。适用于个人 Dashboard、实例与工作台、团队与对话、资源、技能、设置、Console、Runtime 及管理员页面，以及所有共享控件和浮层。通过明确的信息层级、稳定的操作位置和有意义的可视化，让用户快速继续工作并掌握 Agent 的运行情况。
+本文适用于个人 Dashboard、实例与工作台、团队与对话、资源、技能、设置、Console、Runtime 及管理员页面，以及所有共享控件和浮层。自 2026-11-12 起采用 Fluent 2 Web，2026-11-20 增补官方 React 组件基准。预览使用示例数据，页面实施状态以逐页验收记录为准。原方案 08「标准企业表格」及其对比图、实施计划归档。
 
-本文是**已确定的改造目标**，不是当前线上界面的实现报告。本次更新规范，不代表 Fluent UI 依赖已安装、所有页面已迁移或已部署。原方案 08「标准企业表格」及其对比图、实施计划保留为历史资料；发生冲突时，以本文为准，不继续从旧方案引入新视觉规则。
+### 规则与参考来源
 
-采用 Fluent 2 的视觉基础、交互语义和可访问性要求，结合 CM 已确定的产品布局。保留现有路由、API、权限、数据刷新、实例生命周期、Lite/Pro 边界和团队工作流。桌面 Web 使用默认 Web 蓝色品牌体系；保留 CM 原始彩色 Logo 和运行时真实品牌图标。
+| 决策 | 依据 |
+| --- | --- |
+| 页面结构、操作位置、信息密度与数据口径 | 按本文的 CM 规则执行。保留现有路由、API、权限、数据刷新、实例生命周期、Lite/Pro 边界和团队工作流。 |
+| 组件变体、状态、字体、形状和浮层 | 设计参考 Fluent 2 Web UI Kit，代码按项目锁定的 Fluent UI React v9 组件及主题验收。 |
+| 应用专有表面、图表和品牌 | 使用 CM 公共语义 Token、已批准的数据色及原始品牌资产。文档设置有差异时以本文为准。 |
 
-**规范来源与实现边界：**
+新建及迁移页面必须执行本规范。旧页面的实现用于核对现有行为，视觉差异纳入迁移。设计稿和 PR 应注明共享组件、变体与主要状态。官方组件确有能力缺口时，在 PR 中记录缺口、对应公共实现和验证结果。稳定的系统级变更同步更新 `DESIGN.md` 和 `.impeccable/design.json`。
 
-- 基础规范以 Fluent 2 官方的颜色、字体、布局、形状、层级、动效、图标和可访问性文档为依据，各节附直接来源。查阅日期：2026-11-12。
-- 精确 Web Token 对照 Microsoft 官方 [brandWeb 色阶](https://raw.githubusercontent.com/microsoft/fluentui/master/packages/tokens/src/global/brandColors.ts)和[浅色语义映射](https://raw.githubusercontent.com/microsoft/fluentui/master/packages/tokens/src/alias/lightColor.ts)。后续实施应固定所采用的依赖版本，升级时复核映射，不能从上游 master 自动改写产品主题。
-- 侧栏宽度、页面密度、Dashboard 编排、图表配色和现有响应断点是 **CM 的产品约定**，不声称它们是微软统一要求。frontmatter 是目标 Token 的主来源；`.impeccable/design.json` 补充映射、动效、阴影和文档预览。
+设计和开发先从[组件选型目录](#组件选型目录)确认组件及其适用场景，再查该组件的变体、状态、Token 与交互规则。组合成页面时参考[关键页面的组合规则](#关键页面的组合规则)，动效参数见[场景、时长与缓动](#场景时长与缓动)。
+
+### Fluent 2 Web 样例索引
+
+以下页码来自用户提供的《Microsoft Fluent 2 Web》PDF，更新记录截至 2025-09-25。设计稿沿用套件的组件、变体和变量。实现时对照同一组件的 React API 与浏览器渲染。[Microsoft Fluent 2 Web UI Kit](https://fluent2.microsoft.design/get-started/design)
+
+第 3 页 Fluent Theme Designer 用于核对品牌和中性色阶。涉及新色板时，从种子色生成整组色阶，用同一组件状态样例验证对比度。第 4–54 页的组件样例都可从[组件选型目录](#组件选型目录)找到对应规则。
+
+### Fluent 2 Web React 参考版本
+
+组件规则核对使用 `@fluentui/react-components@9.75.2`、`@fluentui/react-icons@2.0.347` 和 `@fluentui/react-charts@9.3.29`。实际接入时以项目锁定并完成兼容性验证的版本为准。
 
 ## Colors
 
 用中性色组织信息，用 Web 蓝表达交互，用语义色表达反馈。图表可以鲜明，页面外壳保持安静。Fluent 2 区分中性、品牌及共享颜色，并强调颜色的语义用途。[官方颜色规范](https://fluent2.microsoft.design/color)
 
+### 主题与 Token 的使用顺序
+
+1. **应用主题**通过根级 `FluentProvider` 注入 `webLightTheme`。接入时锁定已验证的版本，升级后复核 Token 和组件行为。[官方 React 接入方式](https://fluent2.microsoft.design/get-started/develop)
+2. **官方组件**使用公开的 `appearance`、`size`、slot 和内建状态。CM 自有表面和共享控件通过公共 `--cm-*` 语义变量消费对应 Fluent alias。既有 CSS 保持使用同一组语义名，迁移时在公共样式层衔接。
+3. **业务页面**使用共享组件及语义变量。颜色、描边、圆角、阴影和焦点由公共主题提供。自有图表、状态和品牌资源使用各自的公共语义。页面需要新的视觉角色时先确认共享组件或 Token 能否表达，再决定是否新增公共角色。
+
+本文开头的 YAML 记录默认浅色主题和 CM 自有组件的对照值，`.impeccable/design.json` 补充别名、层级和组件参考版本。组件运行时以公开 API 和解析后的 Token 为准。页面样式中的固定色值、跨页面复制的主题变量，以及针对组件库内部类名的覆盖，均属于评审阻断项。
+
+今后新增配色时在主题层提供完整色阶和前景／背景配对。新增设计体系时在公共组件层处理形状、字阶、状态和浮层差异。业务页面保持原有组件语义、路由与数据状态，运行时主题切换按独立功能验收。
+
 ### 品牌与中性色
 
 | CM Token | Fluent Web 对应 | 用途 |
 | --- | --- | --- |
-| `primary` | `colorBrandBackground` / `colorBrandForeground1` | 主要按钮、激活指示；具体前景/背景按组件语义选择 |
-| `primary-hover` / `primary-pressed` / `primary-selected` | `colorBrandBackgroundHover` / `Pressed` / `Selected` | 主要按钮状态；不以统一透明度代替 |
-| `selected` | `colorBrandBackground2` | 浅蓝选中背景；结合指示条、字重或勾选表达状态 |
+| `primary` / `on-primary` | `colorBrandBackground` / `colorNeutralForegroundOnBrand` | 主按钮的背景及内容配对 |
+| `primary-hover` / `primary-pressed` / `primary-selected` | `colorBrandBackgroundHover` / `colorBrandBackgroundPressed` / `colorBrandBackgroundSelected` | 品牌控件各自的悬停、按下与持续选中状态 |
+| `selected` | `colorBrandBackground2` | 自有控件的浅蓝选中背景，结合指示条、字重或勾选表达状态 |
+| 链接 / 品牌前景 | `colorBrandForegroundLink` / `colorBrandForeground1` | 分别用于链接和品牌色文字或图标 |
+| 键盘焦点 | `colorStrokeFocus1` / `colorStrokeFocus2` | 优先用组件内建焦点。自有控件按相邻表面使用对应描边，强制色使用系统色 |
 | `ink` / `text` / `muted` | `colorNeutralForeground1` / `2` / `3` | 标题与主数据、正文、辅助信息 |
 | `surface` / `subtle` / `canvas` | `colorNeutralBackground1` / `2` / `3` | 工作面、弱分区、页面画布 |
-| `hover` / `pressed` | `colorNeutralBackground1Hover` / `Pressed` | 中性控件交互反馈 |
+| `hover` / `pressed` | `colorNeutralBackground1Hover` / `colorNeutralBackground1Pressed` | 中性控件交互反馈 |
 | `border` / `border-subtle` | `colorNeutralStroke1` / `2` | 面板边界、表格分隔，不独自承担控件识别 |
 | `border-accessible` | `colorNeutralStrokeAccessible` | 需要明确边界的输入与交互元素 |
 | `disabled` | `colorNeutralForegroundDisabled` | 真正不可用的控件，不用于正常辅助文字 |
 
-前景链接宜使用 `primary-hover` 对应的 `colorBrandForegroundLink`；背景与前景 Token 即使当前颜色相同也保留语义。颜色通过公共主题入口消费，禁止各页复制散落的十六进制值。Token 组织遵循全局值与语义别名分层，先提供浅色主题，为后续深色和高对比主题留出映射入口；不因此宣称已有主题切换。[官方 Design Tokens](https://fluent2.microsoft.design/design-tokens)
+颜色通过公共主题入口取值，前景、表面、描边和状态各自使用对应语义别名。本阶段以 Web 浅色主题及系统强制色验收。`focus` 是 CM 自有样式的对照项，官方组件沿用内建的双层焦点描边。[官方 Design Tokens](https://fluent2.microsoft.design/design-tokens) · [Web 颜色别名](https://fluent2.microsoft.design/color-tokens/)
 
 ### 反馈色与数据色
 
@@ -209,18 +262,18 @@ components:
 
 资源表盘采用绿、橙、红区间突出接近容量上限的风险，同时显示数值、单位和可读的范围说明。阈值必须对应实际配额及告警策略，不把视觉分段伪装为后端告警规则。状态图、费用图和容量图有不同单位，不共用一根含糊坐标轴。
 
-常规文字对背景至少 4.5:1，大字至少 3:1；识别控件、焦点或理解图表所必需的图形至少 3:1。浅面积和热力图浅格仅作辅助，提供文字、图例及可访问数据；若某个彩色标记单独承担含义，需调整深度或加高对比轮廓。禁止只靠红绿区分结果。[官方可访问性规范](https://fluent2.microsoft.design/accessibility)
+按 WCAG 2.2 AA 核对实际渲染色对。正常文字至少 4.5:1，大字至少 3:1，识别控件、焦点或理解图表所必需的图形至少 3:1。文字对比覆盖悬停、按下与选中等适用状态，真正禁用的控件按 WCAG 例外处理。浅面积和热力图浅格仅作辅助，提供文字、图例及可访问数据。独立承担含义的标记通过调整深度或增加高对比轮廓达到要求。[Fluent 可访问性规范](https://fluent2.microsoft.design/accessibility) · [WCAG 2.2](https://www.w3.org/TR/WCAG22/)
 
 ## Typography
 
-采用系统无衬线字体栈，优先 Segoe UI，按平台回退至系统字体，中文使用 PingFang SC / Microsoft YaHei；不额外下载或捆绑商业字体。正文以 14px / 20px 为基准，标题采用 600 字重。以下层级对照 [Fluent 2 Web 字体规范](https://fluent2.microsoft.design/typography)，实际 Token 在 frontmatter 中定义。
+字体继承 `webLightTheme` 的 `fontFamilyBase`，让系统为中文选择适合的回退字体。使用 Fluent Text 预设或对应的字号、行高和字重 Token。以 14px / 20px 正文为基准，用字阶区分主指标、区块标题和辅助信息。[Fluent 2 Web 字体规范](https://fluent2.microsoft.design/typography)
 
 | CM 角色 | 字号 / 行高 | 用途 |
 | --- | --- | --- |
 | `label` | 12 / 16 | 辅助说明、时间、图例；不作为全站正文 |
 | `body` / `body-strong` | 14 / 20 | 正文、表格、按钮、字段与导航；主数据可用 600 字重 |
 | `title` / `brand` | 16 / 22 | 卡片、区域标题、品牌名 |
-| `subtitle` | 20 / 26 | 对话或复杂弹窗标题 |
+| `subtitle` | 20 / 28 | 对话或复杂弹窗标题 |
 | `page-title` | 24 / 32 | 确有层级需要的独立详情标题 |
 | `metric` | 32 / 40 | Dashboard 当前值和重要总量，配单位及时间范围 |
 
@@ -238,11 +291,13 @@ components:
 | 侧栏 | 展开 224px；折叠 64px | 折叠按钮保持在侧栏与内容交界，保留状态持久化 |
 | 页面内边距 | 桌面 24px；窄屏 16px | 不限制成居中的窄阅读列 |
 | 面板间距 / 内边距 | 16px / 16px | 同行卡片外边框顶底对齐，标题包含在同一布局层级 |
-| 控件 | 默认高 32px；紧凑 24px；大号 40px | 同组同高；紧凑模式不能牺牲字号、焦点和点击区域 |
+| 控件 | 默认高 32px，紧凑 24px，大号 40px | 同组同高。紧凑尺寸用于空间有限的桌面场景，触控目标单独按可达面积验收 |
 | 导航项 | 高 40px | 图标、文本、选中指示保持稳定位置 |
 | 表格行 | 默认 44px；密集 36px | 页面统一选择密度，不按内容随意变化 |
 
 操作工具栏保持紧凑，桌面优先单行；搜索默认图标入口，展开后有清晰输入与关闭行为。搜索、筛选与批量创建各自归属明确；窄屏允许次要项收起，主要创建/提交动作保持可达。管理概览不新增刷新按钮或“更新于”标签，继续使用已有自动同步，错误时提供重试。
+
+管理概览先呈现最常扫读的用量和实例指标，其余数据按趋势、资源、分布归组。使用 16px 区块标题、24–32px 主值和较轻的辅助文字。用组间间距区分区块，用浅分隔线组织同组内容。实例管理把查询工具、Lite/Pro 摘要和数据表按任务顺序纵向排列，保留单行数据和局部滚动。普通表面使用官方中性色，浮层保留组件自带的高度差。
 
 个人设置入口位于右上角账户下拉菜单，与语言、控制台切换、退出登录同级，点击进入现有 `/settings` 页面。个人桌面侧栏及窄屏导航不重复展示设置入口；共享账户菜单在个人区和 Console 均提供该入口，Console 的 `/admin/settings` 系统设置保持独立。
 
@@ -274,18 +329,18 @@ components:
 
 | Token | CM 用途 |
 | --- | --- |
-| `shadow2` | 可交互卡片的基础层，可按页面需要选用 |
-| `shadow4` | 卡片悬停与轻浮起 |
-| `shadow8` | 小型 Popover、局部浮动工具 |
-| `shadow16` | 菜单、选择列表等浮层 |
-| `shadow28` | 覆盖式侧抽屉 |
-| `shadow64` | 模态 Dialog |
+| `shadow2` | 自有轻浮表面的低层级 |
+| `shadow4` | Fluent `Card appearance="filled"` 的默认阴影 |
+| `shadow8` | 交互卡片悬停；Tooltip 使用同等级的双层 drop shadow |
+| `shadow16` | Menu；默认 Popover 使用同等级的双层 drop shadow |
+| `shadow28` | CM 自有的中等高度浮层 |
+| `shadow64` | 模态 Dialog 和覆盖式 Drawer 的官方高度 |
 
-精确 CSS 见 sidecar，依据官方[阴影组合](https://raw.githubusercontent.com/microsoft/fluentui/master/packages/tokens/src/utils/shadows.ts)和浅色主题的环境光/方向光值；不要用不同的透明度冒充同一个 Token。模态遮罩为 `rgba(0,0,0,0.4)`。卡片不必全部套阴影，不能靠不断加深阴影制造信息优先级。浮层以不透明可读表面为默认，不将 Mica、Acrylic、全屏玻璃模糊或装饰性渐变当作 Fluent Web 的必要条件。
+自有表面使用 Fluent 阴影 Token。静态内容通过明度和分隔表达层次，悬浮和模态优先沿用组件阴影及 `colorBackgroundOverlay` 遮罩。PDF 第 18 页的阻断式 Dialog 使用 40% 默认遮罩，代码使用组件对应的主题 Token。工作面和浮层使用不透明中性色表面。
 
 ## Shapes
 
-常用控件 4px、面板 8px、Dialog 12px，头像为圆形；小标签可用 2px。圆角与元素尺度一致，禁止所有容器统一变成胶囊。对应 React Token 分别为 `borderRadiusMedium`、`borderRadiusXLarge`、`borderRadius2XLarge`；注意 React 的 `borderRadiusLarge` 实际是 6px。[官方形状规范](https://fluent2.microsoft.design/shapes)、[React 圆角 Token](https://raw.githubusercontent.com/microsoft/fluentui/master/packages/tokens/src/global/borderRadius.ts)
+使用官方组件默认形状。常用控件为 `borderRadiusMedium`（4px），Card 按 `size` 应用 2 / 4 / 6px 圆角，Dialog 使用 `borderRadiusXLarge`（8px）。自有表面的圆角从同一组 Token 选取。[官方形状规范](https://fluent2.microsoft.design/shapes) · [React Card 默认样式](https://github.com/microsoft/fluentui/blob/master/packages/react-components/react-card/library/src/components/Card/useCardStyles.styles.ts) · [React Dialog 默认样式](https://github.com/microsoft/fluentui/blob/master/packages/react-components/react-dialog/library/src/components/DialogSurface/useDialogSurfaceStyles.styles.ts)
 
 图形轮廓、分隔线和焦点边界保持细而明确。常规边线 1px，选中指示和焦点可以更强；高对比模式使用系统颜色，不依赖阴影和浅背景区分结构。
 
@@ -293,32 +348,196 @@ components:
 
 ### 公共实现策略
 
-继续使用 React、TypeScript、React Router、React Query、现有状态管理与 Tailwind/CSS。后续逐步采用或封装 [Fluent UI React v9](https://fluent2.microsoft.design/components/web/react) 的语义 Token 与合适控件；接入前核对当前 React 版本、主题 Provider、Portal、样式顺序与现有调用方。规范更新不直接安装依赖，不重写业务状态机，也不引入另一套通用表格配置平台。优先改公共主题与组件，再迁移页面。
+新建或迁移的界面必须优先复用仓库已有的共享组件。共享组件选型以 **Fluent UI React v9** 为准，官方组件覆盖所需交互时，采用官方控件或对其封装。迁移既有共享控件时，保留调用方依赖的参数、事件、焦点、键盘行为和业务反馈。页面拥有权限、查询、路由和业务状态，组件负责呈现与输入。布局使用 React、Tailwind 或 CSS。官方组件缺少所需能力时，自有实现必须沿用同一主题、公开语义与交互状态，并以实际行为验收。[官方 React 组件目录](https://fluent2.microsoft.design/components/web/react)
 
-### 操作、输入和选择
+接入时验证 React 和类型依赖兼容性，检查 Tailwind reset 与 Griffel 的样式顺序。将页面布局类放在 Provider 的子容器上。Portal 内的菜单、抽屉、弹窗、Tooltip 与 Toast 必须继承同一主题、字体及文字方向，并按正确层级展示。编辑器、终端和原生 Agent 嵌入面板通过各自支持的入口接收主题；外围样式迁移保留会话、文档隔离和工作区状态。
 
-- 同一命令组只设一个明显的 Primary 动作；其余使用 Secondary、Subtle 或 Transparent。导航使用 Link，切换操作表达选中状态。保留 Hover、Pressed、Focus、Disabled、Loading，不能用统一 opacity 处理所有状态。[Button](https://fluent2.microsoft.design/components/web/react/core/button/usage)
-- 表单字段有持久标签、说明、错误位置与可访问关联，Placeholder 不代替标签。默认 32px，错误同时显示说明和可理解的修复路径。选择表单值用 Select / Combobox；Menu 用于立即执行的命令或导航，不能混淆语义。[Menu](https://fluent2.microsoft.design/components/web/react/core/menu/usage)
-- 只给原生 select 外框上色不能算完成弹出列表统一。需要可控浮层时使用经过验证的组件；保留原生实现时如实说明平台差异，不能破坏原生键盘操作。
-- `--cm-focus` 默认引用品牌蓝，高对比模式引用系统 `Highlight`。键盘焦点采用清晰的双层轮廓，例如 2px 品牌蓝色轮廓配 2px 表面色隔离层；在不同背景下均可见。复合搜索框在外层统一显示蓝色焦点轮廓，内部输入不叠加黑色或第二层轮廓；键盘焦点仍须清晰可见。输入激活下划线不能替代 `:focus-visible`。禁用控件有真实 disabled 语义；正常文字不使用禁用灰。
+### 组件选型目录
 
-### 导航、表格和卡片
+下表覆盖 Fluent 2 Web UI Kit 的全部组件示例，并纳入 CM 常用的表格分页、文件选择、图表与工作台部件。各节以组件或变体为首列，列明适用任务和选型边界。设计稿与 PR 按实际场景标注组件、变体和状态。组件名也可能指 Figma 样式或 CM 组合模式，开发时以项目锁定版本的公开 API 为准。
 
-侧栏采用中性图标与浅蓝选中表面，选中态增加指示或字重，折叠后保留 Tooltip 与可访问名称。菜单、Popover、抽屉和页面共用同一主题与字体。
+| 组件类别 | 选型入口 | PDF 页码 |
+| --- | --- | --- |
+| 动作、操作组与链接 | [按钮与操作菜单](#按钮与操作菜单) | 10–13、26、52 |
+| 字段、输入、数值、搜索与选择 | [搜索、表单与选择](#搜索表单与选择) | 16、21–25、35–37、39–40、43–44、48、50 |
+| 列表、表格、数据网格与分页 | [表格、列表与数据网格](#表格列表与数据网格) | 17、27 |
+| 导航、内容层级、展开与容器 | [导航、卡片与面板](#导航卡片与面板) | 4、9、14–15、19、31、45、54 |
+| 图标、身份、状态标记与标签 | [图标、头像和品牌](#图标头像和品牌) | 5–8、32、42、46–47 |
+| 浮层、通知、错误与加载 | [浮层、消息与加载](#浮层消息与加载) | 18、20、28–30、33–34、38、41、49、51、53 |
+| 统计与数据可视化 | [图表、状态与数据真实性](#图表状态与数据真实性) | CM 扩展 |
+| 对话、文件、编辑器、终端与原生 Agent | [工作台与嵌入内容](#工作台与嵌入内容) | CM 扩展 |
 
-表格默认保留原生语义；仅在确实需要单元格导航等丰富交互时采用 DataGrid，并完整实现相应键盘模型。排序、筛选、分页、批量选择和权限行为保持真实。可点击行中的复选框、链接和菜单不互相劫持事件。
+### 按钮与操作菜单
 
-卡片围绕一个任务或对象组织，标题、内容和底部操作位置稳定。Agent 卡片优先展示身份、状态和继续入口，避免堆叠 Runtime、套餐、ID 和说明文字。整卡可点击时，内部菜单与置顶操作保持独立语义，不嵌套交互元素。[Card](https://fluent2.microsoft.design/components/web/react/core/card/usage)
+先按行为选择控件，再按动作优先级选择外观。同一命令组只放一个主动作。各操作等重要时使用中性外观。独立任务区域和打开的确认框分别确定主动作。[Fluent Button 选型](https://fluent2.microsoft.design/components/web/react/core/button/usage)
+
+| 组件与变体 | 适用场景 | ClawManager 中的用法 |
+| --- | --- | --- |
+| `Button appearance="primary"` | 完成当前区域的主要任务 | 实例管理的「创建实例」、表单的「保存」、休眠工作台的「唤醒」、Runtime 概览的「实例调度」。用文字或图标加文字。 |
+| `Button appearance="secondary"` | 主动作旁的次要任务 | 实例管理的「批量创建」与「创建实例」同在工具栏，保持独立入口。弹窗的「取消」、预览的「下载」也用此变体。 |
+| `Button appearance="outline"` | 保留所在面板的底色，同时需要可见边框 | 独立浅色分区中的中性操作组。整组有一致边框和尺寸。 |
+| `Button appearance="subtle"` | 局部、可重复的轻操作 | 工具栏展开搜索、清除输入、行内更多、侧栏折叠。局部重试可用带文字的 Subtle 按钮。 |
+| `Button appearance="transparent"` | 与标题或控制栏融合的轻操作 | 模态关闭、编辑器内局部移除、已提供上下文的图标操作。悬停主要改变前景色。 |
+| 共享危险确认按钮，基于 `Button appearance="primary"` | 用户在确认框中批准不可逆或高风险变更 | 行内「删除实例」放在更多菜单末尾。Dialog 内的「删除实例」才用实底危险色，初始焦点在「取消」。风险确认条件沿用对应业务流程。 |
+| `ToggleButton appearance="subtle"` | 工具或视图状态持续开启或关闭 | 置顶 Agent、工作台工具栏中持续打开的工具。由 `checked` 绑定真实状态，图标与状态一致，可访问名称保持稳定。 |
+| `MenuButton` 或 Subtle 图标 Button + `MenuTrigger` | 显示一组可执行命令 | 带文字的「运行管理」、账户菜单、行内「更多」。触发器只展开已授权的选项。 |
+| `SplitButton` + `Menu` | 一个明确的主命令带多个相关执行方式 | 默认执行一次导出，箭头提供其他导出方式。主命令和菜单各有键盘目标。 |
+| `CompoundButton appearance="secondary"` | 选择命令前需要阅读一行补充说明 | 在显式动作选择区域展示名称及简短影响，说明放 `secondaryContent`。 |
+| `Link` 或路由链接 | 导向有实际地址的详情、页面或文档 | 实例名称到详情、表格事件到审计详情。保留打开新标签等原生链接行为。 |
+| `Toolbar` + 分组的命令控件 | 在同一区域集中提供频繁使用的操作 | 实例管理的搜索、筛选和创建位于紧凑工具栏。搜索与筛选组成查询区，批量创建是独立命令。窄屏优先收起次要筛选。 |
+
+#### 按钮颜色和动效
+
+下表的状态依次是默认、悬停、按下。采用原生变体时由 Fluent UI React v9 输出这些状态。危险确认由共享组件按公开样式接口映射同一组状态。[Fluent React 按钮样式](https://github.com/microsoft/fluentui/blob/master/packages/react-components/react-button/library/src/components/Button/useButtonStyles.styles.ts) · [Web 浅色 Token](https://fluent2.microsoft.design/color-tokens/)
+
+| 变体 | 背景 | 文字与图标 | 描边 |
+| --- | --- | --- | --- |
+| Primary | `colorBrandBackground` #0f6cbd → `colorBrandBackgroundHover` #115ea3 → `colorBrandBackgroundPressed` #0c3b5e | `colorNeutralForegroundOnBrand` #ffffff | 透明，保留组件焦点描边 |
+| Secondary | `colorNeutralBackground1` #ffffff → `colorNeutralBackground1Hover` #f5f5f5 → `colorNeutralBackground1Pressed` #e0e0e0 | `colorNeutralForeground1` 及对应 Hover、Pressed alias | `colorNeutralStroke1` #d1d1d1，悬停与按下用对应 Hover、Pressed alias |
+| Outline | `colorTransparentBackground` 及对应 Hover、Pressed alias，默认浅色主题均透明 | 同 Secondary | 同 Secondary |
+| Subtle | `colorSubtleBackground` 透明 → `colorSubtleBackgroundHover` #f5f5f5 → `colorSubtleBackgroundPressed` #e0e0e0 | `colorNeutralForeground2` 及对应 Hover、Pressed alias，图标交互色沿用 Fluent | 透明 |
+| Transparent | `colorTransparentBackground` 及对应 Hover、Pressed alias | `colorNeutralForeground2` → `colorNeutralForeground2BrandHover` → `colorNeutralForeground2BrandPressed` | 透明 |
+| 危险确认 | `colorStatusDangerBackground3` #c50f1f → `colorStatusDangerBackground3Hover` #b10e1c → `colorStatusDangerBackground3Pressed` #960b18 | `colorNeutralForegroundOnBrand` #ffffff | 透明，沿用主按钮焦点对比 |
+| Link | 继承所在表面 | `colorBrandForegroundLink` → `colorBrandForegroundLinkHover` → `colorBrandForegroundLinkPressed` | 通过下划线或可辨识的导航布局表达链接 |
+
+- **持续选中**使用 ToggleButton 的 `checked`。Subtle 的已选背景是 `colorSubtleBackgroundSelected` #ebebeb，按住瞬间仍使用 Pressed 状态。Primary 的持续选中使用 `colorBrandBackgroundSelected` #0f548c，仅在整体已属于主操作时使用。
+- **尺寸**默认 `size="medium"`，32px 高、14/20px、600 字重、圆角 4px。有文字的中号按钮保留 Fluent 的 96px 最小宽度，纯图标中号为 32×32px。24px 小号用于密集桌面工具栏或单行表格内，40px 大号用于需要更大操作面积的独立动作。移动端触控目标至少 44×44px，命中区独立于图标大小。
+- **焦点**使用官方焦点样式。CM 自有按钮使用 `colorStrokeFocus1` 与 `colorStrokeFocus2` 的高对比组合，强制色使用系统前景。纯图标按钮需要可访问名称与 Tooltip。
+- **禁用与提交中**保留动作语义。填充型按钮使用 `colorNeutralBackgroundDisabled`、`colorNeutralForegroundDisabled`、`colorNeutralStrokeDisabled`，边框是否显示随原变体。请求处理中保留原按钮占位，显示 Spinner 加「保存中」等文本，阻止重复执行，并在结果返回后恢复有效操作和焦点。
+- **动效**标准 Button 的背景、文字和描边过渡使用 `durationFaster` 100ms / `curveEasyEase`。自有按钮沿用同样的属性和时长，尺寸和位置固定。焦点出现及按下语义即时生效，减少动态效果时直接呈现目标状态。
+
+### 搜索、表单与选择
+
+| 组件与变体 | 适用场景 | ClawManager 中的用法 |
+| --- | --- | --- |
+| `Field` | 输入控件需要长期可见的标签、约束或校验反馈 | 名称、资源配额、导入配置用同一容器关联标签、单位、帮助和错误。必填、范围、格式等任务所需信息始终可见。 |
+| `Label` 或原生 `label` | 单个控件仅需名称，或给一个输入组命名 | 开关的可见标签，或用 `fieldset` / `legend` 为一组互斥选项提供标题。使用 Field 时复用其标签关系。 |
+| `InfoLabel` | 标签旁需要可选的口径说明、术语或更多文档 | 费用的统计范围、配额与实测用量区别。完成任务所需的单位、限制和错误放在 Field 的可见帮助中。[Fluent InfoLabel](https://fluent2.microsoft.design/components/web/react/core/infolabel/usage/) |
+| `Input appearance="outline"` | 输入单行文本或精确数值 | 名称、路径、端口、起始序号。数值用适当类型、步长和单位。占位符用于示例，标签始终显示。 |
+| `Textarea`，默认 Outline | 输入可以换行的文本 | 描述、备注和多行环境变量。保持原始换行和键盘编辑。代码语法与行级诊断使用工作台编辑器。 |
+| `SearchBox appearance="outline" size="medium"` | 查找或缩小当前结果集，输入本身是搜索条件 | 管理工具栏初始用 Subtle 图标触发。展开后焦点进入，Esc 收起并还原焦点。保留其他筛选和原有查询规则。 |
+| `Dropdown appearance="outline" size="medium"` | 从固定集合选单值或多值，允许自定义选项呈现 | 状态、类型、Lite/Pro 筛选。显示当前值或已选数，筛选支持清除。选项名称与结果列表的状态词一致。 |
+| 原生 `Select` | 交互要求使用平台原生选择器、列表只含简单文本 | 使用系统弹出列表时核对目标平台行为。需要一致的 Fluent 浮层、搜索或结构化选项时按对应 Dropdown 或 Combobox 规则。 |
+| `Combobox appearance="outline"` | 先输入关键字，再从匹配项确定值 | 负责人或团队数量较多时，用搜索缩小候选范围。区分加载、无匹配与失败，仅在业务允许时接受自由值。 |
+| `TagPicker`，默认 Outline | 搜索并加入多个对象，已选对象需一直可见且能分别移除 | 多个成员或技能的选择。候选项与选择结果使用同一份真实数据，使用 Tag 表达已选项，移除后合理移动焦点。[Fluent TagPicker](https://fluent2.microsoft.design/components/web/react/core/tagpicker/usage) |
+| `RadioGroup` | 一组少量、相互排斥的选项需要同时比较 | 创建实例时同时呈现 Lite 和 Pro 及必要说明。选项多且无需同时比较时用 Dropdown。 |
+| `Checkbox` | 独立勾选、多选、待提交的布尔值或批量行选择 | 技能勾选、表单中随提交生效的布尔值。表头只选中部分记录时显示 indeterminate，并说明选择范围。 |
+| `Switch` | 即时反映开关值，或立即改变当前表单模式 | 「保持运行」即时提交，请求中防重，失败回到已确认值并就近说明。「批量创建」立即切换表单字段，创建仍由提交按钮执行。 |
+| `SpinButton`，默认 Outline | 有明确上下界及固定步长，用户需精确递增或递减 | 批量创建数量等整数。保留可键入数值、最小值、最大值和错误反馈。需要直接输入大范围精确值时用 Input。 |
+| `Slider` + 同步数值输入 | 范围位置有意义，用户需拖动快速粗调，且能输入精确值 | Pro 资源配置可以同时使用滑块和数字输入，两者共用后端规定的范围、步长和单位。金额、端口等精确值只用数值输入。 |
+| `Rating` / `RatingDisplay` | 显式收集用户评分，或展示已收集的真实聚合评分 | 填写评分用可交互 Rating。详情展示分数与明确统计数，密集列表可用紧凑 RatingDisplay。健康、权限和运行级别沿用状态组件。[Fluent Rating](https://fluent2.microsoft.design/components/web/react/core/rating/usage) |
+| `SwatchPicker` | 选择一个颜色是任务本身，并且可选颜色已经定义 | 适用于将来的外观色板等明确选色场景。色块有可读名称和选中标记，必要时放入 Popover。 |
+| 原生日期、时间输入 + `Field` | 输入绝对日期、计划时间或选择查询区间 | 审计导出范围、API Key 到期、计划时间。显示时区，起止分别有标签，并在相邻位置报区间错误。 |
+| 文件输入 + Secondary 按钮 | 从本机导入受支持的文件或目录 | 实例配置、工作区和技能导入。选择后显示文件名、替换和移除。文件类型、授权、大小和失败原因按真实规则反馈。 |
+
+默认字段高度 32px，正文 14/20px，圆角 4px。Outline Input 的表面使用 `colorNeutralBackground1`，常态外边缘用 `colorNeutralStroke1`，底边用 `colorNeutralStrokeAccessible`。悬停外边缘和底边使用各自的 Hover alias。2px 焦点底边用 `colorCompoundBrandStroke`，失焦的错误边框沿官方 `colorPaletteRedBorder2`，校验文字用 `colorStatusDangerForeground1`。只读字段保留可读前景及文字选择能力。禁用态跟随组件的 `colorNeutralForegroundDisabled` 与 `colorNeutralStrokeDisabled`。复合搜索只显示一套焦点指示。选项列表沿用组件内建的悬停、焦点和选中标记，键盘路径覆盖方向键、Enter 和 Escape。[Input](https://fluent2.microsoft.design/components/web/react/core/input/usage) · [Dropdown](https://fluent2.microsoft.design/components/web/react/core/dropdown/usage)
+
+操作名称使用明确动词并在需要时加对象，如“创建实例”“删除实例”。保留任务所需的标签、限制和操作后果。错误说明发生了什么，以及用户能做的下一步。可见标签、提示和无障碍名称统一进入现有国际化体系。
+
+### 组件状态与交互
+
+按组件实际支持的状态逐项验收。截图或设计稿明确状态，代码使用组件属性、浏览器语义或公共状态样式表达相同含义。
+
+| 状态 | 验收标准 |
+| --- | --- |
+| 默认、悬停、按下 | 默认态表达操作优先级。悬停和按下的反馈各有对应样式。触屏可直接完成操作，图标或行操作在键盘焦点进入时可达。 |
+| 键盘焦点 | 焦点清晰且可见，滚动容器、粘性区域和浮层保留可见的焦点目标。浮层关闭后返回触发入口，入口消失时移到最近仍可操作的位置。 |
+| 当前、选中、展开 | 当前页面、选中项和展开状态分别使用适当的 `aria-current`、`aria-selected`、`aria-pressed`、`aria-expanded` 或原生语义。结合文字、勾选、字重或指示条辨识状态。 |
+| 禁用、处理中 | 禁用按组件语义阻止操作，需要说明时提供键盘可读的原因。提交中防止重复执行，显示进度或处理中标签。 |
+| 加载、空数据 | 初次加载维持内容的空间结构。刷新保留已有内容及选择。空列表说明当前确实无数据或无匹配，并在合适位置提供下一步。 |
+| 错误、权限不足 | 字段错误就地关联输入，页面或请求错误就地保留并提供可用的恢复方式。按真实权限呈现操作。 |
+
+对话框打开时焦点进入弹窗，`Tab` 循环在模态内，关闭后焦点返回。删除等危险操作写明对象与后果，初始焦点落在安全选项。选择列表和命令菜单各自保留正确的键盘模型。
+
+### 表格、列表与数据网格
+
+| 组件、密度与布局 | 适用场景 | ClawManager 中的用法 |
+| --- | --- | --- |
+| `Table` 标准型，44px | 浏览并操作多列资源 | 实例和 Runtime Pod 管理。名称为链接，勾选、状态和行内菜单独立。排序、筛选、分页沿用现有数据来源及选择范围。 |
+| `Table` 密集型，桌面 36px | 长时间高密度扫读日志、审计或紧凑预览 | 时间、等级和摘要单行，主要记录通过链接或行操作打开详情。触屏回到标准 44px。 |
+| `Table` 数值型，沿用标准型或已选密度 | 比较跨行的数值、用量或成对字段 | 费用汇总用标准型，创建预览的 Key / Value 可用桌面密集型。表头显示币种或单位，数字右对齐，空值用“—”，显示真实的 0。 |
+| `DataGrid`，默认 `focusMode="cell"` | 需要方向键在多个单元格之间连续查看或操作 | 有真实行选择需求时启用 `selectionMode`。单元格内有多个独立操作且需要行级复合导航时选 `focusMode="composite"`，验收进入、操作、离开的键盘路径。 |
+| `List` 或语义 `ul` / `ol` | 逐项浏览同类对象，一列即可判断下一步 | 最近使用、实例侧栏、成员单列列表。每项有稳定名称和入口。比较多字段用 Table，父子路径用 Tree。 |
+| 说明列表 `dl` | 阅读单个对象的多组属性 | 实例概况、连接详情、只读配置摘要。有多行需要比较、排序或批量操作时用 Table。 |
+| CM 分页控件组合 | 结果按服务端或客户端页组织 | 上一页／下一页使用有名称的按钮，显示当前页和真实总数。页大小可更改时用 Dropdown。筛选更改后的页码按原有查询规则更新。 |
+
+#### 表格视觉与状态
+
+标准表头和行高均为 44px，单元格水平内边距 12px。密集表头和行高均为 36px，水平内边距 8px。两种样式使用 14/20px 正文，表头 600 字重。尺寸为默认文字大小下的视觉基准，放大后按焦点和文字可见性调整控件区域。勾选和单个图标操作列各预留至少 44px。表格在自己的容器横向滚动，窄屏把次要操作收进菜单，保留资源名称、状态、主要操作和键盘入口。
+
+| 部位或状态 | 背景、前景及分隔 | 放置及行为 |
+| --- | --- | --- |
+| 表头 | `colorNeutralBackground2` #fafafa、`colorNeutralForeground3` #616161 | 表头与对应列同向对齐。可排序列使用 `TableHeaderCell` 的排序按钮，当前排序列用图标和 `aria-sort` 表达方向。 |
+| 正常行 | `colorNeutralBackground1` #ffffff、`colorNeutralForeground1` #242424，`colorNeutralStroke2` #e0e0e0 作 1px 水平分隔 | 同表维持一致底色和行高。名称用主要字阶，ID 和单位用次级字阶，状态词与短原因同行。 |
+| 悬停与按下 | `colorSubtleBackgroundHover` #f5f5f5、`colorSubtleBackgroundPressed` #e0e0e0 | 行内可用操作随鼠标或焦点可达，移动端提供常显入口。独立链接、选择控件和菜单保留各自命中区。 |
+| 选中行 | 标准选中 `TableRow appearance="brand"` 或 DataGrid 的 `selectionAppearance="brand"`，静止背景 `colorBrandBackground2` #ebf3fc，悬停和按下沿用 Fluent 行变体 | 复选框或单选标记在悬停及焦点时持续可见，与选中数同步。原生表格用选中控件表达，DataGrid 按自身语义表达。 |
+| 键盘焦点 | 内建的 `colorStrokeFocus2` 焦点轮廓，强制色用系统色 | 普通表格使用 Tab 到表头命令、链接、选择和更多。DataGrid 使用网格键盘规则。截断容器只包住文字，焦点和浮层保留可见空间。 |
+| 错误或警告行 | 行底沿用当前行状态，错误与警告色限于对应的 Badge、文本或图标 | 如 Runtime 失败，显示「失败」与可达的完整原因。状态更新保持行高和按钮位置。 |
+
+名称与 ID、状态与短原因共用一行。优先保留 ID 和必要状态，长名称省略。通过现有链接或可点击、可键盘访问的「详情」入口查看全文。数值与表头对齐，支持等宽数字。批量操作前显示已选数量，表头勾选提示选择范围，确认框沿用实际授权和失败恢复规则。表格刷新沿用原位更新，排序、选中、刷新和分页即时呈现，避免逐行位移和入场。CM 自有行如果加悬停过渡，只允许背景色 `durationFaster` 100ms / `curveEasyEase`。[Fluent Table 行样式](https://github.com/microsoft/fluentui/blob/master/packages/react-components/react-table/library/src/components/TableRow/useTableRowStyles.styles.ts)
+
+### 导航、卡片与面板
+
+#### 导航与视图
+
+| 组件与外观 | 适用场景 | ClawManager 中的用法 |
+| --- | --- | --- |
+| `NavDrawer` + `NavItem` | 在产品主区域或稳定的一级子区域间导航 | 个人区和 Console 外壳按 224px／64px，导航行 40px。NavItem 背景 `colorNeutralBackground4` #f0f0f0、悬停 `colorNeutralBackground4Hover` #fafafa。当前项用 600 字重、品牌填充图标和 `colorCompoundBrandForeground1` 的 4×20px 指示条。折叠后保留可访问名称与 Tooltip。 |
+| `Breadcrumb` + 路由链接 | 表达既有页面层级与当前位置 | 顶栏显示父路径和当前项。非当前链接用 `colorBrandForegroundLink`，当前文字用 `colorNeutralForeground1` 并标记 `aria-current="page"`。 |
+| `TabList` + `Tab` | 在同一任务上下文切换互斥的内容面板 | Skill Hub 内容分类、同一个对象的不同视图。默认中性外观及品牌指示，保持面板与选中项关联。改变产品区域时使用 Nav 或 Link。 |
+| `Tree` + `TreeItem` | 浏览或操作真实父子结构 | 工作区目录、具有多层层级的资源。分支负责展开，叶项负责打开或操作。未展开、选中、焦点各自可辨识，支持方向键。平面列表用 List，同级内容分组折叠用 Accordion。[Fluent Tree](https://fluent2.microsoft.design/components/web/react/core/tree/usage) |
+
+#### 内容与容器
+
+| 组件与变体 | 适用场景 | ClawManager 中的用法 |
+| --- | --- | --- |
+| `Text` 配合语义标题与正文 | 页面需要明确内容层级、辅助说明或数值 | 采用 [Typography](#typography) 的字阶映射。卡片标题、状态说明、指标数值各用相应角色，视觉字号和文档标题层级分别按语义确定。 |
+| CM 语义 `section` | 同一区域内组织静态读数、表格或表单 | Dashboard 指标、管理表格容器和表单区域用 `colorNeutralBackground1`、1px `colorNeutralStroke2`、8px 圆角、16px 内边距，同组对齐。 |
+| `Card appearance="filled"` | 展示可打开或具有独立操作的对象 | 置顶 Agent。白底 `colorNeutralBackground1` + `shadow4`，交互悬停用 `colorNeutralBackground1Hover` + `shadow8`，按下用 `colorNeutralBackground1Pressed`。主要入口、置顶和附属菜单分别可达。 |
+| `Card appearance="filled-alternative"` | 白色容器中需要较弱的对象表面，仍保留卡片层级 | 可独立查看的次级对象用 `colorNeutralBackground2` + `shadow4`，同组对象保持一致外观。 |
+| `Card appearance="outline"` | 在当前背景中用边界区分同类对象，层级保持平面 | 同组模板或选项的独立预览可用透明背景及 `colorNeutralStroke1`。若任务只是从互斥值选一个，选择状态仍使用单选语义。 |
+| `Card appearance="subtle"` | 容器内的轻量对象摘要需要稳定内边距，底色与所在区域融合 | 次要对象预览。沿用 `colorSubtleBackground`，交互反馈使用组件内建状态。 |
+| `Accordion` | 同页有多组可独立阅读的次要内容，用户可按需展开 | 高级配置、非必要的补充说明。标题说明内容，箭头位置一致。必需字段和待处理错误在主路径可见，校验涉及折叠内容时展开并定位。 |
+| `Divider` | 标明内容或操作组的边界 | 全宽分隔不同区域，内缩分隔同一列表的相关项，竖向分隔工具栏中的命令组。同样层级使用相同强度。 |
+| `Image` 或语义 `figure` | 展示一张截图、图片产物或有说明的媒体 | 提供有意义的替代文本。需要图注时使用 figure，查看原图使用可达链接。多张相互独立且需并排比较的截图保持同时可见。 |
+| `Carousel` | 用户按顺序浏览多张图片或预览，每一项可独立查看 | 如同一份产物的多张截图。默认手动前后切换，显示当前项和总数。Dashboard 并列指标、需要横向比较的数据和关键操作保持同时可见。 |
+
+[Fluent Nav 样式](https://github.com/microsoft/fluentui/blob/master/packages/react-components/react-nav/library/src/components/sharedNavStyles.styles.ts) · [Fluent Card](https://fluent2.microsoft.design/components/web/react/core/card/usage) · [Fluent Accordion](https://fluent2.microsoft.design/components/web/react/core/accordion/usage) · [Fluent Divider](https://fluent2.microsoft.design/components/web/react/core/divider/usage) · [Fluent Carousel](https://fluent2.microsoft.design/components/web/react/core/carousel/usage)
 
 ### 图标、头像和品牌
 
-系统导航及动作以 Fluent System Icons 为目标：常规态使用 Regular，选中或强调态按语义使用 Filled；默认 20px，紧凑行可用 16px，重要操作可用 24px。迁移期间现有 Lucide 可暂留，已迁移的同类组件统一图标体系，不在同一工具栏混用不同视觉重量。[官方图标规范](https://fluent2.microsoft.design/iconography)
+新建和迁移页面的导航、工具栏和操作使用 Fluent System Icons。常规态用 Regular，选中或强调态按语义用 Filled；默认 20px，紧凑行可用 16px，重要操作可用 24px。现有 Lucide 随页面迁移替换。[官方图标规范](https://fluent2.microsoft.design/iconography)
 
 **Agent 类型使用真实品牌图标**，不替换为通用显示器或系统图标：OpenClaw、Hermes、OpenCode、DeepSeek Harness 等复用现有资产与类型映射；继续工作与置顶区域均用 32px 容器，保留原始宽高比及颜色，不滤镜染蓝、不裁切 Logo。未知类型有清晰回退和可访问名称。品牌图与系统图标承担不同角色，二者可以共存。
 
+| 组件与变体 | 适用场景 | ClawManager 中的用法 |
+| --- | --- | --- |
+| `Avatar` | 一个人或一个团队的身份 | 个人头像通常圆形，团队头像用组形状。账户入口和成员行使用本人图片或姓名缩写，并保留名称。Agent 类型沿用品牌图标。 |
+| `AvatarGroup` | 同一区域代表多位成员，快速辨认比展示完整属性重要 | 团队参与者默认用 spread。空间不足时用 stack，极紧凑且不需辨认每个成员时可用 pie。溢出显示真实数量，完整成员和角色仍可查看。 |
+| `Persona` | 头像旁需要同时展示姓名和一项身份信息 | 带角色的成员或带身份提示的负责人候选项。支持一行或多行的场景可用完整 Persona。单行管理表格将名字与次级信息同行。 |
+| `PresenceBadge` | 人员确有在线、忙碌、离开等实时信号 | 附着于 Avatar 或 Persona。保留状态文字或可访问名称，未知有独立显示。Agent 生命周期使用 Status Indicator 或 Badge。 |
+| `Badge appearance="tint"` | 表示系统提供的稳定状态、级别或分类 | 成功／运行、警告、失败分别用 `color="success"`、`"warning"`、`"danger"`。仅表达分类时用中性色。标签提供状态词，完整原因另有可达入口。 |
+| `Badge appearance="outline"` 或 `"ghost"` | 次要的系统标签需要弱化视觉权重 | 需要轮廓区分时用 Outline，旁边已有足够界限且只需短分类文字时用 Ghost。同列同场景使用一致外观。 |
+| `CounterBadge` | 需要在对象或范围入口旁显示真实计数 | 例如待处理或未读数量。可访问名称同时说明数量和范围，完整清单通过原入口打开。 |
+| Status Indicator（图标加文本） | 状态变化频繁，用户需要快速扫读对象进展 | 实例／Pod 列表中的「运行」「启动」「离线」「未知」及原因。使用状态图标和语义色配文字，颜色只应用在状态内容。 |
+| `Tag` | 表达用户已经选中的值，唯一附属操作是移除该值 | 当前筛选、已选技能或成员。可移除时提供带名称的移除入口。状态由系统产生时用 Badge。 |
+| `InteractionTag` | 已选对象还有一个与自身直接相关的主要动作 | 点击已选成员打开身份摘要，移除仍是独立次要动作。搜索和加入多个对象使用 TagPicker。 |
+
+[Fluent Avatar](https://fluent2.microsoft.design/components/web/react/core/avatar/usage/) · [Fluent AvatarGroup](https://fluent2.microsoft.design/components/web/react/core/avatargroup/usage) · [Fluent Persona](https://fluent2.microsoft.design/components/web/react/core/persona/usage) · [Fluent Tag](https://fluent2.microsoft.design/components/web/react/core/tag/usage)
+
 ### 图表、状态与数据真实性
 
-Token 和费用曲线有时间范围、轴/单位、悬停与键盘可达的数据详情；当前值与选定时间范围一致。费用区分币种，区分实际账单与估算。曲线缺测保留断点或“暂无数据”，不补零制造趋势。 用量卡片独立切换时间范围，只请求用量接口；保留其他区域的 DOM、交互状态和数据，局部加载时保留原图并提供短暂过渡，失败在卡片内重试。双轴采用蓝色 Token 实线与橙色费用虚线，平滑曲线经过真实样本且不超出相邻值范围。主卡片移除采集状态、统计口径和底部解释段落，保留日期、单位、币种、明确的状态标签以及错误；不完整费用以“小计”字段名表达，估算值用 ≈ 标明。必要的来源和口径放在详情中。
+| 组件 | 适用场景 | ClawManager 中的用法 |
+| --- | --- | --- |
+| 指标值 + 时间范围 | 需要立即读出一个真实总量或当前值 | Token 总量、费用小计、实例数。用 Metric 字阶，单位、期间和覆盖范围就近呈现。 |
+| 折线图／浅面积图 | 时间趋势和缺测连续性有意义 | Token 与费用并列时间轴趋势。用独立轴、单位和实线／虚线区分系列。 |
+| 条形图 | 比较离散对象的量级或排序 | 不同服务、团队或资源项的分布。对齐尺度，类别名称和关键值始终可读。 |
+| 环图 + 图例 | 展示可解释的总体及其组成 | Agent 状态分布。环中心显示运行／总数，图例显示真实分项和数量。 |
+| 表盘 + 文本 | 当前读数需要对照可靠的容量上限 | Dashboard 同时展示 CPU、内存和 Workspace 存储的已用、可用与比例，标明是配额还是实际使用。 |
+| 年度热力图 | 对齐日期并查看活动强度 | 个人活动日历。按时区组织日期，提供可达日期详情和明确定义的强度图例。 |
+| 数据表 | 任务是精确查询、比较或导出数据 | 对应统计范围提供 Tab 可达的数据表或明细入口，保留与主图一致的单位和过滤条件。 |
+
+图表优先核对 Fluent React Charts 对轴、单位、焦点和交互的支持。已有专业图形可在保留真实数据、图例、可访问入口和 Fluent 外层表面的前提下继续使用。Token 和费用曲线有时间范围、轴/单位、悬停与键盘可达的数据详情；当前值与选定时间范围一致。费用区分币种，区分实际账单与估算。曲线缺测保留断点或“暂无数据”，不补零制造趋势。用量卡片独立切换时间范围，只请求用量接口；保留其他区域的 DOM、交互状态和数据，局部加载时保留原图并提供短暂过渡，失败在卡片内重试。双轴采用蓝色 Token 实线与橙色费用虚线，平滑曲线经过真实样本且不超出相邻值范围。主卡片移除采集状态、统计口径和底部解释段落，保留日期、单位、币种、明确的状态标签以及错误；不完整费用以“小计”字段名表达，估算值用 ≈ 标明。必要的来源和口径放在详情中。
 
 资源表盘同时显示 CPU、内存、Workspace 存储的已用 / 可用、单位和百分比；标题明确是配额占用、分配容量还是实际使用率。不能将分配量当实测消耗，不能把实例配额汇总称为集群物理容量。获取失败或暂不支持明确显示未知，不显示 0%。
 
@@ -326,13 +545,60 @@ Agent 环图中心显示“运行数量 / 总数量”，下方标注“运行 /
 
 活动热力图按个人身份、日期和时区统计，提供强度图例、日期详情及键盘替代入口。图表同时提供简短文字概览或数据表，不能让 SVG/Canvas 成为唯一的数据入口。异步同步时保持布局、图例顺序和焦点稳定，不自动重排用户正在操作的卡片。
 
-### 消息、弹窗与工作台
+### 浮层、消息与加载
 
-MessageBar 展示当前页面或区域内需要处理的状态，错误有恢复动作；Toast 用于短暂完成反馈，不能成为失败信息的唯一存留位置。[MessageBar](https://fluent2.microsoft.design/components/web/react/core/messagebar/usage)
+#### 浮层
 
-Dialog 管理焦点、Escape 与关闭后的焦点返回；危险动作说明对象与后果。长内容局部滚动，主操作可达；避免嵌套模态。非阻断说明使用 Popover，附属详情可用 Drawer。[Dialog](https://fluent2.microsoft.design/components/web/react/core/dialog/usage)、[Drawer](https://fluent2.microsoft.design/components/web/react/core/drawer/usage)
+| 组件与外观 | 适用场景 | ClawManager 中的用法 |
+| --- | --- | --- |
+| `Menu`，白底、4px 圆角、`shadow16` | 从触发器选择即时命令或导航入口 | 行内更多、账户菜单、运行管理。方向键移动，Enter/Space 执行，Esc 返回触发器。危险命令靠后并与常用命令分组，文字用 `colorStatusDangerForeground1`。 |
+| Dropdown／Combobox 的 Listbox，白底、4px 圆角、`shadow16` | 展开可选值，用户选择后控件保留该值 | 从筛选触发器或候选输入框对齐展开，视口边缘可翻转和滚动。焦点与已选标记可以同时辨识。 |
+| `Tooltip`，白底、`colorNeutralForeground1`、4px 圆角、等效 `shadow8` | 为现有触发器提供简短纯文本说明 | 图标名称、已省略词的简短解释。悬停、键盘焦点均可显示。必要信息另有可达入口。 |
+| `Popover`，白底、4px 圆角、等效 `shadow16` | 在原位查看结构化信息或完成一个简短附属操作 | 如实例运行详情和保持运行开关。内容受视口约束，关闭后回到触发器。较长详情选择 Drawer。 |
+| Teaching Popover，默认中性外观 | 用户主动查看与当前控件相邻的操作帮助 | 标明适用控件、给出简短可执行步骤，并允许关闭。提交条件和关键后果放在主流程可见位置。 |
+| `InlineDrawer`，medium、逻辑末端 | 阅读或编辑附属内容，同时要对照主区且继续操作 | 宽屏主列表旁核对一条资源详情。主区保持可操作，焦点按布局顺序可达。 |
+| `OverlayDrawer`，medium、逻辑末端、`shadow64` | 附属详情较长，或窄屏空间只够显示当前任务 | 覆盖主区并根据任务使用组件的模态行为。视口内正文可滚动，关闭按钮及主操作可达。 |
+| `Dialog` + `DialogSurface`，白底、8px 圆角、`shadow64`、40% `colorBackgroundOverlay` | 阻断式确认或必须完成的短流程 | 删除实例、放弃未保存更改。短确认统一 440px，窄屏保留两侧边距，长内容最大 600px。正文滚动，动作区末端对齐、间隔 8px、取消在确认前。 |
+| Material acrylic（材质变体） | PDF 中用于轻触关闭的短时浮层 | CM 默认 Fluent 2 Web 的菜单和 Popover 使用不透明中性表面。后续经确认的外观若采用该材质，适用范围限于这些临时浮层，仍须验证叠在不同内容上的对比度。 |
+
+#### 状态反馈与加载
+
+| 组件与变体 | 适用场景 | ClawManager 中的用法 |
+| --- | --- | --- |
+| `Field` 的校验反馈 | 错误关联到一个具体输入，且可在原位修复 | 无效范围、日期顺序、文件格式。说明问题和修复方式，并通过控件关系让辅助技术读到。 |
+| `MessageBar`，按实际情况选 `intent` | 状态或错误影响整个表单、区域、Drawer 或页面，需要在原处持续可见 | 筛选失败在表格区域给重试，提交失败在表单给恢复动作。Info 用 `colorNeutralBackground3`、`colorNeutralStroke1`，成功、警告、错误用各自 `colorStatus…Background1`、`…Border1` 和语义图标。 |
+| `Toast`，指定语义 `intent` | 低风险操作结束，用户可继续当前任务 | 已复制、保存完成。带动作的 Toast 只用于确有可执行后续操作的情况。持久错误或部分失败的结果留在相应区域或 Dialog。 |
+| `Skeleton` | 首次加载一块已知结构的内容，预计等待超过一秒 | 实例表格初载保留表头、列宽和行高。字块、图形遵循内容形状，用 `colorNeutralStencil1` / `colorNeutralStencil2`。刷新时保留已有数据。 |
+| `Spinner` + 进度文字 | 一个局部动作正在处理，暂无可量化进度 | 表单正在保存、实例正在唤醒。显示在原操作区，防止重复提交。 |
+| `ProgressBar`，可确定进度 | 后端提供可靠的完成量和总量 | 上传、可统计的批处理、资源容量。明确单位和实际进度，不用预设时钟模拟百分比。 |
+| `ProgressBar`，不确定进度 | 较长任务需要持续进度提示，只有真实阶段或进行中信号 | 导入或恢复任务可显示当前阶段，进度条维持不确定状态。已知失败在任务区域留恢复入口。 |
+| CM 空态组合 | 真实请求完成后结果为空、筛选无匹配或用户暂无访问权限 | 无对象时提供有权限的首个创建入口，无匹配时提供清除筛选。权限不足、服务错误和加载各保留对应状态说明。 |
+
+[Fluent Dialog](https://fluent2.microsoft.design/components/web/react/core/dialog/usage) · [Fluent Drawer](https://fluent2.microsoft.design/components/web/react/core/drawer/usage) · [Fluent MessageBar](https://fluent2.microsoft.design/components/web/react/core/messagebar/usage) · [Fluent Menu](https://fluent2.microsoft.design/components/web/react/core/menu/usage)
+
+### 关键页面的组合规则
+
+| 页面或流程 | 组件组合 |
+| --- | --- |
+| 实例管理 | 同行工具栏使用 Primary「创建实例」、Secondary「批量创建」、Subtle 搜索和筛选 Dropdown。用标准 Table，名称与 ID 同行，主要行命令和更多各自可达。删除从更多进入 Dialog；批量部分失败时 Dialog 或管理窗口列出失败对象和原因并保留失败项选择。 |
+| Runtime 概览和 Pod 管理 | 概览右侧 Primary「实例调度」+ Subtle「更多」。Pod 管理用标准 Table，运行状态单元格放点或图标、状态词及短原因。Pod 维护进入更多，按既有预检结果启用相应命令。 |
+| 实例创建 | 单页表单使用 Field 与 Input / RadioGroup / Switch，提交 Primary「创建实例」，退出或取消用 Secondary。右侧预览是静态面板，环境变量用 Key / Value 表格。提交不替换整页，错误保留输入并回到可修复字段。 |
+| 管理审计与费用 | 审计用桌面密集 Table 和可达详情入口，严重状态由 Badge 与文字表达。费用用标准 Table，单位与币种随列头，数字右对齐，缺测显示“—”。 |
+| 实例工作台恢复 | 休眠内容区用 Primary「唤醒」和原生类型状态图标，操作中在原位置显示进度。失败用区域内 MessageBar 与可用的重试。工作台正常态的技能入口和「运行管理」各自可达。 |
+
+### 工作台与嵌入内容
 
 团队对话、实例工作台、编辑器、终端及 Console 沿用各自信息结构，用共享外壳、工具栏和焦点规则连接；不能为统一卡片外观破坏长会话、代码阅读、流式输出或终端尺寸。个人数据与平台管理数据遵循现有权限范围，不能混合呈现为用户拥有的资源。
+
+| 组件或组合 | 适用场景 | ClawManager 中的用法 |
+| --- | --- | --- |
+| CM 可调分栏 + 可聚焦分隔条 | 两个或多个工作区要并行可见，宽度需要用户调整 | 实例工作台与团队工作区。分隔条支持拖动和键盘，保留最小尺寸、焦点和已有会话。静态视觉分组使用 Divider。 |
+| CM 消息流 + 输入区 | 按时间阅读及继续团队或 Agent 会话 | 消息流逐条表达作者、内容和发送状态，长文本可换行。输入区使用多行编辑和发送按钮，保留发送、换行与输入法组合行为。 |
+| CM 文件列表／`Tree` | 通过名称、属性或目录层级查找文件 | 需要比较大小、更新时间等字段时用单行 Table。需要浏览真实的多级目录时用 Tree。文件操作从行内菜单进入，受当前工作区权限约束。 |
+| 工作区代码编辑器 | 需要多行代码、语法、行定位或存储中的文件编辑 | 复用工作区文本编辑器。工具栏提供保存、打开或只读标识，保留编辑缓冲区和错误定位。普通表单描述使用 Textarea。 |
+| Markdown／媒体预览 | 阅读文件内容且无需编辑 | Git 文档、文本产物或图片按类型使用已有预览。链接与代码块保持可读，失败或不支持时在原位置说明。 |
+| 终端 | 用户需要交互式命令会话或终端输出 | 复用现有终端与会话连接，工具栏只提供有意义的终端动作。窗口尺寸和主题变更保持连接、缓冲区与键盘交互。 |
+| 原生 Agent 嵌入容器 | 打开实例原生界面，需要保留其文档或会话边界 | CM 外壳负责名称、状态、业务命令及加载提示。嵌入页通过既有边界、权限和公开入口运行。 |
 
 实例工作台顶部保留可重命名的实例名称和生命周期状态，去掉返回按钮及类型、模式、Runtime、Workspace 大小、更新时间的元信息行。名称内联编辑，Enter/保存提交，Escape/取消返回；失败保留输入，保存仅更新名称，不重启实例。Share Link 旁提供技能管理按钮，在弹窗内管理；启动/停止、重启、配置环境变量并重启、删除收进“运行管理”菜单，删除仍需确认。不在工作台底部显示技能折叠面板或 Session Token Usage。桌面采用“实例列表 / Agent / 工作区”三栏，默认比例 **1.2:6.8:2**；两个分隔条支持拖动与键盘调宽，调整宽度不重载 Agent 会话。实例列表沿用 Fluent 中性表面和选中蓝，使用真实类型图标、名称、状态、服务端搜索与分页，可直接切换当前用户有权访问的实例。实例状态由原生类型图标表达，行背景保持中性：运行中原图轻呼吸；停止灰化并在一次熄灭动效后静止；故障保留静止的原图，仅放大、缩小红色三角感叹号，不晃动图标、不加背后红圈；休眠采用睡姿、Zz 和缓慢呼吸。动效尊重减少动态效果并在离屏、页面隐藏时暂停。当前选中项保留柔和的蓝色渐变高亮与 1px 半透明渐变轮廓；状态保留可访问名称和悬停文字。实例列表标题栏仅保留列表隐藏按钮，不放重复的全屏或展开管理按钮；隐藏后在 Agent 标题栏的实例状态后提供恢复列表按钮，与名称、状态同行，不单独占用一行；按钮不依赖原生页面加载或实例运行状态，Agent 全屏时仍可达，恢复列表同时退出全屏并将焦点返回列表标题栏，保留列表位置。实例列表顶部第一项为“创建实例”，第二项为“实例管理”，随后显示搜索和真实实例；空列表时主窗口显示创建提示及按钮，右上角不放创建入口。切换时使用短时、账户与查询隔离的无凭据列表快照消除空列表，并保留后台同步；详情、原生页面内容及工作区使用短暂淡入，尊重减少动态效果设置。原生文档隔离保持有效。当前实例已删除时清理该账户的导航快照，转到剩余可访问且非删除中的实例；没有剩余实例则在主窗口显示创建提示。元数据 404 的恢复不等待状态请求，服务错误保留重试路径。批量删除部分失败时，在管理窗口列出实例名称与原因并保留失败项选择，不用原生 alert 仅展示汇总数量。隐藏工具区后保留实例列表并将剩余空间分给 Agent；恢复时保持各栏最小宽度。窄屏用弹窗选择实例，Agent 与工具上下排列，保持可用高度。实例或账户切换必须隔离旧请求、弹窗、分享凭据和编辑状态，保留浏览器预览的文档隔离机制：普通运行、休眠、停止和故障实例切换不因访问元数据触发整页重载，仅实际打开 credentialless 预览时绑定当前实例的文档分区；已使用预览的文档切换到其他实例时仍建立新分区。
 
@@ -346,29 +612,57 @@ Dialog 管理焦点、Escape 与关闭后的焦点返回；危险动作说明对
 
 ### 动效与可访问性
 
-动效帮助理解变化：控件反馈 100–150ms，卡片/图表局部变化 150–200ms，抽屉和 Dialog 200–300ms。使用 Fluent duration 与 curve Token，具体值见 sidecar；避免夸张弹跳、全页依次入场、常驻呼吸灯及数据数字不停翻动。[官方动效规范](https://fluent2.microsoft.design/motion)、[duration](https://raw.githubusercontent.com/microsoft/fluentui/master/packages/tokens/src/global/durations.ts)、[curve](https://raw.githubusercontent.com/microsoft/fluentui/master/packages/tokens/src/global/curves.ts)
+#### 场景、时长与缓动
 
-图表初次显现或数据变化可短暂过渡；仪表盘指针只随真实数据变化，不循环摆动。`prefers-reduced-motion: reduce` 关闭位移、描边和数值滚动等非必要动画，直接呈现最终值；后台或不可见区域暂停持续动画，不延迟交互。
+官方组件保留其内建动效。共享自有实现按表映射，动效属性限于表中所列。表内长度、时长和缓动使用对应 Token。[Fluent 动效规范](https://fluent2.microsoft.design/motion) · [Duration](https://github.com/microsoft/fluentui/blob/master/packages/tokens/src/global/durations.ts) · [Curves](https://github.com/microsoft/fluentui/blob/master/packages/tokens/src/global/curves.ts)
 
-所有交互提供键盘路径、可见焦点、正确名称与合理的焦点返回。支持文本放大 200% 和页面缩放后的重排，在等效 320px 宽度下内容可用；保留必要二维数据的局部滚动。`forced-colors` 下边界、焦点和状态仍可辨识。加载、空态、权限不足、错误和长内容均是正式状态，不以预览常量代替。
+| 场景 | 动画属性 | Duration / Curve |
+| --- | --- | --- |
+| Button、ToggleButton 的悬停和按下 | 背景、文字与描边 | `durationFaster` 100ms / `curveEasyEase`。位置、点击区域和文案占位保持稳定。 |
+| NavItem 切换、悬停 | 背景、当前项指示条与图标显隐 | `durationFaster` 100ms / `curveLinear`，随真实当前路由更新。 |
+| CM 自有字段的焦点底边 | 2px 底边水平显现与收起 | 展开 `durationNormal` 200ms / `curveDecelerateMid`，收起 `durationUltraFast` 50ms / `curveAccelerateMid`。键盘焦点即时生效并保持可辨识。 |
+| CM 自有 Menu、Popover 等小浮层 | 开启只淡入，关闭即时 | 开启 `durationFaster` 100ms / `curveDecelerateMid`。位置确定、测量和焦点管理独立于动画。 |
+| 官方 Dialog | 内建缩放，遮罩同步 | 开启和关闭均为 `durationGentle` 250ms，进入 `curveDecelerateMid`，退出 `curveAccelerateMin`。 |
+| 官方 Drawer | 从所在边缘滑入滑出 | small 250ms、medium 300ms、large 400ms、full 500ms。进入 `curveDecelerateMid`，退出 `curveAccelerateMin`。 |
+| CM 自有交互卡片、工作台局部内容替换 | 卡片背景和阴影，内容只淡入 | `durationFast` 150ms。卡片反馈用 `curveEasyEase`，内容淡入用 `curveDecelerateMid`。 |
+| 图表的真实数据变化 | 指针旋转及环图段描边 | `durationNormal` 200ms / `curveDecelerateMid`。指标文字直接更新，状态变化来自真实数据。 |
+| 表格排序、分页、后台刷新与选择 | 即时更新内容或状态，保持结构 | 0ms 布局动效。自有表格行悬停只过渡背景色，100ms / `curveEasyEase`。 |
+
+[Fluent Dialog 默认动效](https://github.com/microsoft/fluentui/blob/master/packages/react-components/react-dialog/library/src/components/DialogSurfaceMotion.ts) · [Fluent Drawer 默认动效](https://github.com/microsoft/fluentui/blob/master/packages/react-components/react-drawer/library/src/shared/drawerMotions.ts)
+
+实例工作台与休眠提示的原生类型图标使用 `AgentStateIcon` 专用动效。运行呼吸 2.8s 循环，停止灰化 700ms 一次，故障只缩放警示标记 2.2s 循环，休眠姿态和 Zz 为 3.4s 循环。运行、故障、休眠使用 ease-in-out，停止使用 `cubic-bezier(.16,1,.3,1)`。离屏、后台暂停持续动画，回到可见区域继续当前动效。
+
+`prefers-reduced-motion: reduce` 下直接呈现控件、状态和图表最终值，加载保留文本或静态进度指示。焦点转移、关闭浮层、错误展示等交互即时响应。
+
+所有交互提供正确可访问名称和键盘路径。支持文本放大 200% 和页面缩放后的重排，在等效 320px 宽度下内容可用。必要的二维数据使用局部滚动。`forced-colors` 下边界、焦点和状态仍可辨识。加载、空态、权限不足、错误和长内容均按正式状态设计并使用实际状态数据驱动。
 
 ### 迁移与验收
 
-迁移顺序：公共 Token 与外壳 → 按钮/表单/菜单/浮层 → 表格与管理页 → Dashboard 与工作台 → 团队及管理员边界场景。每批页面完成后检查公共调用方，再继续扩展。旧页面尚未迁移不构成新页面沿用旧样式的理由；详细任务由后续实施计划安排，不把历史 08 计划当作 Fluent 2 迁移完成清单。
+先迁移公共 Token 与外壳，再迁移按钮、表单、菜单与浮层，随后覆盖表格和管理页、Dashboard 和工作台、团队及管理员边界场景。首组端到端样例用实例管理页的搜索、筛选、单行表格、批量选择和删除确认。每批核对共享组件的正常入口和受影响的调用方，尤其是团队嵌入页、实例工作台和管理员页面。
 
-实际改 UI 时检查 1440、1280、768、390 宽度，补充 320px 重排与用户实际大屏；Dashboard 核对 1440×900、1280×800。覆盖中英文与日/韩/德长文本、加载/空/错误/禁用/长名称、键盘/焦点返回、缩放、减少动态效果、真实数据同步和关键工作流。文档校验不能替代后续页面的浏览器验收。
+#### UI 评审清单
+
+| 核对项 | 合格条件 |
+| --- | --- |
+| Token 与组件 | 对照组件选型目录核对本次涉及的组件、变体和选型场景。组件有近似选项时，按可观察的任务区别核对，例如命令与表单值、选中对象与系统状态、阻断确认与附属操作。实际渲染核对该组件的适用状态、尺寸、圆角、对比度及浮层主题。 |
+| 布局与内容 | 实际浏览器检查 1440、1280、768、390px，补充等效 320px 重排。Dashboard 核对 1440×900 与 1280×800。检查中英文及日、韩、德文长文本，确认表格仅在自身容器滚动。 |
+| 状态与可访问性 | 覆盖适用的正常、加载、空、错误、禁用与长内容。用键盘跑通主流程、选择列表、菜单和 Dialog，核对焦点可见、关闭后返回、200% 文本放大及强制色。核对受影响控件的动效属性、时长和缓动，同时检查减少动态效果。 |
+| 业务回归 | 验证涉及的路由、API、权限、键盘交互与自动同步。实例管理检查搜索、筛选分页、Lite 批量选择和危险确认。涉及工作台时验证编辑内容及连接状态的保留。 |
+| 交付记录 | PR 写明涉及的组件和变体、对应任务与验收状态，附实际浏览器截图或步骤、受影响的公共调用方、类型检查及关键行为回归结果。规范、独立预览、页面实现和部署状态各按实际证据记录。 |
+
+所有适用项通过后才可完成 UI 验收。存在官方组件能力缺口时，按「规则与参考来源」记录选型和公共实现，仍须通过对应检查。历史预览用于核对视觉方向，变更以实际应用的浏览器结果验收。
 
 构建、打包与部署方式由实际开发、CI 和目标部署环境确定，环境专属约束不作为项目通用设计要求。
 
 ## Do's and Don'ts
 
-- **Do** 将本文和公共主题作为 CM 整体 UI 的统一依据，使用 Fluent 2 的语义层级及完整交互状态。
+- **Do** 按本文的组件选型与 UI 评审清单交付。使用公共主题、语义层级及完整交互状态。
 - **Do** 保留彩色品牌、真实 Agent 类型图标和鲜明而可读的数据图表，让颜色服务于操作和信息。
 - **Do** 保留顶部位置导航、紧凑工具栏、单行表格、侧栏边缘折叠按钮及已有自动同步。
 - **Do** 让 Token、资源和 Agent 状态分别表达；让继续工作与置顶面板整体对齐。
 - **Do** 明确数据范围、单位、币种与缺测状态，保留业务权限和真实状态语义。
-- **Don't** 继续混用旧 08、Ant Design Pro 或任意页面自建的主题 Token；历史材料不作为新的视觉权威。
-- **Don't** 把 Fluent 简化成换蓝色、全屏玻璃、紫色主题或大面积装饰性渐变。
+- **Don't** 将旧 08、Ant Design Pro、页面自建主题或对组件库内部类名的覆盖带入新建及迁移页面。
+- **Don't** 在默认外观使用紫色主题、全屏玻璃、大面积彩色铺底或装饰性渐变。
 - **Don't** 将真实 Logo 换成通用图标，或为了密度把正文缩小、裁掉内容、把重要环图缩成装饰。
 - **Don't** 在管理概览重复大标题、设计解释、刷新按钮或更新时间；不要把批量创建藏进筛选。
 - **Don't** 使用仅靠颜色、仅鼠标可达、失去焦点或没有文字替代的数据图表。
