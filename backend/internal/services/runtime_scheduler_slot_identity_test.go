@@ -99,3 +99,29 @@ func TestSlotSchedulerRequiresInventoryButLegacyAllowsMissingUID(t *testing.T) {
 		t.Fatalf("legacy start changed: %v", err)
 	}
 }
+
+func TestFreshRuntimePoolIsSpecificToItsApprovedInstance(t *testing.T) {
+	active := true
+	ordinaryUID, freshUID := "ordinary", "fresh"
+	ip, endpoint := "10.2.0.2", "https://10.2.0.2:19090"
+	now := time.Now()
+	ordinary := models.RuntimePod{ID: 1, RuntimeType: RuntimeTypeOpenCode, Namespace: "tenant", PodName: "ordinary", DeploymentName: "pool", PodUID: &ordinaryUID, PodIP: &ip, AgentEndpoint: &endpoint, ImageRef: "registry/opencode:old", State: "ready", KubernetesReady: true, LastSeenAt: &now}
+	fresh := ordinary
+	fresh.ID, fresh.PodName, fresh.DeploymentName, fresh.PodUID, fresh.ImageRef = 2, "fresh", "pool-new-7", &freshUID, "registry/opencode:new"
+	live := []models.RuntimePod{ordinary, fresh}
+	live[1].PoolPurpose, live[1].SchedulingEnabled = "fresh-instance-7", &active
+	s := &RuntimeScheduler{runtimeNamespace: ordinary.Namespace}
+	for _, tc := range []struct {
+		id   int
+		want int64
+	}{{0, 1}, {6, 1}, {7, 2}} {
+		got := s.currentRuntimePodsForInstance([]models.RuntimePod{ordinary, fresh}, live, tc.id)
+		if len(got) != 1 || got[0].ID != tc.want {
+			t.Fatalf("instance %d got %+v, want Pod %d", tc.id, got, tc.want)
+		}
+	}
+	live[1].KubernetesReady = false
+	if got := s.currentRuntimePodsForInstance([]models.RuntimePod{ordinary, fresh}, live, 7); len(got) != 0 {
+		t.Fatalf("approved scope fell back to an unrelated image: %+v", got)
+	}
+}

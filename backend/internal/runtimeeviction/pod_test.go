@@ -258,3 +258,31 @@ func TestInspectPodLedgerOwnersReadOnlyExactUID(t *testing.T) {
 		t.Fatal("accepted traversal type")
 	}
 }
+
+func TestInspectPodLedgerOwnersRequiresVerifiedStorageOwner(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("requires ownership fixture with distinct management and storage UIDs")
+	}
+	s, _, root, _ := podFixture(t)
+	dir := filepath.Join(root, ".clawmanager-slot-locks")
+	ledgerPath := filepath.Join(dir, "opencode-2-1.json")
+	const storageUID = 10001
+	for _, p := range []string{root, dir, ledgerPath} {
+		if err := os.Chown(p, storageUID, storageUID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := InspectPodLedgerOwners(root, s.RuntimeType, s.PodUID); err == nil {
+		t.Fatal("accepted a ledger from a different storage owner by default")
+	}
+	owners, err := InspectPodLedgerOwnersOwnedBy(root, s.RuntimeType, s.PodUID, storageUID)
+	if err != nil || len(owners) != 1 || owners[0].PodUID != s.PodUID {
+		t.Fatalf("failed to inspect verified owner ledger: %+v, %v", owners, err)
+	}
+	if err := os.Chown(ledgerPath, 0, 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := InspectPodLedgerOwnersOwnedBy(root, s.RuntimeType, s.PodUID, storageUID); err == nil {
+		t.Fatal("accepted a ledger whose file owner differs from the verified storage owner")
+	}
+}

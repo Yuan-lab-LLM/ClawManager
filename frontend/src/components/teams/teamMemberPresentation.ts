@@ -1,7 +1,7 @@
 import type { TeamMember } from "../../types/team";
 
 export function memberSchedule(status: string) {
-  const labels: Record<string, string> = { creating: "创建中", idle: "空闲", busy: "执行中", failed: "失败", offline: "离线", deleting: "删除中", deleted: "已删除" };
+  const labels: Record<string, string> = { creating: "创建中", idle: "待命", busy: "执行中", failed: "失败", offline: "离线", deleting: "删除中", deleted: "已删除" };
   return { label: labels[status] || status || "待确认", tone: status === "busy" ? "active" : status === "failed" ? "error" : "neutral" };
 }
 
@@ -18,7 +18,7 @@ export function memberHasRuntimeFault(member: TeamMember) {
 
 export function memberRuntime(availability?: string, runtimeStatus?: string) {
   if (['creating', 'starting', 'pending'].includes((runtimeStatus || '').trim().toLowerCase())) return { label: '启动中', tone: 'neutral' };
-  const labels: Record<string, string> = { idle: "空闲", busy: "忙碌", blocked: "受阻", offline: "离线", unknown: "待确认" };
+  const labels: Record<string, string> = { idle: "在线", busy: "忙碌", blocked: "受阻", offline: "离线", unknown: "待确认" };
   const value = availability || "unknown";
   return { label: labels[value] || value, tone: value === "blocked" || value === "offline" ? "error" : value === "busy" ? "active" : value === "idle" ? "good" : "unknown" };
 }
@@ -38,12 +38,13 @@ export function memberRailState(member: TeamMember) {
       return { label: member.runtime_observation.reason === 'collaboration_unconfirmed' ? '协作待确认' : '待确认', tone: 'unknown' };
     }
     const delayed = member.runtime_observation.reason === 'runtime_inventory_delayed' ? ' · 状态更新中' : '';
-    return member.availability === 'busy' ? { label: `执行中${delayed}`, tone: 'active' } : { label: `空闲${delayed}`, tone: 'good' };
+    return member.availability === 'busy' ? { label: `执行中${delayed}`, tone: 'active' } : { label: `在线${delayed}`, tone: 'good' };
   }
   if (memberIsStarting(member)) return { label: '启动中', tone: 'neutral' };
   if (member.status === 'creating') return memberSchedule(member.status);
   if (!member.availability || !["idle", "busy"].includes(member.availability)) return memberRuntime(member.availability);
   if (member.availability === "busy") return { label: "运行忙碌", tone: "active" };
+  if (member.status === "idle") return { label: "在线", tone: "good" };
   return memberSchedule(member.status);
 }
 

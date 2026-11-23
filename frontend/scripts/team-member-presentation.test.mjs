@@ -9,7 +9,11 @@ const { memberRuntime, memberSchedule, memberRailState, memberPageSize, memberSu
 for (const status of ['creating', 'idle', 'busy', 'failed', 'offline', 'deleting', 'deleted']) assert.ok(memberSchedule(status).label);
 assert.equal(memberRuntime(undefined).label, '待确认');
 assert.equal(memberRuntime('unknown').tone, 'unknown');
-assert.equal(memberRuntime('idle').label, '空闲', 'heartbeat does not prove desktop access');
+assert.equal(memberRuntime('idle').label, '在线', 'presentation label does not grant desktop access');
+assert.equal(memberSchedule('idle').label, '待命', 'scheduling readiness remains distinct from runtime liveness');
+assert.equal(memberRailState({status:'idle',availability:'idle'}).label, '在线');
+assert.equal(memberRailState({status:'idle',availability:'offline'}).label, '离线');
+assert.equal(memberRailState({status:'idle',availability:'idle',runtime_status:'stopped'}).label, '已停止');
 assert.equal(memberRuntime('future-status').label, 'future-status', 'unknown protocol values must not become healthy');
 assert.equal(memberRuntime('future-status').tone, 'unknown');
 assert.equal(memberRailState({ status: 'idle', availability: 'future-status' }).tone, 'unknown');
@@ -19,7 +23,7 @@ assert.equal(memberRailState({ status: 'idle', availability: 'unknown' }).label,
 assert.equal(memberRailState({ status: 'failed', availability: 'idle' }).label, '失败');
 assert.equal(memberRailState({ status: 'idle', availability: 'busy' }).label, '运行忙碌');
 assert.equal(memberRailState({ status: 'idle', availability: 'idle', blocked_reason: 'fault' }).label, '运行异常');
-assert.equal(memberRailState({status:'idle',availability:'idle',runtime_observation:{state:'online',reason:'runtime_inventory_delayed'}}).label,'空闲 · 状态更新中');
+assert.equal(memberRailState({status:'idle',availability:'idle',runtime_observation:{state:'online',reason:'runtime_inventory_delayed'}}).label,'在线 · 状态更新中');
 assert.equal(memberRailState({status:'busy',availability:'busy',runtime_observation:{state:'offline'}}).tone,'error');
 for(const runtime_status of ['creating','starting','pending']){
   const warming={status:'creating',availability:'unknown',runtime_status};

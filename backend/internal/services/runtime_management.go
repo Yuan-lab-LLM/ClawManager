@@ -21,6 +21,7 @@ import (
 const RuntimeForceEvictionUnavailable = "Runtime management requires the confirmed slot teardown lifecycle"
 
 type RuntimeSchedulingRequest struct {
+	RecoveryTeamID     int    `json:"recovery_team_id,omitempty"`
 	SourcePodUID       string `json:"source_pod_uid,omitempty"`
 	RetryOperationID   string `json:"retry_operation_id,omitempty"`
 	SourcePodID        int64  `json:"source_pod_id,omitempty"`
@@ -72,13 +73,14 @@ type RuntimeManagementOperation struct {
 }
 
 type RuntimeManagementService struct {
-	processMu        sync.Mutex
-	sess             db.Session
-	scheduler        *RuntimeScheduler
-	guards           *repository.NorthboundRepository
-	token            string
-	idlePodSince     map[string]time.Time
-	lastIdlePoolScan time.Time
+	processMu                     sync.Mutex
+	sess                          db.Session
+	scheduler                     *RuntimeScheduler
+	guards                        *repository.NorthboundRepository
+	token                         string
+	idlePodSince                  map[string]time.Time
+	lastIdlePoolScan              time.Time
+	verifiedFaultRecoveryOverlays sync.Map
 }
 
 func NewRuntimeManagementService(sess db.Session, scheduler *RuntimeScheduler, guards *repository.NorthboundRepository) *RuntimeManagementService {
@@ -217,6 +219,9 @@ func (s *RuntimeManagementService) Scheduling(ctx context.Context, podID int64, 
 }
 
 func (s *RuntimeManagementService) Preflight(ctx context.Context, req RuntimeSchedulingRequest) (*RuntimeSchedulingPreflight, error) {
+	if req.RecoveryTeamID != 0 && req.Mode != "recovery" {
+		return nil, errors.New("Team recovery scope requires fault recovery mode")
+	}
 	if req.Mode == "orphan-recovery" {
 		return s.orphanRecoveryPreflight(ctx, req)
 	}
@@ -506,6 +511,19 @@ func (s *RuntimeManagementService) Submit(ctx context.Context, req RuntimeSchedu
 }
 
 func (s *RuntimeManagementService) Evict(ctx context.Context, podID int64, req RuntimeSchedulingRequest, actor *int) (*RuntimeManagementOperation, error) {
+	if req.RecoveryTeamID != 0 {
+		if req.Mode != "recovery" || actor == nil || *actor < 1 || req.SourcePodID != podID || req.TargetPodID != 0 || req.TargetSlot != 0 {
+			return nil, errors.New("Team fault recovery requires an administrator and exact source with no forced target")
+		}
+		plan, err := s.recoveryEvictionPreflight(ctx, req)
+		if err != nil {
+			return nil, err
+		}
+		if !plan.Allowed {
+			return nil, errors.New(strings.Join(plan.Blockers, "; "))
+		}
+		return s.enqueue(ctx, "eviction", req, plan.Items, actor)
+	}
 	if req.Mode == "orphan-recovery" {
 		return s.submitOrphanRecovery(ctx, podID, req, actor)
 	}
@@ -675,6 +693,14 @@ func (s *RuntimeManagementService) enqueue(ctx context.Context, kind string, req
 	requestJSON, _ := json.Marshal(req)
 	itemsJSON, _ := json.Marshal(op.Items)
 	err = s.sess.TxContext(ctx, func(tx db.Session) error {
+		if req.RecoveryTeamID != 0 {
+			if kind != "eviction" || req.Mode != "recovery" {
+				return errors.New("invalid Team fault recovery operation")
+			}
+			if err := repository.ReserveTeamFaultRecovery(ctx, tx, req.RecoveryTeamID, req.InstanceIDs, op.ID); err != nil {
+				return err
+			}
+		}
 		if err := repository.LockRuntimeManagementAdmission(ctx, tx); err != nil {
 			return err
 		}

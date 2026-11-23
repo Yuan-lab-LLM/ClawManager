@@ -1,0 +1,298 @@
+.portal-unified {
+  display:grid;
+  grid-template-columns:clamp(224px,18vw,270px) minmax(0,1fr);
+  gap:10px;
+  height:100dvh;
+  min-height:0;
+  padding:10px;
+  background:var(--cm-canvas);
+  color:var(--cm-ink);
+}
+.portal-unified:has(.portal-unified-instance[data-directory-collapsed=true]) {grid-template-columns:minmax(0,1fr)}
+.portal-unified:has(.portal-unified-instance[data-directory-collapsed=true]) > .portal-unified-rail {display:none}
+.portal-unified-rail {
+  --portal-card-radius:10px;
+  --portal-card-gap:8px;
+  --portal-card-header-height:60px;
+  --portal-card-logo-box:44px;
+  --portal-card-logo-gap:8px;
+  display:flex;
+  flex-direction:column;
+  min-width:0;
+  min-height:0;
+  border:1px solid var(--cm-border);
+  border-radius:12px;
+  background:var(--cm-surface);
+}
+.portal-unified-brand {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  min-height:50px;
+  padding:0 10px 0 14px;
+}
+.portal-unified-brand img {width:96px;height:auto;object-fit:contain}
+.portal-unified-account {position:relative;z-index:40}
+.portal-unified-account summary {
+  display:grid;
+  place-items:center;
+  list-style:none;
+  width:32px;
+  height:32px;
+  border-radius:var(--cm-radius-control);
+  color:var(--cm-muted);
+  cursor:pointer;
+}
+.portal-unified-account summary:hover {background:var(--cm-subtle);color:var(--cm-primary)}
+.portal-unified-account summary::-webkit-details-marker {display:none}
+.portal-unified-account-menu {
+  position:absolute;
+  top:100%;
+  right:0;
+  width:200px;
+  display:grid;
+  gap:8px;
+  padding:12px;
+  background:var(--cm-surface);
+  border:1px solid var(--cm-border);
+  border-radius:var(--cm-radius-panel);
+  box-shadow:var(--cm-shadow-16);
+}
+.portal-unified-nav {
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  padding:0 10px 8px;
+  gap:5px;
+}
+.portal-unified-nav button {
+  display:flex;
+  align-items:center;
+  gap:6px;
+  min-height:34px;
+  min-width:0;
+  padding:5px 8px;
+  border-radius:8px;
+  background:transparent;
+  color:var(--cm-muted);
+  white-space:nowrap;
+  text-align:left;
+}
+.portal-unified-nav button:hover,.portal-unified-nav button[aria-selected=true] {
+  background:var(--cm-selected);
+  color:var(--cm-primary);
+}
+.portal-unified-nav button[data-primary=true] {
+  grid-column:1/-1;
+  min-height:42px;
+  padding-inline:7px 10px;
+  background:var(--cm-subtle);
+  color:var(--cm-ink);
+  font-weight:600;
+  border:1px solid transparent;
+}
+.portal-unified-nav button[data-primary=true]:is(:hover,[aria-selected=true]) {
+  background:linear-gradient(100deg,var(--cm-selected),var(--cm-subtle));
+  color:var(--cm-primary);
+  border-color:var(--cm-border);
+}
+.portal-unified-nav button[data-primary=true][aria-selected=true] {box-shadow:inset 3px 0 var(--cm-primary)}
+.portal-unified-nav button[data-primary=false] {justify-content:center;font-size:var(--cm-font-label);padding-inline:2px}
+.portal-unified-nav-icon {display:grid;place-items:center;flex:none}
+.portal-unified-nav button[data-primary=true] .portal-unified-nav-icon {
+  width:24px;height:24px;border-radius:6px;background:var(--cm-surface);color:var(--cm-primary)
+}
+.portal-unified-nav-tail {margin-left:auto;color:var(--cm-muted)}
+.portal-unified-nav svg,.portal-unified-directory-toggle svg {flex-shrink:0}
+.portal-unified-directory-toggle.app-button-secondary {display:none}
+.portal-unified-directory {
+  display:flex;
+  flex:1;
+  flex-direction:column;
+  min-height:0;
+  padding:9px 8px 0;
+  border-top:1px solid var(--cm-border);
+}
+.portal-unified-directory .ot-instance-tabs {flex-shrink:0;margin:0 2px 7px}
+.portal-unified-directory .ot-instance-tabs [aria-selected=true] {
+  color:var(--cm-primary);
+  background:var(--cm-surface);
+  box-shadow:var(--cm-shadow-2);
+}
+.portal-unified-search {display:flex;align-items:center;gap:4px;margin:0 2px 8px}
+.portal-unified-search input,.portal-unified-runtime-filter {
+  width:100%;
+  min-height:34px;
+  border:1px solid var(--cm-border);
+  border-radius:8px;
+  background:var(--cm-subtle);
+  color:var(--cm-ink);
+  font-size:var(--cm-font-label);
+}
+.portal-unified-search input {padding:4px 6px 4px 29px}
+.portal-unified-runtime-filter {padding:4px 8px;margin-bottom:8px}
+.portal-unified-cards,.portal-unified-directory .ot-card-list {
+  flex:1;
+  min-height:0;
+  overflow:auto;
+  padding:2px 2px 8px;
+  scrollbar-width:thin;
+  overscroll-behavior:contain;
+}
+.portal-unified-list-error {padding:8px;color:var(--cm-error)}
+.portal-unified-rail .portal-runtime-card {border-radius:var(--portal-card-radius)}
+.portal-unified-rail .portal-runtime-card .instance-summary {padding:9px 34px 4px 8px;min-height:60px}
+.portal-unified-rail a.instance-summary::after {position:absolute;inset:0;content:""}
+.portal-unified-rail .instance-heading {gap:2px}
+.portal-unified-rail .instance-heading strong {font-size:13px;line-height:17px}
+.portal-unified-rail .instance-avatar img {width:44px;height:44px}
+.portal-unified-rail .instance-runtime-label {font-size:11px;line-height:15px}
+.portal-unified-rail .instance-more {
+  position:absolute;
+  right:4px;
+  top:4px;
+  z-index:3;
+  display:grid;
+  place-items:center;
+  width:26px;
+  height:26px;
+  padding:0;
+  border-radius:6px;
+  background:transparent;
+  color:var(--cm-muted);
+}
+.portal-unified-rail .instance-more:hover {background:var(--instance-soft);color:var(--instance-accent)}
+.portal-unified-rail .instance-bottom-row {min-height:31px;padding:1px 7px 6px;gap:4px}
+.portal-unified-rail .instance-meta {font-size:11px;line-height:15px;color:var(--cm-muted)}
+.portal-unified-rail .instance-hover-entry {position:relative;z-index:2}
+.portal-unified-rail .instance-entry {font-size:11px;line-height:16px}
+.portal-unified-rail .instance-entry span {padding:3px 5px}
+.portal-unified-rail .instance-entry svg {width:12px;height:12px;padding:5px}
+.portal-unified-rail .instance-menu {right:4px;top:31px}
+body[data-northbound-portal] .portal-unified-rail .portal-runtime-card.is-selected {
+  border-color:var(--instance-accent);
+  box-shadow:inset 2px 0 var(--cm-primary);
+}
+.portal-unified-content {display:flex;flex-direction:column;min-height:0;min-width:0;overflow:auto}
+.portal-unified-alert {
+  margin-bottom:8px;
+  padding:7px 10px;
+  border-radius:var(--cm-radius-control);
+  background:var(--cm-warning-background,var(--cm-subtle));
+  color:var(--cm-warning);
+  font-size:var(--cm-font-body);
+}
+.portal-unified .owner-dashboard {grid-template-columns:minmax(0,1fr);min-height:0;min-width:0}
+.portal-unified .portal-dashboard-host {min-width:0;flex:1}
+.portal-unified-instance-info {
+  display:grid;
+  grid-template-columns:minmax(0,1fr) minmax(230px,30%);
+  gap:10px;
+  min-width:0;
+  min-height:0;
+  flex:1;
+}
+.portal-unified-instance-info > * {min-width:0}
+.portal-unified-route-state {min-height:300px;flex:1}
+.portal-unified-instance {
+  flex:1;
+  border:0;
+  border-radius:0;
+  background:transparent;
+}
+.portal-unified-instance-panes {
+  display:grid;
+  grid-template-columns:minmax(0,1fr) clamp(300px,28vw,420px);
+  gap:10px;
+  padding:0;
+  min-width:0;
+  min-height:0;
+  flex:1;
+}
+.portal-unified-instance-panes[data-tools=false] {grid-template-columns:minmax(0,1fr)}
+.portal-instance-toolbar {
+  display:flex;align-items:center;justify-content:space-between;flex:none;gap:8px;
+  min-height:48px;padding:5px 10px;border-bottom:1px solid var(--cm-border);
+}
+.portal-instance-toolbar-title {display:flex;align-items:center;gap:8px;min-width:0}
+.portal-instance-toolbar-actions {display:flex;align-items:center;gap:5px;flex:none}
+.portal-instance-toolbar .portal-instance-pane-toggle {flex:none}
+.portal-instance-toolbar .portal-instance-pane-toggle:disabled {color:var(--cm-disabled);cursor:default}
+.portal-instance-toolbar-actions .portal-instance-restart {
+  margin-left:3px;color:var(--cm-error);
+  background:color-mix(in srgb,var(--cm-error) 6%,var(--cm-surface));
+  border-color:color-mix(in srgb,var(--cm-error) 30%,var(--cm-border));
+}
+.portal-instance-toolbar-actions .portal-instance-restart:hover:not(:disabled) {
+  color:var(--cm-error);background:color-mix(in srgb,var(--cm-error) 12%,var(--cm-surface));
+}
+.portal-instance-toolbar-actions .portal-instance-restart:disabled {color:var(--cm-disabled)}
+.portal-unified .portal-unified-team {height:auto;min-width:0;min-height:0;flex:1}
+.portal-unified .portal-unified-team .ot-northbound-body {padding:0}
+.portal-unified .portal-unified-team .ot-northbound-body > .team-workspace {min-width:0}
+.portal-unified-directory .ot-sidebar {padding:0 2px;gap:8px}
+.portal-unified-directory .ot-search {height:34px}
+.portal-unified-directory .ot-card-title,
+.portal-unified-directory .ot-team-card[data-expanded=true] .ot-card-title {
+  display:flex;
+  align-items:center;
+  min-height:59px;
+  padding:9px 8px 5px;
+}
+.portal-unified-directory .ot-team-card[data-expanded=true] .ot-card-avatar {display:flex}
+.portal-unified-directory .ot-card-avatar img {width:44px;height:44px}
+.portal-unified-directory .ot-card-heading {gap:2px}
+.portal-unified-directory .ot-card-heading strong {font-size:13px;line-height:17px}
+.portal-unified-directory .ot-card-status {min-height:32px;padding:0 8px 7px;grid-template-columns:minmax(0,1fr) auto;gap:3px}
+.portal-unified-directory .ot-card-status > div {gap:1px 5px}
+.portal-unified-directory .ot-card-entry {font-size:12px}
+.portal-unified-directory .ot-card-entry > span,.portal-unified-directory .ot-card-entry > svg {padding:4px}
+.portal-unified-directory .ot-card-members {margin:0 7px}
+.portal-unified-directory .ot-card-members footer {gap:4px;padding:6px 0}
+.portal-unified-directory .ot-card-watermark {display:none}
+.ot-directory-member {
+  display:flex;
+  align-items:center;
+  gap:7px;
+  min-height:44px;
+  padding:4px;
+  border-radius:7px;
+  text-align:left;
+}
+a.ot-directory-member:hover,.ot-directory-member[aria-current=page] {background:var(--cm-selected)}
+.ot-directory-member > svg {flex:none;color:var(--cm-primary)}
+.ot-directory-avatar {width:29px;height:29px;object-fit:contain;flex:none}
+.ot-directory-identity {min-width:0;flex:1}
+.ot-directory-identity strong,.ot-directory-identity small {display:block;overflow-wrap:anywhere}
+.ot-directory-identity strong {font-size:13px;line-height:17px;font-weight:600}
+.ot-directory-identity small {font-size:11px;line-height:15px;color:var(--cm-muted)}
+.ot-directory-member [data-state=green] {color:var(--cm-success)}
+.ot-directory-member [data-state=red] {color:var(--cm-error)}
+
+@media(max-width:1079px) {
+  .portal-unified-instance-panes {grid-template-columns:minmax(0,1fr);grid-auto-rows:minmax(420px,1fr);overflow-y:auto}
+  .portal-unified-instance-info {grid-template-columns:minmax(0,1fr);overflow-y:auto}
+}
+
+@media(max-width:767px) {
+  .portal-unified {display:flex;flex-direction:column;height:auto;min-height:100dvh;padding:6px;gap:8px}
+  .portal-unified-brand {min-height:44px}
+  .portal-unified-nav {padding:0 6px 6px;gap:4px}
+  .portal-unified-nav button[data-primary=true] {grid-column:auto;min-height:44px}
+  .portal-unified-nav button[data-primary=false] {min-height:36px}
+  .portal-unified-directory-toggle.app-button-secondary {display:flex;justify-content:space-between;min-height:44px;margin:0 6px 6px}
+  .portal-unified-directory[data-open=false] {display:none}
+  .portal-unified-directory {max-height:min(440px,60dvh)}
+  .portal-unified-instance {min-height:540px}
+  .portal-instance-toolbar {gap:4px;padding-inline:6px}
+  .portal-instance-toolbar-actions {gap:3px}
+  .portal-unified-instance-panes {overflow:visible;grid-auto-rows:minmax(440px,auto)}
+  .portal-unified-content {overflow:visible}
+  .portal-unified .portal-unified-team {min-height:560px}
+}
+
+@media(pointer:coarse) {
+  .portal-unified-rail .portal-runtime-card .instance-summary {padding-right:50px;min-height:66px}
+  .portal-unified-rail .instance-more {width:44px;height:44px}
+  .portal-unified-rail .instance-entry {min-height:42px}
+  .portal-instance-toolbar .cm-icon-button {min-width:44px;min-height:44px}
+}

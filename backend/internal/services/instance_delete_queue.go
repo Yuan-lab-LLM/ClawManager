@@ -19,6 +19,17 @@ func (s *instanceService) QueueDelete(instanceID int) error {
 	return nil
 }
 
+// Whole-Team deletion publishes every member's delete intent before waiting on
+// any one Runtime. The caller still waits for real deletion before shared cleanup.
+func (s *instanceService) QueueDeleteForOwnerTeam(teamID, instanceID int) error {
+	instance, err := s.prepareDeletion(instanceID, teamID)
+	if err != nil {
+		return err
+	}
+	s.scheduleLegacyDeletion(instance.UserID, instance.ID)
+	return nil
+}
+
 func (s *instanceService) prepareDeletion(instanceID, teamID int) (*models.Instance, error) {
 	if s.ownerTeamMutationGuard != nil {
 		if err := s.ownerTeamMutationGuard(instanceID, "delete", teamID); err != nil {

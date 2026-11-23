@@ -25,6 +25,10 @@ var ErrAssignmentInvalid = errors.New("protected runtime assignment is invalid")
 
 var errUnavailable = ErrUnavailable
 
+// ErrAssignmentAbsent is an authoritative absence in a fresh observation,
+// unlike an unavailable/stale watch. Both deny access, but only the latter retries.
+var ErrAssignmentAbsent = ErrAssignmentNotFound
+
 const maxObservationAge = 3 * time.Second
 
 type objectStore struct {

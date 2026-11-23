@@ -1,0 +1,16 @@
+.owner-agent-icon{position:relative;display:inline-block;flex:none;vertical-align:middle;isolation:isolate}
+.owner-agent-icon .cm-agent-state-art>img:is([src$="/hermes.png"],[src$="/hermes-card.png"]){clip-path:inset(3%)}
+.owner-agent-icon .cm-agent-state-sleep-sign{right:-12%;top:-12%}
+.instance-detail-watermark .cm-agent-state-warning{right:0;bottom:0;width:46%;height:46%}
+.instance-detail-watermark .cm-agent-state-sleep-sign{right:0;top:0;width:36%;height:36%}
+.instance-detail-watermark .owner-agent-status-badge{right:0;bottom:0}
+.owner-agent-status-badge{position:absolute;right:-13%;bottom:-7%;display:grid;place-items:center;width:46%;height:46%;min-width:12px;min-height:12px;max-width:24px;max-height:24px;border:2px solid var(--cm-surface);border-radius:50%;background:var(--cm-surface);color:var(--cm-muted);z-index:2}
+.owner-agent-status-badge>svg{display:block;width:100%;height:100%}
+.owner-agent-icon[data-owner-agent-state=starting] .owner-agent-status-badge{color:var(--cm-primary)}
+.owner-agent-icon[data-owner-agent-state=starting] .owner-agent-status-badge>svg{animation:owner-agent-preparing 1.6s linear infinite}
+.owner-agent-icon[data-owner-agent-state=offline] .cm-agent-state-art{filter:grayscale(1);opacity:.55}
+.owner-agent-icon[data-owner-agent-state=unknown] .cm-agent-state-art{opacity:.65}
+.owner-agent-icon:has(.cm-agent-state-icon[data-motion-paused=true]) .owner-agent-status-badge>svg{animation-play-state:paused}
+@keyframes owner-agent-preparing{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.owner-agent-status-badge>svg{animation:none!important}}
+@media(forced-colors:active){.owner-agent-status-badge{color:CanvasText;background:Canvas;border-color:CanvasText}}

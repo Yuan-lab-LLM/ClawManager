@@ -97,8 +97,8 @@ func (s *RuntimeUpgradeService) filterUpgradePlacementAtBirth(ctx context.Contex
 		}
 		var emptyStarted *time.Time
 		emptyRecord := current
-		emptyBarrier := isEmptyOpenClawPoolReset(current)
-		if isEmptyOpenClawPoolReset(current) {
+		emptyBarrier := isEmptyOpenClawPoolReset(current) || current.Phase == RuntimeEmptyPoolRecoveryPhase
+		if emptyBarrier {
 			emptyStarted = current.StartedAt
 		} else {
 			emptyRecord = &models.RuntimeRollout{RuntimeType: RuntimeTypeOpenClaw, Phase: RuntimeUpgradePhaseEmptyPoolReset}

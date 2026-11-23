@@ -62,6 +62,7 @@ func ordinaryRuntimeDeployment(d appsv1.Deployment) bool {
 	}
 	meta := d.Labels
 	if strings.HasPrefix(d.Name, "openclaw-upgrade-lab-") ||
+		strings.HasPrefix(meta[upgradeLabPurposeLabel], RuntimeFreshPoolPurposePrefix) ||
 		meta["clawmanager.io/pool-purpose"] == "openclaw-upgrade-lab" ||
 		meta["clawmanager.io/pool-role"] == "upgrade-lab" ||
 		meta["clawmanager.io/scheduling-enabled"] == "false" {

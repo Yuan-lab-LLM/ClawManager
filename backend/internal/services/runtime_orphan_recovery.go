@@ -172,7 +172,7 @@ func (s *RuntimeManagementService) orphanRecoveryPreflight(ctx context.Context, 
 	if endpoint.Hostname() != live.Status.PodIP {
 		return nil, fmt.Errorf("source endpoint differs from current exact Pod IP")
 	}
-	owners, e := runtimeeviction.InspectPodLedgerOwners(s.scheduler.workspaceRoot, pinned.RuntimeType, req.SourcePodUID)
+	owners, e := pinned.InspectLedgerOwners()
 	if e != nil {
 		return nil, e
 	}

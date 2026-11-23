@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useLocation, useSearchParams } from 'react-router-dom';
 import { ownerTeamService, type OwnerTeamCapabilities, type OwnerTeamSummary } from '../services/ownerTeamService';
 import { OWNER_SESSION_INVALID, OWNER_SESSION_MESSAGE } from '../lib/ownerReadNotice';
 
 export function useOwnerTeams(owner?: string) {
   const [params, setParams] = useSearchParams();
+  const { state: routeState } = useLocation();
   const [capabilities, setCapabilities] = useState<OwnerTeamCapabilities | null>(null);
   const [teams, setTeams] = useState<OwnerTeamSummary[]>([]);
   const [total, setTotal] = useState(0);
@@ -13,6 +14,7 @@ export function useOwnerTeams(owner?: string) {
   const [page, setPage] = useState(1);
   const [loadedOwner, setLoadedOwner] = useState(owner);
   const sequence = useRef(0);
+  const inFlight = useRef<{key: string; signal?: AbortSignal; promise: Promise<void>} | null>(null);
   useEffect(() => {
     const invalidate = () => { sequence.current++; setCapabilities(null); setTeams([]); setTotal(0); setError(OWNER_SESSION_MESSAGE); };
     window.addEventListener(OWNER_SESSION_INVALID, invalidate);
@@ -26,12 +28,17 @@ export function useOwnerTeams(owner?: string) {
   const setPresentation = useCallback((values: Record<string, string | null>) => {
     const next = new URLSearchParams(window.location.search);
     Object.entries(values).forEach(([key, value]) => value === null ? next.delete(key) : next.set(key, value));
-    next.delete('token'); setParams(next, { replace: true });
-  }, [setParams]);
-  const refresh = useCallback(async (signal?: AbortSignal) => {
-    if (!owner) return;
+    next.delete('token'); setParams(next, { replace: true, state: routeState });
+  }, [routeState, setParams]);
+  const refresh = useCallback((signal?: AbortSignal): Promise<void> => {
+    if (!owner || signal?.aborted) return Promise.resolve();
+    const key = JSON.stringify([owner, page, query]);
+    // A slow read must complete before another poll can supersede its result.
+    // Changed queries/accounts and aborted effect scopes still start a fresh read.
+    if (inFlight.current?.key === key && !inFlight.current.signal?.aborted) return inFlight.current.promise;
     const request = ++sequence.current;
     setLoading(true);
+    const pending = (async () => {
     try {
       const caps = await ownerTeamService.capabilities(signal);
       if (request !== sequence.current || signal?.aborted) return;
@@ -46,6 +53,10 @@ export function useOwnerTeams(owner?: string) {
       setTeams(result.teams || []); setTotal(result.total); setError('');
     } catch (error) { if (request === sequence.current && !signal?.aborted) setError(error instanceof Error ? error.message : '团队列表读取失败'); }
     finally { if (request === sequence.current && !signal?.aborted) setLoading(false); }
+    })();
+    inFlight.current = {key, signal, promise: pending};
+    void pending.finally(() => { if (inFlight.current?.promise === pending) inFlight.current = null; });
+    return pending;
   }, [owner, page, query]);
   useEffect(() => { sequence.current++; setLoadedOwner(owner); setCapabilities(null); setTeams([]); setTotal(0); setError(''); setPage(1); }, [owner]);
   useEffect(() => { setPage(1); }, [query]);

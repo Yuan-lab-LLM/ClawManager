@@ -2,8 +2,8 @@ import {useEffect,useRef,useState} from 'react';
 import {ArrowRight,ChevronLeft,ChevronRight} from 'lucide-react';
 import type {IEISystemInstance,OwnerDashboardData} from '../services/ieiSystemService';
 import {getIEIRuntimePresentation} from '../lib/ieiRuntimeCatalog';
+import {OwnerAgentStateIcon} from './OwnerAgentStateIcon';
 
-const logos:Record<string,string>={openclaw:'/openclaw.png',hermes:'/hermes.png',opencode:'/opencode.png','deepseek-harness':'/deepseek-harness.svg',workbuddy:'/workbuddy.png'};
 export function OwnerContinueWork({instances,data,onSelect}:{instances:IEISystemInstance[];data:OwnerDashboardData|null;onSelect:(id:number)=>void}){
  const ref=useRef<HTMLElement>(null);const [page,setPage]=useState(0);const [pageSize,setPageSize]=useState(5);
  useEffect(()=>{const el=ref.current;if(!el)return;const update=()=>{
@@ -15,7 +15,7 @@ export function OwnerContinueWork({instances,data,onSelect}:{instances:IEISystem
  <div className="owner-continue-list" data-count={Math.min(pageSize,instances.length)}>{instances.slice(start,start+pageSize).map(i=>{
   const q=data?.recent_questions?.[i.id];const at=q?.at?new Date(q.at):null;
   return <button key={i.id} onClick={()=>onSelect(i.id)} aria-label={`进入实例 ${i.alias?.trim()||i.name}`}>
-   <span className="owner-work-identity"><img src={logos[i.type]} alt="" className="owner-continue-logo"/><span className="min-w-0"><span className="owner-continue-name" title={i.alias?.trim()||i.name}>{i.alias?.trim()||i.name}</span><span className="owner-continue-type">{getIEIRuntimePresentation(i.type).name}</span></span></span>
+   <span className="owner-work-identity"><OwnerAgentStateIcon type={i.type} status={i.status} stoppedReason={i.stopped_reason} size={36} className="owner-continue-logo"/><span className="min-w-0"><span className="owner-continue-name" title={i.alias?.trim()||i.name}>{i.alias?.trim()||i.name}</span><span className="owner-continue-type">{getIEIRuntimePresentation(i.type).name}</span></span></span>
    <span className="owner-work-question"><span>{q?.warning||'最近提问'}</span><span className={q?.text?'':'owner-work-empty'} title={q?.text}>{q?.text||(q?.warning?'暂时无法读取最近提问':'暂无可展示的最近提问')}</span></span>
    <span className="owner-work-footer"><time dateTime={q?.at} title={at?.toLocaleString('zh-CN',{timeZone:'Asia/Shanghai'})+'（北京时间）'}>{at&&!Number.isNaN(at.getTime())?at.toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}):'暂无记录'}</time><span>进入实例 <ArrowRight size={13}/></span></span>
   </button>

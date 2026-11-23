@@ -18,10 +18,22 @@ func (r *instanceRepository) RetryRuntimeSchedulingError(ctx context.Context, ex
 	default:
 		return false, nil
 	}
-	result, err := r.sess.SQL().ExecContext(ctx, `UPDATE instances SET status='creating',runtime_error_code=NULL,runtime_error_message=NULL,updated_at=? WHERE id=? AND user_id=? AND runtime_generation=? AND status='error' AND CAST(runtime_error_code AS BINARY)=CAST(? AS BINARY) AND CAST(runtime_error_message AS BINARY)=CAST(? AS BINARY) AND updated_at=? AND NOT EXISTS (SELECT 1 FROM instance_runtime_bindings b WHERE b.instance_id=instances.id)`, time.Now().UTC(), expected.ID, expected.UserID, expected.RuntimeGeneration, *expected.RuntimeErrorCode, *expected.RuntimeErrorMessage, expected.UpdatedAt)
-	if err != nil {
-		return false, err
-	}
-	rows, err := result.RowsAffected()
-	return rows == 1, err
+	changed := false
+	err := r.withUnfencedInstance(ctx, expected.ID, func(tx *instanceRepository) error {
+		matches, err := tx.runtimeRecoveryIntentMatches(ctx, expected)
+		if err != nil || !matches {
+			return err
+		}
+		if err := checkAutoStopRuntimeState(ctx, tx.sess, expected.ID, "creating", expected.RuntimeGeneration); err != nil {
+			return err
+		}
+		result, err := tx.sess.SQL().ExecContext(ctx, `UPDATE instances SET status='creating',runtime_error_code=NULL,runtime_error_message=NULL,updated_at=? WHERE id=? AND user_id=? AND runtime_generation=? AND status='error' AND CAST(runtime_error_code AS BINARY)=CAST(? AS BINARY) AND CAST(runtime_error_message AS BINARY)=CAST(? AS BINARY) AND updated_at=? AND NOT EXISTS (SELECT 1 FROM instance_runtime_bindings b WHERE b.instance_id=instances.id)`, time.Now().UTC(), expected.ID, expected.UserID, expected.RuntimeGeneration, *expected.RuntimeErrorCode, *expected.RuntimeErrorMessage, expected.UpdatedAt)
+		if err != nil {
+			return err
+		}
+		rows, err := result.RowsAffected()
+		changed = rows == 1
+		return err
+	})
+	return changed, err
 }

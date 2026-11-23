@@ -47,6 +47,15 @@ func (a *OwnerTeamAPI) GuardInstanceMutation(instanceID int, action string, team
 	if team == nil {
 		return nil
 	}
+	if teamID == 0 && action == "delete" && team.Status == models.TeamStatusDeleting {
+		pending, err := a.store.PendingMemberDeletion(team.ID, instanceID)
+		if err != nil {
+			return err
+		}
+		if pending {
+			teamID = team.ID
+		}
+	}
 	if team.ID != teamID || action != "delete" {
 		return fmt.Errorf("该实例属于 Team，请从团队管理操作；不支持单独重置或删除")
 	}
@@ -58,6 +67,19 @@ func (a *OwnerTeamAPI) GuardInstanceMutation(instanceID int, action string, team
 		return fmt.Errorf("Team has active tasks")
 	}
 	return nil
+}
+
+// Resolve membership from the same ledger used by lifecycle admission. Never
+// infer it from client navigation state, instance names or model arguments.
+func (a *OwnerTeamAPI) InstanceTeamForOwner(instanceID int, owner string) (int, error) {
+	team, err := a.store.InstanceTeam(instanceID)
+	if err != nil || team == nil {
+		return 0, err
+	}
+	if team.ResourceScope != models.TeamScopeNorthbound || team.Owner == nil || !strings.EqualFold(strings.TrimSpace(*team.Owner), strings.TrimSpace(owner)) {
+		return 0, fmt.Errorf("instance Team owner mismatch")
+	}
+	return team.ID, nil
 }
 
 type ownerTeamStoredRequest struct {
@@ -726,6 +748,19 @@ func (a *OwnerTeamAPI) execute(ctx context.Context, op *models.NorthboundOperati
 	}
 	if op.TeamID == nil {
 		return nil, fmt.Errorf("missing Team operation target")
+	}
+	if req.Action == "teams.delete" {
+		// A worker may lose its response/lease after DeleteTeam committed its
+		// terminal tombstone. Only that exact owner's terminal deletion can
+		// finish a replay; normal reads still hide deleted Teams.
+		var deleted models.Team
+		err := a.sess.Collection("teams").Find(db.Cond{"id": *op.TeamID, "user_id": op.UserID, "owner": *op.Owner, "resource_scope": models.TeamScopeNorthbound, "status": models.TeamStatusDeleted}).One(&deleted)
+		if err == nil {
+			return nil, deleted.ValidateScope()
+		}
+		if err != db.ErrNoMoreRows {
+			return nil, err
+		}
 	}
 	team, err := a.authorize(OwnerTeamIdentity{UserID: op.UserID, Owner: *op.Owner}, *op.TeamID)
 	if err != nil {

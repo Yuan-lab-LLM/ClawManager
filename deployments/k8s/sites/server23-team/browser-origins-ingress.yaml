@@ -1,0 +1,17 @@
+# This tenant isolates app ingress. The separate browser-origin Service
+# needs its own permission for the TLS listener used by native and preview URLs.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: clawmanager-browser-origins-ingress
+  namespace: clawmanager-hxc-peer-system
+spec:
+  podSelector:
+    matchLabels:
+      app: clawmanager-app
+  policyTypes:
+    - Ingress
+  ingress:
+    - ports:
+        - port: 8444
+          protocol: TCP

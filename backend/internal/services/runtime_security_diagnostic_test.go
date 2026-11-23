@@ -17,16 +17,19 @@ func TestRuntimeLeasePreservesOnlySanitizedInventoryClassification(t *testing.T)
 	a, _, _, cm, pod := securityFixture(t)
 	cm.UID, cm.ResourceVersion = "assignment-7", "123"
 	calls := 0
+	rawErr := errors.New("raw-sentinel-secret")
 	a.assignments = securityAssignmentFunc(func(context.Context, int) (*corev1.ConfigMap, []corev1.Pod, error) {
 		calls++
-		if calls == 3 {
-			return nil, nil, errors.New("raw-sentinel-secret")
+		if calls == 2 {
+			return nil, nil, rawErr
 		}
 		return cm, []corev1.Pod{*pod}, nil
 	})
 	lease, err := a.IssueLease(context.Background(), runtimeauth.Identity{InstanceID: 7, UserID: 3, Generation: 2, PodUID: "pod-7"}, netip.MustParseAddr("10.2.0.3"))
 	d := RuntimeSecurityFailureDiagnostic(err)
-	if err == nil || err.Error() != errRuntimeSecurity.Error() || calls != 3 || lease != (RuntimeSecurityLease{}) || d.Stage != "issue_egress" || d.Reason != "authorization_denied" || d.AssignmentUID != "assignment-7" || d.AssignmentResourceVersion != "123" {
+	if err == nil || err.Error() != errRuntimeSecurity.Error() || errors.Is(err, rawErr) || runtimeauth.IsUnavailable(err) ||
+		calls != 2 || lease != (RuntimeSecurityLease{}) || d.Stage != "issue" || d.Reason != "authorization_denied" ||
+		d.AssignmentUID != "assignment-7" || d.AssignmentResourceVersion != "123" {
 		t.Fatalf("lost safe classification: calls=%d error=%v diagnostic=%+v", calls, err, d)
 	}
 }

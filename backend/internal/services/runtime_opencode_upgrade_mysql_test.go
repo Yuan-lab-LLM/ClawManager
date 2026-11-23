@@ -723,7 +723,7 @@ func TestOpenCodeNativeMySQLDefaultQueryKeepsTwoGenerationLineageAndIgnoresLegac
 	if len(history) != 3 {
 		t.Fatalf("default SQL loader discarded lineage: %d records", len(history))
 	}
-	targets, err := runtimeDefaultScaleTargets("runtime", "opencode", history, checkpoints)
+	targets, err := runtimeDefaultScaleTargets("runtime", "opencode", "opencode-runtime", history, checkpoints)
 	if err != nil || len(targets) != 1 || targets[0].DeploymentName != runtimeUpgradeTargetDeploymentName(secondSource.Name, second.ID) {
 		t.Fatalf("default targets=%+v err=%v", targets, err)
 	}

@@ -37,14 +37,15 @@ const (
 )
 
 type startRuntimeRolloutRequest struct {
-	Strategy       string `json:"strategy,omitempty"`
-	PreparationID  string `json:"preparation_id,omitempty"`
-	RuntimeType    string `json:"runtime_type" binding:"required"`
-	TargetImageRef string `json:"target_image_ref" binding:"required"`
-	BatchSize      int    `json:"batch_size"`
-	MaxUnavailable int    `json:"max_unavailable"`
-	PreflightID    string `json:"preflight_id"`
-	AutoRollback   *bool  `json:"auto_rollback,omitempty"`
+	Strategy            string `json:"strategy,omitempty"`
+	PreparationID       string `json:"preparation_id,omitempty"`
+	RuntimeType         string `json:"runtime_type" binding:"required"`
+	TargetImageRef      string `json:"target_image_ref" binding:"required"`
+	BatchSize           int    `json:"batch_size"`
+	MaxUnavailable      int    `json:"max_unavailable"`
+	PreflightID         string `json:"preflight_id"`
+	AutoRollback        *bool  `json:"auto_rollback,omitempty"`
+	SourceDeploymentUID string `json:"source_deployment_uid,omitempty"`
 }
 
 type runtimeUpgradePreflightRequest struct {
@@ -266,6 +267,22 @@ func (h *RuntimePoolHandler) StartRollout(c *gin.Context) {
 		return
 	}
 	targetImage := strings.TrimSpace(req.TargetImageRef)
+	if req.Strategy == services.RuntimeEmptyPoolRecoveryStrategy {
+		if !runtimeMaintenanceAdmin(c) {
+			return
+		}
+		if h.scheduler == nil || req.PreparationID != "" || req.PreflightID != "" || req.MaxUnavailable != 0 || req.BatchSize > 1 || req.BatchSize < 0 {
+			utils.Error(c, http.StatusConflict, "empty pool recovery requires its own retired controller proof and batch_size=1")
+			return
+		}
+		rollout, err := h.scheduler.SubmitEmptyRuntimeRecovery(c.Request.Context(), runtimeType, targetImage, req.SourceDeploymentUID, currentUserIDPtr(c))
+		if err != nil {
+			utils.Error(c, http.StatusConflict, err.Error())
+			return
+		}
+		utils.Success(c, http.StatusCreated, "Empty Runtime recovery recorded", gin.H{"rollout": rollout, "strategy": services.RuntimeEmptyPoolRecoveryStrategy})
+		return
+	}
 	if runtimeType == services.RuntimeTypeOpenCode && req.Strategy != services.RuntimeUpgradeStrategyOpenCodePreserve {
 		utils.Error(c, http.StatusConflict, models.ErrOpenCodeSafeUpgradeRequired.Error())
 		return

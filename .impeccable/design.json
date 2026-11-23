@@ -15,6 +15,19 @@
         "https://raw.githubusercontent.com/microsoft/fluentui/master/packages/tokens/src/alias/lightColor.ts"
       ]
     },
+    "teamChatPresentation": {
+      "approvedAt": "2026-11-17",
+      "name": "清润蓝青 · 旧版 Team 对话样式",
+      "scope": "TeamChatWorkspace and its member dialog/workflow tooltip only",
+      "source": "frontend/src/components/teams/team-classic-presentation.css",
+      "publicThemeUnchanged": true,
+      "surface": "white",
+      "header": "inline title and Team ID; no online count or normal running badge; keep transition/fault feedback; files at the right",
+      "memberIdleDisplay": "online; scheduling readiness remains distinct; protocol and health checks unchanged",
+      "radii": { "workspace": 22, "panel": 18, "composer": 16, "control": 10 },
+      "colors": { "ink": "#173255", "text": "#30425e", "border": "#dce5f2", "selected": "#edf5ff", "headerStart": "#f0f7ff", "headerEnd": "#f3fbfa" },
+      "preserve": ["member pagination", "complete Kanban", "single mini/full workflow", "workspace operations", "history anchors", "focus restoration", "existing container breakpoints", "Team scheduling"]
+    },
     "colorMeta": {
       "primary": {
         "role": "primary",

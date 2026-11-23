@@ -20,6 +20,36 @@ import (
 
 type managedServiceVerifier func(context.Context, string, string) (runtimeauth.Identity, error)
 
+func TestRuntimeServicesUnavailableAuthorityNeverOpensTunnel(t *testing.T) {
+	for _, unavailable := range []bool{false, true} {
+		failure := errors.New("secret revoked identity")
+		if unavailable {
+			failure = runtimeauth.Unavailable(failure)
+		}
+		h, err := NewRuntimeServicesHandler(managedServiceVerifier(func(context.Context, string, string) (runtimeauth.Identity, error) {
+			return runtimeauth.Identity{}, failure
+		}), func(context.Context, runtimeauth.Identity, *http.Request) (RuntimeServiceOperation, error) {
+			t.Fatal("failed authorization opened service")
+			return RuntimeServiceOperation{}, nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		r := httptest.NewRequest("GET", "/api/v1/runtime/services/json/version", nil)
+		r.Header.Set("Authorization", "Bearer v1.services")
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		h.Close()
+		want := 403
+		if unavailable {
+			want = 503
+		}
+		if w.Code != want || strings.Contains(w.Body.String(), "secret") {
+			t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+		}
+	}
+}
+
 func (f managedServiceVerifier) Verify(ctx context.Context, token, audience string) (runtimeauth.Identity, error) {
 	return f(ctx, token, audience)
 }

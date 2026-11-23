@@ -19,13 +19,14 @@ export type AgentStateIconProps = {
   label?: string;
   size?: number;
   className?: string;
+  imageSrc?: string;
 };
 
-export default function AgentStateIcon({ type, state, label, size = 32, className = "" }: AgentStateIconProps) {
+export default function AgentStateIcon({ type, state, label, size = 32, className = "", imageSrc }: AgentStateIconProps) {
   const ref = useRef<HTMLSpanElement>(null);
   const displayState = state === "auto_sleep" ? "sleeping"
     : ["running", "stopped", "error", "sleeping"].includes(state) ? state : "unknown";
-  const logo = logos[type];
+  const logo = imageSrc ?? logos[type];
 
   useEffect(() => {
     const element = ref.current;

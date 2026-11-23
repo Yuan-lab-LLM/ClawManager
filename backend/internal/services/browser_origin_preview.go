@@ -124,6 +124,9 @@ func (s *InstanceWorkbenchService) ServeBrowserViewer(w http.ResponseWriter, r *
 	w.Header().Set("X-Frame-Options", "DENY")
 	w.Header().Set("Cross-Origin-Opener-Policy", "same-origin")
 	w.Header().Set("Content-Security-Policy", fmt.Sprintf("default-src 'none'; script-src 'nonce-%s'; style-src 'unsafe-inline'; frame-src https://%s; base-uri 'none'; frame-ancestors 'none'", nonce, net.JoinHostPort(manager.Hostname(), "*")))
+	// Gin invokes this middleware-only document through NoRoute, whose default
+	// status is 404 even when the trusted viewer HTML is successfully written.
+	w.WriteHeader(http.StatusOK)
 	if r.Method == http.MethodHead {
 		return
 	}

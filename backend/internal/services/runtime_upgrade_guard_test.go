@@ -29,7 +29,8 @@ func (r upgradeBlockedRepo) MarkDeleting(context.Context, int, int, int) error {
 func TestDurableUpgradeBlocksAllLifecycleEntrypoints(t *testing.T) {
 	s := &instanceService{instanceRepo: upgradeBlockedRepo{failure: models.ErrRuntimeUpgradeInProgress}}
 	for name, call := range map[string]func() error{
-		"start": func() error { return s.Start(90321) }, "stop": func() error { return s.Stop(90321) }, "restart": func() error { return s.Restart(90321) },
+		"start-stopped": func() error { return s.StartStopped(90321) },
+		"start":         func() error { return s.Start(90321) }, "stop": func() error { return s.Stop(90321) }, "restart": func() error { return s.Restart(90321) },
 		"restart-env": func() error { return s.RestartWithEnvironment(90321, nil, nil) }, "delete": func() error { return s.Delete(90321) },
 		"update": func() error { return s.Update(90321, UpdateInstanceRequest{}) }, "sync": func() error { return s.ForceSyncInstance(90321) },
 	} {

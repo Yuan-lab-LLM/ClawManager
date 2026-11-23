@@ -19,6 +19,7 @@ import (
 
 const RuntimeFaultHelperImageAnnotation = "clawmanager.io/fault-eviction-helper-image"
 const RuntimeFaultSandboxProfileAnnotation = "clawmanager.io/fault-eviction-sandbox-profile"
+const runtimeNFSRootlessLedgerUID = 10001
 
 var ErrRuntimeFaultEvictionPending = errors.New("runtime fault eviction helper pending")
 
@@ -104,7 +105,7 @@ func buildRuntimeEvictionJob(s runtimeeviction.Scope, p *corev1.Pod, image strin
 	switch profile {
 	case "":
 	case RuntimeNFSRootlessProfile:
-		uid = 10001
+		uid = runtimeNFSRootlessLedgerUID
 		// The node CRI socket is root-group writable. This grants no Linux
 		// capabilities and preserves the management-owned NFS ledger identity.
 		gid := int64(0)

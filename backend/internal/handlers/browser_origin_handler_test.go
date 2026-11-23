@@ -27,6 +27,33 @@ func (s *browserRouteStore) ByPort(_ context.Context, p int) (browserorigin.Bind
 	}
 	return s.binding, nil
 }
+
+func TestBrowserViewerMiddlewareReturnsSuccessfulDocument(t *testing.T) {
+	reg, err := browserorigin.New("https://cm.test:30443", "31400-31527", &browserRouteStore{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wb := services.NewInstanceWorkbenchService(nil, nil, nil, nil, nil)
+	wb.SetBrowserOrigins(reg)
+	router := gin.New()
+	router.Use(BrowserOriginRoutes(reg, nil, wb))
+	for _, method := range []string{"GET", "HEAD"} {
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, httptest.NewRequest(method, "https://cm.test:30443/__clawmanager_browser/view", nil))
+		if w.Code != http.StatusOK {
+			t.Fatalf("viewer inherited NoRoute status: %s HTTP %d", method, w.Code)
+		}
+		if method == "GET" && !strings.Contains(w.Body.String(), "credentialless") {
+			t.Fatal("missing trusted viewer document")
+		}
+		if method == "HEAD" && w.Body.Len() != 0 {
+			t.Fatal("HEAD returned HTML")
+		}
+		if !strings.Contains(w.Header().Get("Content-Security-Policy"), "frame-ancestors 'none'") {
+			t.Fatal("viewer lost its isolation policy")
+		}
+	}
+}
 func nativeRouteFixture(t *testing.T, runtimeTypes ...string) (*gin.Engine, *InstanceHandler, string) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
