@@ -25,7 +25,7 @@ const AdminSecurityScannerConfigPage = lazy(() => import('../pages/admin/securit
 const RiskRulesPage = lazy(() => import('../pages/admin/RiskRulesPage'));
 const ModelManagementPage = lazy(() => import('../pages/admin/ModelManagementPage'));
 const SystemSettingsPage = lazy(() => import('../pages/admin/SystemSettingsPage'));
-const BackupsPage = lazy(() => import('../pages/admin/backups/TeamDataBackupsPage'));
+const BackupsPage = lazy(() => import('../pages/admin/backups/BackupTrialPage'));
 const NorthboundSettingsPage = lazy(() => import('../pages/admin/NorthboundSettingsPage'));
 const RuntimePodsPage = lazy(() => import('../pages/admin/RuntimePodsPage'));
 const UserSettingsPage = lazy(() => import('../pages/settings/UserSettingsPage'));
@@ -273,8 +273,9 @@ function AppRoutes() {
       />
 
       {/* Admin Routes */}
-      <Route path="/admin/backups" element={<AdminRoute><BackupsPage /></AdminRoute>} />
-      <Route path="/admin/backups/:id" element={<AdminRoute><BackupsPage /></AdminRoute>} />
+      <Route path="/admin/backups" element={<AdminRoute><Navigate to="/admin/backups/records" replace /></AdminRoute>} />
+      <Route path="/admin/backups/records" element={<AdminRoute><BackupsPage /></AdminRoute>} />
+      <Route path="/admin/backups/:id" element={<AdminRoute><Navigate to="/admin/backups/records" replace /></AdminRoute>} />
       <Route
         path="/admin"
         element={

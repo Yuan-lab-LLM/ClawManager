@@ -73,6 +73,7 @@ var (
 )
 
 const (
+	hermesLegacyGatewayImage                = "ghcr.io/yuan-lab-llm/agentsruntime/hermes-lite@sha256:4fd519962d0afe796b36dade6f8e66379e7030a2c6f3c62b4a6574352b2eac44"
 	runtimeRolloutStaleWindowMultiplier     = 3
 	runtimeHeartbeatFailoverMultiplier      = 3
 	runtimeHeartbeatProbeTimeout            = 2 * time.Second
@@ -2769,11 +2770,17 @@ func (s *RuntimeScheduler) createGatewayOnPod(ctx context.Context, instance mode
 			return fmt.Errorf("%w: reserved eviction slot no longer meets the source resource profile", errRuntimeGatewayStartPending)
 		}
 	}
+	podUID := stringValue(pod.PodUID)
 	if start.upgradeID == "" {
 		if err := s.verifyRuntimePodForInstance(ctx, pod, instance.ID); err != nil {
 			// A reservation exists: preserve it for authoritative reconciliation,
 			// never try another Pod after an uncertain start boundary.
 			return s.preservePendingGatewayStart(ctx, instance.ID, instance.RuntimeGeneration, err)
+		}
+		// The pinned Hermes Lite agent rejects pod_uid. Ordinary starts still
+		// verify the Pod in Kubernetes and keep any configured security profile.
+		if runtimeType == RuntimeTypeHermes && instance.RuntimeSecurityProfile == "" && runtimePodMatchesImage(pod, hermesLegacyGatewayImage) {
+			podUID = ""
 		}
 	}
 	resp, err := s.agentClient.CreateGateway(ctx, start.endpoint, RuntimeAgentCreateGatewayRequest{
@@ -2794,7 +2801,7 @@ func (s *RuntimeScheduler) createGatewayOnPod(ctx context.Context, instance mode
 		DiskQuotaMB:     instance.DiskGB * 1024,
 		Generation:      instance.RuntimeGeneration,
 		SecurityProfile: instance.RuntimeSecurityProfile,
-		PodUID:          stringValue(pod.PodUID),
+		PodUID:          podUID,
 		UpgradeID:       start.upgradeID,
 		Environment:     start.environment,
 	})
