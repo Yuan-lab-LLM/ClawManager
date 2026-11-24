@@ -17,6 +17,7 @@ RUNTIMES = ("openclaw", "hermes", "opencode", "deepseek-harness")
 MODEL = "installation-smoke"
 FILENAME = "installation-smoke.txt"
 CONTENT = b"clawmanager installation workspace\n"
+INSTANCE_BUSY = "instance operation already in progress; wait for it to finish"
 
 
 class API:
@@ -103,8 +104,17 @@ def upload(api, instance_id):
     header = (f"--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{FILENAME}\"\r\n"
               "Content-Type: text/plain\r\n\r\n")
     payload = header.encode() + CONTENT + f"\r\n--{boundary}--\r\n".encode()
-    api.call("POST", f"/instances/{instance_id}/workspace/upload", payload, expected=(201,),
-             content_type=f"multipart/form-data; boundary={boundary}")
+    path = f"/instances/{instance_id}/workspace/upload"
+    deadline = time.monotonic() + 30
+    while True:
+        status, reply = api.request("POST", path, payload, expected=(201, 409),
+                                    content_type=f"multipart/form-data; boundary={boundary}")
+        if status == 201:
+            return
+        error = reply.get("error")
+        if error != INSTANCE_BUSY or time.monotonic() >= deadline:
+            raise RuntimeError(f"POST {path} returned {status}: {error or 'unexpected response'}")
+        time.sleep(1)
 
 
 def assert_workspace(api, instance_id):
@@ -126,8 +136,9 @@ def seed(api):
             "name": f"installation-smoke-{kind}", "cpu_cores": 1, "memory_gb": 2, "disk_gb": 5,
             "os_type": kind, "os_version": "latest",
         }, expected=(201,))
-        instances[kind] = instance["id"]
-    for kind, instance_id in instances.items():
+        instance_id = instance["id"]
+        instances[kind] = instance_id
+        # Finish provisioning each Runtime before the next scale-out on the single-node cluster.
         wait_for_state(api, instance_id, "running")
         upload(api, instance_id)
         assert_workspace(api, instance_id)

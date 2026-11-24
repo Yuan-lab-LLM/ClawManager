@@ -66,25 +66,26 @@ test('unavailable populated activity masks zero defaults; partial recorded value
  assert.deepEqual(activityCounts({...day,observed:true},{status:'ready'}),{events:0,calls:0,tasks:0,status:'ready'});
  assert.equal(day.calls,0);
 });
-test('gauge ratios distinguish unavailable and zero limits and preserve oversubscription', async () => {
- const { quotaGauge } = await import('./model.ts');
- assert.deepEqual(quotaGauge(0, 10), {ratio:0, needle:0});
- assert.deepEqual(quotaGauge(15, 10), {ratio:1.5, needle:1});
- assert.deepEqual(quotaGauge(0, 0), {ratio:null, needle:null});
- assert.deepEqual(quotaGauge(5, null), {ratio:null, needle:null});
-});
-test('state ring totals use every aggregate state, independent of the presentation cap', async () => {
- const { stateRing } = await import('./model.ts');
- const ring = stateRing({busy:200,idle:100,running:20,sleeping:10,starting:1,failed:2,offline:3,unknown:4});
- assert.equal(ring.total,340);
- assert.equal(ring.running,320,'running includes busy, idle and running-with-unknown-activity Agents');
- assert.equal(ring.segments.reduce((n, part)=>n+part.count,0),340);
- assert.ok(Math.abs(ring.segments.reduce((n, part)=>n+part.share,0)-1)<1e-9);
- assert.deepEqual(stateRing({}).segments.map(part=>part.share),Array(8).fill(0));
- assert.equal(stateRing({}).running,0);
- assert.equal(stateRing({sleeping:4,starting:3,failed:2,offline:1,unknown:5}).running,0,'non-running states must not inflate the numerator');
+test('quota ratios distinguish unavailable and zero limits and preserve oversubscription', async () => {
+ const { quotaRatio } = await import('./model.ts');
+ assert.equal(quotaRatio(0, 10), 0);
+ assert.equal(quotaRatio(15, 10), 1.5);
+ assert.equal(quotaRatio(0, 0), null);
+ assert.equal(quotaRatio(5, null), null);
+ assert.equal(quotaRatio(null, 10), null);
 });
 
+test('quota status changes at 80% and at the assigned limit', async () => {
+ const { quotaStatus } = await import('./model.ts');
+ assert.deepEqual([null, 0, .799, .8, .99, 1, 1.01].map(quotaStatus),
+  ['unknown', 'normal', 'normal', 'quotaNear', 'quotaNear', 'quotaReached', 'quotaOver']);
+});
+test('Agent state totals use the full aggregate and count only running states', async () => {
+ const { agentStateTotals } = await import('./model.ts');
+ assert.deepEqual(agentStateTotals({busy:200,idle:100,running:20,sleeping:10,starting:1,failed:2,offline:3,unknown:4}), {total:340,running:320});
+ assert.deepEqual(agentStateTotals({}), {total:0,running:0});
+ assert.deepEqual(agentStateTotals({sleeping:4,starting:3,failed:2,offline:1,unknown:5}), {total:15,running:0});
+});
 test('smooth history paths pass through samples without overshooting spikes', async () => {
  const { smoothPath } = await import('./model.ts');
  assert.equal(smoothPath([]), '');

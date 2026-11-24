@@ -777,11 +777,7 @@ export function InstanceWorkbench({
             </div>
           )}
         </div>
-        <footer className="wb-footer">
-          {selected?.kind === "terminal"
-            ? t("workbench.hideHint")
-            : t("workbench.activityHint")}
-        </footer>
+        {selected?.kind === "terminal" && <footer className="wb-footer">{t("workbench.hideHint")}</footer>}
       </div>
     </section>
   );

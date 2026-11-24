@@ -53,20 +53,21 @@ export function comparison(current: number | null, previous: number | null, comp
  return complete && current !== null && previous !== null && previous > 0 ? (current - previous) / previous * 100 : null;
 }
 export const agentStates: AgentState[] = ['busy', 'idle', 'running', 'sleeping', 'starting', 'failed', 'offline', 'unknown'];
-export function quotaGauge(assigned: number | null, limit: number | null) {
- const ratio = assigned !== null && Number.isFinite(assigned) && limit !== null && Number.isFinite(limit) && limit > 0 ? assigned / limit : null;
- return { ratio, needle: ratio === null ? null : Math.max(0, Math.min(1, ratio)) };
+export function quotaRatio(assigned: number | null, limit: number | null): number | null {
+ return assigned !== null && Number.isFinite(assigned) && limit !== null && Number.isFinite(limit) && limit > 0
+  ? assigned / limit
+  : null;
 }
-export function stateRing(counts: Partial<Record<AgentState, number>>) {
+export function quotaStatus(ratio: number | null) {
+ if (ratio === null) return 'unknown';
+ if (ratio > 1) return 'quotaOver';
+ if (ratio === 1) return 'quotaReached';
+ return ratio >= 0.8 ? 'quotaNear' : 'normal';
+}
+export function agentStateTotals(counts: Partial<Record<AgentState, number>>) {
  const total = agentStates.reduce((sum, state) => sum + (counts[state] ?? 0), 0);
- let offset = 0;
  const running = (counts.busy ?? 0) + (counts.idle ?? 0) + (counts.running ?? 0);
- return { total, running, segments: agentStates.map(state => {
-  const count = counts[state] ?? 0, share = total ? count / total : 0;
-  const segment = { state, count, share, offset };
-  offset += share;
-  return segment;
- }) };
+ return { total, running };
 }
 export const stateLabel = (state: AgentState, text: import('./text').WorkspaceText) => state === 'running' ? text.runtime : text[state];
 export function usageRanking(rows: import('./types').Dashboard['agent_usage'], currency: string | null, available: boolean) {
