@@ -218,6 +218,46 @@ class TrialRegistrationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "private collector mounts"):
             REGISTER["app_patch"](self.config, "source", observed, "app")
 
+    def test_combined_hermes_and_workspace_selection_share_one_read_only_pvc(self):
+        local = self.config["source"]
+        local["workspace_claim"] = "hermes-snapshot"
+        local["hermes_history"] = {"image": "registry.example/hermes@sha256:" + "a" * 64,
+                                   "script_configmap": "hermes-collector-v1", "user_id": 7,
+                                   "instance_id": 13, "run_as_user": 200013}
+        local["workspace_files"] = {"user_id": 7, "instance_id": 13, "runtime": "hermes",
+                                    "relative_root": "home/projects"}
+        REGISTER["validate"](self.config)
+        observed = self.deployment("source")
+        pod = observed["spec"]["template"]["spec"]
+        pod["securityContext"] = {"fsGroup": local["prepare"]["volume_group"]}
+        patch = REGISTER["app_patch"](self.config, "source", observed, "app")
+        added = {op["path"]: op["value"] for op in patch if op["op"] == "add"}
+        template = "/spec/template/spec"
+        workspace, = [vol for vol in added[template + "/volumes"]
+                      if vol.get("persistentVolumeClaim", {}).get("claimName") == local["workspace_claim"]]
+        self.assertTrue(workspace["persistentVolumeClaim"]["readOnly"])
+        app_mounts = added[template + "/containers/1/volumeMounts"]
+        app_workspace, = [mount for mount in app_mounts if mount["name"] == workspace["name"]]
+        self.assertTrue(app_workspace["readOnly"])
+        self.assertEqual(app_workspace["subPath"], "hermes/user-7/instance-13/home/projects")
+        worker = added[template + "/containers/-"]
+        worker_workspace, = [mount for mount in worker["volumeMounts"] if mount["name"] == workspace["name"]]
+        self.assertTrue(worker_workspace["readOnly"])
+        self.assertEqual(worker_workspace["mountPath"], "/workspaces")
+        socket_dir = "/run/clawmanager-trial/hermes-source"
+        self.assertEqual(next(m for m in app_mounts if m["name"] == "trial-hermes-socket")["mountPath"], socket_dir)
+        self.assertIn(socket_dir + "/history.sock", worker["args"])
+
+        app = pod["containers"][1]
+        pod["volumes"] = added[template + "/volumes"]
+        app["volumeMounts"] = app_mounts
+        app["env"] = added[template + "/containers/1/env"]
+        pod["containers"].append(worker)
+        self.assertTrue(all(op["op"] == "test" for op in REGISTER["app_patch"](self.config, "source", observed, "app")))
+        app_workspace["subPath"] = "hermes/user-7/instance-13/home"
+        with self.assertRaisesRegex(ValueError, "private collector mounts"):
+            REGISTER["app_patch"](self.config, "source", observed, "app")
+
     def test_workspace_selection_mounts_only_the_registered_subtree(self):
         local = self.config["source"]
         local["workspace_claim"] = "workspace-snapshot"

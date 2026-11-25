@@ -16,6 +16,9 @@ COMMAND = "/usr/local/bin/system-backup-trial-prepare"
 APP_MATERIALS = "/var/run/clawmanager-trial"
 IMPORTER_CONTAINER = "trial-artifact-import"
 HERMES_SOURCE_CONTAINER = "trial-hermes-source"
+HERMES_SOURCE_WORKSPACE = "trial-hermes-workspace"
+HERMES_SOURCE_SOCKET_DIR = "/run/clawmanager-trial/hermes-source"
+SOURCE_WORKSPACE_SELECTION = "trial-app-workspace-selection"
 TRIAL_ENV = "SYSTEM_BACKUP_TRIAL_"
 PLACEHOLDER = re.compile(r"\$\{([A-Z][A-Z0-9_]*)\}")
 WORKSPACE_BLOCK = re.compile(r"^ *# trial-workspace-begin\r?\n.*?^ *# trial-workspace-end\r?\n", re.MULTILINE | re.DOTALL)
@@ -289,7 +292,7 @@ def bind_profile(config, side, observed):
     return resource("v1", "ConfigMap", local["namespace"], job["profile_configmap"], data={"environment.json": json.dumps(result, indent=2) + "\n"})
 
 
-def app_materials(local, side):
+def app_materials(local, side, hermes_workspace=None):
     preparation = local["prepare"]
     volumes, mounts = [], []
 
@@ -334,10 +337,15 @@ def app_materials(local, side):
         )
         if "workspace_files" in local:
             scope = local["workspace_files"]
-            attach("trial-app-workspace-selection", "workspace-selection", {
-                "persistentVolumeClaim": {"claimName": local["workspace_claim"], "readOnly": True},
+            workspace = hermes_workspace or SOURCE_WORKSPACE_SELECTION
+            if hermes_workspace is None:
+                volumes.append({"name": workspace, "persistentVolumeClaim": {
+                    "claimName": local["workspace_claim"], "readOnly": True,
+                }})
+            mounts.append({
+                "name": workspace, "mountPath": APP_MATERIALS + "/workspace-selection", "readOnly": True,
+                "subPath": f'{scope["runtime"]}/user-{scope["user_id"]}/instance-{scope["instance_id"]}/{scope["relative_root"]}',
             })
-            mounts[-1]["subPath"] = f'{scope["runtime"]}/user-{scope["user_id"]}/instance-{scope["instance_id"]}/{scope["relative_root"]}'
             settings["WORKSPACE_FILES_SELECTION_ROOT"] = APP_MATERIALS + "/workspace-selection"
     else:
         settings.update(
@@ -424,10 +432,10 @@ def hermes_source_script(local):
                     immutable=True, data={"history.py": script})
 
 
-def hermes_source_materials(local):
+def hermes_source_materials(local, workspace, socket_dir):
     hermes = local["hermes_history"]
     root, scratch = "/workspaces", "/trial-snapshot"
-    socket_mount = {"name": "trial-hermes-socket", "mountPath": APP_MATERIALS + "/hermes-source"}
+    socket_mount = {"name": "trial-hermes-socket", "mountPath": socket_dir}
     address = socket_mount["mountPath"] + "/history.sock"
     volumes = [
         {"name": "trial-hermes-socket", "emptyDir": {}},
@@ -435,7 +443,7 @@ def hermes_source_materials(local):
         {"name": "trial-hermes-no-token", "emptyDir": {}},
         {"name": "trial-hermes-script", "configMap": {"name": hermes["script_configmap"], "defaultMode": 0o444,
                                                       "items": [{"key": "history.py", "path": "history.py"}]}},
-        {"name": "trial-hermes-workspace", "persistentVolumeClaim": {"claimName": local["workspace_claim"], "readOnly": True}},
+        {"name": workspace, "persistentVolumeClaim": {"claimName": local["workspace_claim"], "readOnly": True}},
     ]
     container = {
         "name": HERMES_SOURCE_CONTAINER, "image": hermes["image"], "imagePullPolicy": "IfNotPresent",
@@ -451,7 +459,7 @@ def hermes_source_materials(local):
         },
         "volumeMounts": [socket_mount,
             {"name": "trial-hermes-scratch", "mountPath": scratch},
-            {"name": "trial-hermes-workspace", "mountPath": root, "readOnly": True},
+            {"name": workspace, "mountPath": root, "readOnly": True},
             {"name": "trial-hermes-script", "mountPath": "/trial-script", "readOnly": True},
             {"name": "trial-hermes-no-token", "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount", "readOnly": True},
         ],
@@ -483,6 +491,8 @@ def app_patch(config, side, observed, container_name, artifact_import=False):
             raise ValueError("observed Deployment namespace, service account or pinned image differs")
         receiver = None
         collector = None
+        hermes_workspace = None
+        history_mount = None
         if artifact_import:
             if pod.get("securityContext", {}).get("fsGroup") != local["prepare"]["volume_group"] or (
                 pod.get("hostPID") or pod.get("shareProcessNamespace")
@@ -493,7 +503,15 @@ def app_patch(config, side, observed, container_name, artifact_import=False):
             if (container_name == HERMES_SOURCE_CONTAINER or pod.get("securityContext", {}).get("fsGroup") != local["prepare"]["volume_group"] or
                     pod.get("hostPID") or pod.get("shareProcessNamespace")):
                 raise ValueError("Hermes capture expects the registered Pod fsGroup and a separate process namespace")
-            history_volumes, history_mount, history_env, collector = hermes_source_materials(local)
+            hermes_workspace = HERMES_SOURCE_WORKSPACE
+            workspace_volumes = {v["name"] for v in pod.get("volumes", [])
+                                 if v.get("persistentVolumeClaim", {}).get("claimName") == local["workspace_claim"]}
+            if "workspace_files" in local and workspace_volumes == {SOURCE_WORKSPACE_SELECTION}:
+                hermes_workspace = SOURCE_WORKSPACE_SELECTION
+            legacy_socket = {"name": "trial-hermes-socket", "mountPath": APP_MATERIALS + "/hermes-source", "readOnly": True}
+            socket_dir = legacy_socket["mountPath"] if legacy_socket in container.get("volumeMounts", []) else HERMES_SOURCE_SOCKET_DIR
+            history_volumes, history_mount, history_env, collector = hermes_source_materials(local, hermes_workspace, socket_dir)
+        volumes, mounts, env = app_materials(local, side, hermes_workspace)
         if side == "source" and (collector is not None or "workspace_files" in local):
             restricted = {item["name"] for item in history_volumes} if collector is not None else set()
             workspace_names = {item["name"] for item in pod.get("volumes", [])
@@ -502,7 +520,8 @@ def app_patch(config, side, observed, container_name, artifact_import=False):
                 if collector is not None and item == collector and any(item is candidate for candidate in containers):
                     continue
                 for mount in item.get("volumeMounts", []):
-                    if (mount["name"] in restricted and not (item is container and mount == history_mount) or
+                    allowed_app_mount = item is container and (mount == history_mount or mount in mounts)
+                    if (mount["name"] in restricted and not allowed_app_mount or
                             mount["name"] in workspace_names and mount.get("readOnly") is not True):
                         raise ValueError("observed source Deployment exposes writable snapshot or private collector mounts")
                 if any(device["name"] in restricted | workspace_names for device in item.get("volumeDevices", [])):
@@ -521,7 +540,6 @@ def app_patch(config, side, observed, container_name, artifact_import=False):
                     raise ValueError("observed target Deployment has a writable import mount")
                 if any(device["name"] in archive_names for device in item.get("volumeDevices", [])):
                     raise ValueError("observed target Deployment exposes the import claim as a block device")
-        volumes, mounts, env = app_materials(local, side)
         if artifact_import:
             volumes.extend(import_volumes)
             mounts.append(socket_mount)
