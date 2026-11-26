@@ -31,12 +31,18 @@ func (databaseHistoryObjects) Read(ctx context.Context, owner string, reference 
 func (databaseHistoryObjects) RestoreDetail(ctx context.Context, kind string, raw []byte) ([]byte, error) {
 	return repository.HydrateArchivedPayload(ctx, kind, json.RawMessage(raw))
 }
-func startHistoryMaintenance(ctx context.Context, database db.Session, objects *observability.EncryptedObjects, cfg config.DatabaseConfig) error {
+func startHistoryMaintenance(ctx context.Context, database db.Session, objects *observability.EncryptedObjects, cfg config.DatabaseConfig, trialRuntime bool) error {
 	pool, ok := database.Driver().(*sql.DB)
 	if !ok || objects == nil {
 		return errors.New("history maintenance requires SQL and encrypted objects")
 	}
 	service := historymaintenance.New(pool, databaseHistoryObjects{}, func(ctx context.Context) (func(), error) { return backupgate.HoldWorkUnit(ctx, "history.maintenance") })
+	// The isolated trial runtime uses a DML-only account.
+	if trialRuntime {
+		databaseHistory = service
+		repository.ConfigureHistoryReader(database, service)
+		return nil
+	}
 	openCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	var closeDDL func()

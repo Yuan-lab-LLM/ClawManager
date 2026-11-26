@@ -857,7 +857,7 @@ func main() {
 		}
 	}
 	defer leaderCancel()
-	if err := startDatabaseMaintenance(leaderCtx, database, observationObjects, cfg.Database); err != nil {
+	if err := startDatabaseMaintenance(leaderCtx, database, observationObjects, cfg.Database, trialRuntimeBackupID != ""); err != nil {
 		log.Fatalf("Failed to start database maintenance: %v", err)
 	}
 	workspaceStore := workspacedashboard.NewStore(database)
