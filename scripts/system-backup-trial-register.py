@@ -292,7 +292,7 @@ def bind_profile(config, side, observed):
     return resource("v1", "ConfigMap", local["namespace"], job["profile_configmap"], data={"environment.json": json.dumps(result, indent=2) + "\n"})
 
 
-def app_materials(local, side, hermes_workspace=None):
+def app_materials(local, side, hermes_workspace=None, artifact_import=False):
     preparation = local["prepare"]
     volumes, mounts = [], []
 
@@ -318,9 +318,10 @@ def app_materials(local, side, hermes_workspace=None):
     ca = config_map("trial-app-ca", "ca", preparation["ca_configmap"], "ca-bundle.crt")
     key = secret("trial-app-key", "key", local["key_secret"], "key")
     claim = {"claimName": local["artifact_claim"]}
-    if side == "target":
+    if side == "target" and not artifact_import:
         claim["readOnly"] = True
-    attach("trial-app-archive", "archive-read", {"persistentVolumeClaim": claim})
+    archive_volume = "trial-import-write" if artifact_import else "trial-app-archive"
+    attach(archive_volume, "archive-read", {"persistentVolumeClaim": claim})
 
     settings = {
         "ENVIRONMENT_PROFILE_FILE": profile, "KEY_FILE": key, "READ_DIR": APP_MATERIALS + "/archive-read",
@@ -391,7 +392,6 @@ def artifact_import_materials(local):
     write_dir = APP_MATERIALS + "/import-write"
     volumes = [
         {"name": "trial-import-socket", "emptyDir": {}},
-        {"name": "trial-import-write", "persistentVolumeClaim": {"claimName": local["artifact_claim"]}},
         {"name": "trial-import-no-token", "emptyDir": {}},
     ]
     socket_mount = {"name": "trial-import-socket", "mountPath": socket_dir}
@@ -469,6 +469,28 @@ def hermes_source_materials(local, workspace, socket_dir):
     return volumes, {**socket_mount, "readOnly": True}, [{"name": TRIAL_ENV + key, "value": value} for key, value in extras.items()], container
 
 
+def replace_legacy_target_archive(patch, pod, app, template, selected, claim):
+    # Older targets declared a second, read-only volume for the same claim.
+    legacy = {"name": "trial-app-archive", "persistentVolumeClaim": {"claimName": claim, "readOnly": True}}
+    archive_mount = {"name": legacy["name"], "mountPath": APP_MATERIALS + "/archive-read", "readOnly": True}
+    volumes = pod["volumes"].copy()
+    mounts = app.get("volumeMounts", []).copy()
+    volume_matches = [(i, v) for i, v in enumerate(volumes) if v["name"] == legacy["name"]]
+    mount_matches = [(i, m) for i, m in enumerate(mounts) if m["name"] == legacy["name"]]
+    if (len(volume_matches) != 1 or volume_matches[0][1] != legacy
+            or len(mount_matches) != 1 or mount_matches[0][1] != archive_mount):
+        raise ValueError("observed target Deployment has a conflicting legacy archive layout")
+    volume_index = volume_matches[0][0]
+    mount_index = mount_matches[0][0]
+    volumes.pop(volume_index)
+    mounts[mount_index] = {**archive_mount, "name": "trial-import-write"}
+    patch.extend([
+        {"op": "remove", "path": f"{template}/volumes/{volume_index}"},
+        {"op": "replace", "path": f"{selected}/volumeMounts/{mount_index}/name", "value": "trial-import-write"},
+    ])
+    return {**pod, "volumes": volumes}, {**app, "volumeMounts": mounts}
+
+
 def app_patch(config, side, observed, container_name, artifact_import=False):
     local = config[side]
     if artifact_import and (side != "target" or container_name == IMPORTER_CONTAINER):
@@ -511,7 +533,7 @@ def app_patch(config, side, observed, container_name, artifact_import=False):
             legacy_socket = {"name": "trial-hermes-socket", "mountPath": APP_MATERIALS + "/hermes-source", "readOnly": True}
             socket_dir = legacy_socket["mountPath"] if legacy_socket in container.get("volumeMounts", []) else HERMES_SOURCE_SOCKET_DIR
             history_volumes, history_mount, history_env, collector = hermes_source_materials(local, hermes_workspace, socket_dir)
-        volumes, mounts, env = app_materials(local, side, hermes_workspace)
+        volumes, mounts, env = app_materials(local, side, hermes_workspace, artifact_import)
         if side == "source" and (collector is not None or "workspace_files" in local):
             restricted = {item["name"] for item in history_volumes} if collector is not None else set()
             workspace_names = {item["name"] for item in pod.get("volumes", [])
@@ -529,10 +551,12 @@ def app_patch(config, side, observed, container_name, artifact_import=False):
         if side == "target":
             archive_names = {item["name"] for item in pod.get("volumes", [])
                              if item.get("persistentVolumeClaim", {}).get("claimName") == local["artifact_claim"]}
+            if artifact_import and archive_names - {"trial-app-archive", "trial-import-write"}:
+                raise ValueError("observed target Deployment declares the import claim under another volume name")
             for item in containers + pod.get("initContainers", []):
                 if receiver is not None and item == receiver and any(item is candidate for candidate in containers):
                     continue
-                if artifact_import and any(mount["name"] in {"trial-import-socket", "trial-import-write"}
+                if artifact_import and any(mount["name"] in {"trial-import-socket", "trial-import-write", "trial-app-archive"}
                                            for mount in item.get("volumeMounts", []) if item is not container):
                     raise ValueError("observed target Deployment exposes import materials to another container")
                 if any(mount["name"] in archive_names and mount.get("readOnly") is not True
@@ -557,6 +581,8 @@ def app_patch(config, side, observed, container_name, artifact_import=False):
             selected + "/name": container_name, selected + "/image": local["image"],
         }
         patch = [{"op": "test", "path": path, "value": value} for path, value in identities.items()]
+        if artifact_import and "trial-app-archive" in archive_names:
+            pod, container = replace_legacy_target_archive(patch, pod, container, template, selected, local["artifact_claim"])
         patch_list(patch, pod, "volumes", template + "/volumes", volumes, "name")
         patch_list(patch, container, "volumeMounts", selected + "/volumeMounts", mounts, "mountPath")
         patch_list(patch, container, "env", selected + "/env", env, "name")

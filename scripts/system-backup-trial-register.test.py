@@ -170,17 +170,55 @@ class TrialRegistrationTests(unittest.TestCase):
         self.assertEqual(worker["securityContext"]["capabilities"], {"drop": ["ALL"]})
         self.assertNotIn("KEY_FILE", json.dumps(worker["env"]))
         self.assertNotIn("DSN_FILE", json.dumps(worker["env"]))
-        self.assertTrue(any(item["name"] == "trial-import-write" for item in worker["volumeMounts"]))
+        pod["volumes"] = added[template + "/volumes"]
+        archive, = [volume for volume in pod["volumes"]
+                    if volume.get("persistentVolumeClaim", {}).get("claimName") == local["artifact_claim"]]
+        self.assertFalse(archive["persistentVolumeClaim"].get("readOnly", False))
+        importer_mount, = [item for item in worker["volumeMounts"] if item["name"] == archive["name"]]
+        self.assertFalse(importer_mount.get("readOnly", False))
         app = pod["containers"][1]
         app["volumeMounts"] = added[template + "/containers/1/volumeMounts"]
+        app_mount, = [item for item in app["volumeMounts"] if item["name"] == archive["name"]]
+        self.assertTrue(app_mount["readOnly"])
         self.assertTrue(all(item.get("readOnly") for item in app["volumeMounts"] if "archive" in item["name"] or "import" in item["name"]))
-        pod["volumes"] = added[template + "/volumes"]
         app["env"] = added[template + "/containers/1/env"]
         pod["containers"].append(worker)
         self.assertTrue(all(op["op"] == "test" for op in REGISTER["app_patch"](self.config, "target", observed, "app", True)))
         pod["containers"][0]["volumeMounts"] = [{"name": "trial-import-write", "mountPath": "/unsafe"}]
         with self.assertRaisesRegex(ValueError, "another container"):
             REGISTER["app_patch"](self.config, "target", observed, "app", True)
+
+    def test_target_delivery_reuses_the_claim_on_previously_registered_targets(self):
+        local = self.config["target"]
+        template = "/spec/template/spec"
+        for existing_importer in (False, True):
+            with self.subTest(existing_importer=existing_importer):
+                observed = self.deployment("target")
+                pod = observed["spec"]["template"]["spec"]
+                pod["securityContext"] = {"fsGroup": local["prepare"]["volume_group"]}
+                volumes, mounts, env = REGISTER["app_materials"](local, "target")
+                pod["volumes"] = volumes
+                pod["containers"][1].update(env=env, volumeMounts=mounts)
+                if existing_importer:
+                    private_volumes, socket_mount, socket_env, worker = REGISTER["artifact_import_materials"](local)
+                    volumes.extend(private_volumes)
+                    volumes.append({"name": "trial-import-write", "persistentVolumeClaim": {"claimName": local["artifact_claim"]}})
+                    mounts.append(socket_mount)
+                    env.append(socket_env)
+                    pod["containers"].append(worker)
+                original = copy.deepcopy(observed)
+                patch = REGISTER["app_patch"](self.config, "target", observed, "app", True)
+                self.assertEqual(observed, original)
+                legacy_volume = next(i for i, v in enumerate(volumes) if v["name"] == "trial-app-archive")
+                legacy_mount = next(i for i, m in enumerate(mounts) if m["name"] == "trial-app-archive")
+                self.assertIn({"op": "remove", "path": f"{template}/volumes/{legacy_volume}"}, patch)
+                self.assertIn({"op": "replace", "path": f"{template}/containers/1/volumeMounts/{legacy_mount}/name",
+                               "value": "trial-import-write"}, patch)
+                added_archive_volumes = [
+                    op["value"] for op in patch if op["op"] == "add" and op["path"] == f"{template}/volumes/-"
+                    and op["value"].get("persistentVolumeClaim", {}).get("claimName") == local["artifact_claim"]
+                ]
+                self.assertEqual(len(added_archive_volumes), 0 if existing_importer else 1)
 
     def test_registered_hermes_source_has_a_read_only_workspace_and_private_socket(self):
         local = self.config["source"]
