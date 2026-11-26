@@ -208,6 +208,8 @@ kubectl --context $targetContext -n $targetNs get deployment $targetDeploy `
   -o 'custom-columns=SA:.spec.template.spec.serviceAccountName,CONTAINERS:.spec.template.spec.containers[*].name,IMAGES:.spec.template.spec.containers[*].image'
 ```
 
+管理入口库启用了 CM 的数据库 TLS 固定配置时，`DB_TLS_CA_FILE` 指向容器内只读的规范绝对路径普通文件，`DB_TLS_CA_SHA256` 使用该文件原始字节的 SHA-256，`DB_TLS_SERVER_NAME` 匹配数据库证书的 SAN。使用 ConfigMap 提供 CA 时，可用只读单文件 `subPath` 挂载得到普通文件。
+
 确认目标管理员已能登录。启用页面上传需要 Pod 的 `spec.securityContext.fsGroup` 与 `target.prepare.volume_group` 一致，`hostPID` 和 `shareProcessNamespace` 均保持关闭。在平台发布配置中设置这些字段。直接管理 Deployment 且只需补充 `fsGroup` 时，可使用下面的命令：
 
 ```powershell
@@ -420,13 +422,15 @@ kubectl --context $targetContext -n $targetNs rollout status "deployment/$target
 4. 点击 **检查此备份**，核对备份 ID、密文 SHA-256 和预期内容，确认显示 **产物读回和恢复内容预检通过**。
 5. 点击 **恢复到隔离环境**。等待任务显示 **独立读回校验通过**，记录恢复任务 ID 和内容计数。下一节使用的是页面上的**备份 ID**。
 
-同集群跨 namespace 和跨集群均可导入同一种 `.tar`，导入成功后即可预检。通过其他方式传输备份原件时，在源端展开 **单独传输备份原件** 下载交接单。将同一备份的 `.trial` 密文和 `.receipt` 回执放入目标导入卷，再在目标端展开 **已有备份原件**，点击 **选择恢复交接单** 导入 JSON。
+同集群跨 namespace 和跨集群均可导入同一种 `.tar`，导入成功后即可预检。交付包绑定导出时登记的源端和目标端。若换了目标集群、namespace 或导入卷，先在源、目标两端更新登记并核对配置，再从源端为新目标重新下载交付包。核对重新导出的备份 ID 和密文 SHA-256 与原备份一致。通过其他方式传输备份原件时，在源端展开 **单独传输备份原件** 下载交接单。将同一备份的 `.trial` 密文和 `.receipt` 回执放入目标导入卷，再在目标端展开 **已有备份原件**，点击 **选择恢复交接单** 导入 JSON。
 
 ### 5.6 使用恢复的账号和实例
 
 要用恢复后的账号登录，需要启用隔离运行入口。平台可另行发布运行入口，或在保留管理入口配置的前提下，把本次试行的目标 CM 切换到运行模式。以下示例是切换目标 CM 的配置。
 
-确认 5.5 的恢复校验已通过，且目标登记包含 `runtime_secret`。保留目标只读归档挂载、密钥、恢复复核账号和所需工作区。Kubernetes namespace、实例 namespace、实例与工作区 StorageClass 都要符合目标登记。运行配置关闭企业认证、Northbound、IEI 和旧备份功能开关。按需启用实例调度，并为目标运行入口配置自己的访问地址和运行依赖。
+需要让旧版和新版两个运行入口同时工作时，分别使用独立的运行 namespace 和工作区。运行调度器在各自 namespace 使用固定的 `clawmanager-runtime-scheduler` Lease。
+
+确认 5.5 的恢复校验已通过，且目标登记包含 `runtime_secret`。保留目标只读归档挂载、密钥、恢复复核账号和所需工作区。Kubernetes namespace、实例 namespace、实例与工作区 StorageClass 都要符合目标登记。运行配置关闭企业认证、Northbound、IEI 和旧备份功能开关。为目标运行入口配置自己的访问地址。目标环境尚未部署运行池时，按 5.7 接入并启用调度。使用支持隔离运行模式的试行镜像。运行账号只授予目标业务库的 SELECT、INSERT、UPDATE 和 DELETE。该模式只配置历史归档读服务，跳过月表 DDL 和归档维护任务。
 
 直接管理 Deployment 时，将以下配置保存为 `trial-target-runtime-patch.yaml`。替换 CM 容器名、备份 ID、恢复库、目标 namespace、StorageClass 和运行 Secret。以下示例包含工作区卷。把 `RUNTIME_WORKSPACE_PVC_CLAIM` 的值替换为 `target.workspace_claim`，`RUNTIME_WORKSPACE_ROOT` 使用 5.4 的挂载路径。仅恢复账号和实例且未登记工作区卷时，去掉 `RUNTIME_WORKSPACE_PVC_CLAIM` 这一项，并把 `RUNTIME_WORKSPACE_ROOT` 指向目标运行配置已有的工作区挂载。环境变量在原 Deployment 中通过 `valueFrom` 注入时，应用这些新值前移除对应的旧引用。
 
@@ -496,12 +500,213 @@ kubectl --context $targetContext -n $targetNs rollout status "deployment/$target
 
 使用恢复后的账号在目标运行入口登录。核对账号所属的实例，按需启动实例，再检查 Hermes 聊天内容、顺序及 workspace 文件。恢复后的实例初始为停止状态。可以再用另一个普通账号核对实例访问范围。
 
+### 5.7 空目标环境接入 Hermes Lite 运行池
+
+同一份备份里选中的实例会随本次任务一起恢复，保留各自的类型和模式。运行依赖按类型配置。以下命令用于 Hermes Lite。目标包含 OpenClaw Lite、OpenCode Lite 或 DeepSeek Harness Lite 时，分别按标准部署清单配置对应的池。按现场使用的类型和模式抽样启动，再核对本次备份有纳入的聊天和文件。
+
+恢复后的实例初始为 **停止**。空目标环境需要先配置运行池，账号登录、实例启动和内容读取才构成完整验收。5.4 的 Hermes 恢复适配器负责恢复聊天数据。这里的 `hermes-runtime` 是供调度器启动实例的独立 Deployment。
+
+以下 PowerShell 示例接续 5.1 和 5.6 的变量，`$targetDeploy` 指向目标**运行入口**的 Deployment。由 Helm 或 GitOps 管理时，把下面的资源和环境变量合入目标发布配置。目标已有同类型池时，核对工作区、凭据、镜像和回连配置，复用已就绪的目标池。
+
+#### 准备目标工作区、内部服务和凭据
+
+- 目标 CM、Hermes 恢复适配器和运行池使用同一个 `target.workspace_claim`。运行池和 CM 必须使用同一个 PVC，并把 PVC 挂到**相同的绝对路径**。调度器会把 CM 中的实例工作区绝对路径传给运行池。存储需支持两类 Pod 的访问方式，并保留已恢复文件的 UID/GID。
+- 使用池 Pod 能访问的 **目标 CM 内部 Service**。标准部署使用 HTTP 9001。核对 Service 的 EndpointSlice 指向目标运行入口。导入管理入口独立部署时，运行池回连运行入口。启用新版的受管代理策略时，目标 namespace 还要有名为 `clawmanager-frontend` 的 Service，其选择器指向目标 CM Pod，调度器用它发现需信任的代理地址。
+- CM 和池从同一个目标 Secret 读取控制 token 和上报 token。平台已有对应的 Secret 时可复用。需要手动创建时，从受保护的文件导入目标专用凭据。
+- 准备目标可访问的独立 Redis，供 CM 运行协调使用。通过 Secret 给 CM 配置 `PLATFORM_REDIS_URL`，已有对应目标 Secret 时可沿用。
+- 首次启动前，在目标运行入口的 **AI 网关 → 模型**（`/admin/models`） 保存并启用可用的聊天模型，确认实例归属的恢复账号有使用权限。试行备份会保留实例启动配置中的模型名称或引用，平台模型目录（`llm_models`）、其中的提供商凭据和访问策略需要在目标单独配置。实例显式引用某个模型时，核对目标可用的模型标识。模型网关地址使用目标内部服务。
+
+```powershell
+$poolName = 'hermes-runtime'
+$poolSecret = 'trial-hermes-runtime-agent'
+$poolImage = '<目标集群可拉取的 Hermes Lite 镜像@sha256:摘要>'
+$poolWorkspace = $target.workspace_claim
+$poolWorkspaceRoot = '<目标 CM 的 RUNTIME_WORKSPACE_ROOT，使用 5.6 的实际路径>'
+$poolCmService = '<目标运行入口的 Kubernetes Service 名>'
+$poolCmUrl = "http://$poolCmService.$targetNs.svc.cluster.local:9001"
+$poolProxyCidrs = '<覆盖目标 CM 代理 Pod IP 的受信 CIDR>'
+$poolControlFile = '<目标控制 token 文件路径，单行无结尾换行>'
+$poolReportFile = '<目标上报 token 文件路径，单行无结尾换行>'
+$poolRedisSecret = 'trial-runtime-redis'
+$poolRedisKey = 'redis-url'
+$poolRedisFile = '<目标 Redis URL 文件路径，单行无结尾换行>'
+
+# 目标 CM 监听标准 API 端口且还没有内部 Service 时，先创建
+# kubectl --context $targetContext -n $targetNs expose deployment $targetDeploy --name=$poolCmService --type=ClusterIP --port=9001 --target-port=9001
+
+$poolFrontendPort = '8443' # 按目标 CM 实际 HTTPS 端口调整
+# 尚无 clawmanager-frontend Service 时执行，选择器继承自目标 CM Deployment
+# kubectl --context $targetContext -n $targetNs expose deployment $targetDeploy --name=clawmanager-frontend --type=ClusterIP --port=443 --target-port=$poolFrontendPort
+
+kubectl --context $targetContext -n $targetNs get svc clawmanager-frontend
+kubectl --context $targetContext -n $targetNs get pvc $poolWorkspace
+kubectl --context $targetContext -n $targetNs get svc $poolCmService
+kubectl --context $targetContext -n $targetNs get endpointslice -l "kubernetes.io/service-name=$poolCmService"
+
+# 仅在首次创建时执行
+kubectl --context $targetContext -n $targetNs create secret generic $poolSecret `
+  "--from-file=runtime-agent-control-token=$poolControlFile" `
+  "--from-file=runtime-agent-report-token=$poolReportFile"
+
+# 尚未配置目标 Redis URL Secret 时执行
+kubectl --context $targetContext -n $targetNs create secret generic $poolRedisSecret "--from-file=$poolRedisKey=$poolRedisFile"
+```
+
+网络策略应允许池 Pod 访问目标 CM API，以及目标 CM 访问运行池的 Agent 19090 和所配置的网关端口。保留目标 namespace 的 DNS 通路。新版 Hermes Lite 要求 `CLAWMANAGER_BACKEND_URL` 使用 Kubernetes Service DNS。Agent 报 `clock_reference_unavailable` 时，从运行池所在网络对同一地址执行 `curl -I --noproxy '*' --max-time 3 <目标 CM Service URL>`，检查是否收到 HTTP `Date`，并核对连接用的协议、端口和节点时间。受信 CIDR 按实际代理流量填写。运行池需要私有仓库凭据时，在其 Pod 发布配置中添加 `imagePullSecrets`。
+
+#### 核对目标调度权限
+
+标准安装已有目标调度权限时，复用现有绑定。缺少基本权限时，给登记的目标 CM 服务账号添加 namespace 内的发现、扩缩容和选主权限。模型和 Redis 等依赖按运行入口的实际配置提供目标端点。
+
+```powershell
+@"
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: trial-hermes-runtime-scheduler
+  namespace: $targetNs
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "endpoints"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["services"]
+    resourceNames: ["clawmanager-frontend"]
+    verbs: ["get"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments/scale"]
+    resourceNames: ["$poolName"]
+    verbs: ["get", "update", "patch"]
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "create", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: trial-hermes-runtime-scheduler
+  namespace: $targetNs
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: trial-hermes-runtime-scheduler
+subjects:
+  - kind: ServiceAccount
+    name: $($target.service_account)
+    namespace: $targetNs
+"@ | kubectl --context $targetContext -n $targetNs apply -f -
+```
+
+#### 配置目标 CM 的运行池凭据
+
+先给目标 CM 配置 Agent 凭据和 Hermes Web 控制入口，让运行池发布后能完成上报。此时保持调度关闭。保留 5.6 的 `RUNTIME_WORKSPACE_ROOT` 和恢复业务库配置。
+
+```powershell
+$runtimeEnv = @(
+    @{ name = 'RUNTIME_NAMESPACE'; value = $targetNs; valueFrom = $null }
+    @{ name = 'RUNTIME_WORKSPACE_PVC_CLAIM'; value = $poolWorkspace; valueFrom = $null }
+    @{ name = 'RUNTIME_SCHEDULER_ENABLED'; value = 'false'; valueFrom = $null }
+    @{ name = 'HERMES_RUNTIME_IMAGE'; value = $poolImage; valueFrom = $null }
+    @{ name = 'CLAWMANAGER_CONTROL_UI_ORIGIN'; value = $poolCmUrl; valueFrom = $null }
+    @{ name = 'CLAWMANAGER_LLM_GATEWAY_BASE_URL'; value = "$poolCmUrl/api/v1/gateway/llm"; valueFrom = $null }
+    @{
+        name = 'PLATFORM_REDIS_URL'
+        value = $null
+        valueFrom = @{ secretKeyRef = @{ name = $poolRedisSecret; key = $poolRedisKey } }
+    }
+    @{
+        name = 'RUNTIME_AGENT_CONTROL_TOKEN'
+        value = $null
+        valueFrom = @{ secretKeyRef = @{ name = $poolSecret; key = 'runtime-agent-control-token' } }
+    }
+    @{
+        name = 'RUNTIME_AGENT_REPORT_TOKEN'
+        value = $null
+        valueFrom = @{ secretKeyRef = @{ name = $poolSecret; key = 'runtime-agent-report-token' } }
+    }
+)
+$runtimeContainer = @{ name = $targetContainer; env = $runtimeEnv }
+$runtimePatch = @{ spec = @{ template = @{ spec = @{ containers = @($runtimeContainer) } } } }
+$runtimePatchFile = '.\trial-target-hermes-scheduler.json'
+$runtimePatch | ConvertTo-Json -Depth 16 | Set-Content -LiteralPath $runtimePatchFile -Encoding ascii
+
+kubectl --context $targetContext -n $targetNs patch deployment $targetDeploy `
+  --type=strategic --patch-file $runtimePatchFile
+kubectl --context $targetContext -n $targetNs rollout status "deployment/$targetDeploy"
+```
+
+#### 发布目标 Hermes Lite 运行池
+
+要验收 Hermes 聊天页，运行池镜像需与目标 CM 的 Hermes Desktop Web 契约兼容。当前分支固定 Hermes `v0.22.5` 及其源码提交，实际要求以 [CM 的版本锁](../hermes-desktop-web/upstream.lock.json) 为准。用目标环境已验收的 digest，并核对 Agent 上报的 `hermes_desktop_web` 能力、版本、源码提交和 RPC 协议。池 Pod Ready、实例 Running 和聊天页可用分别检查。 [运行 Agent 契约](clawmanager-agent-v2-contract.md)
+
+从旧版 Hermes 恢复到新版时，源端用兼容源版本的采集镜像取得会话数据。目标端先准备空的 Hermes 工作区，用与目标 CM 配对的 Hermes 镜像运行 5.4 的恢复适配器，由新版原生接口导入会话。核对数量、顺序和独立读回后，在同一目标工作区启动新版运行池。保留原工作区以便核对和回退。旧版的 `state.db` 无需用新版池原地打开。
+
+下列命令从仓库标准清单提取 **hermes-runtime** Deployment，复用其 Agent、网关端口和 Pod 身份配置。生成的文件仅包含该 Deployment，并替换镜像、回连、工作区与 Secret 引用。 [Hermes Lite 标准部署清单](../deployments/k8s/cluster/clawmanager.yaml)
+
+```powershell
+$standard = Get-Content -Raw -LiteralPath .\deployments\k8s\cluster\clawmanager.yaml
+$poolTemplates = @($standard -split '(?m)^---[ \t]*\r?$' | Where-Object {
+    $_ -match '(?m)^kind: Deployment\r?$' -and
+    $_ -match '(?m)^metadata:\r?\n  name: hermes-runtime\r?$'
+})
+if ($poolTemplates.Count -ne 1) { throw '未找到唯一的标准 Hermes Deployment' }
+
+$poolJson = $poolTemplates[0] |
+    kubectl --context $targetContext create --dry-run=client --validate=false -f - -o json
+if ($LASTEXITCODE -ne 0 -or -not $poolJson) { throw '解析标准 Hermes Deployment 失败' }
+
+$poolSpec = $poolJson | Out-String | ConvertFrom-Json
+$poolSpec.metadata.namespace = $targetNs
+$poolPod = $poolSpec.spec.template.spec
+$poolContainer = $poolPod.containers | Where-Object name -eq 'runtime'
+$poolContainer.image = $poolImage
+($poolPod.volumes | Where-Object name -eq 'workspaces').persistentVolumeClaim.claimName = $poolWorkspace
+($poolContainer.volumeMounts | Where-Object name -eq 'workspaces').mountPath = $poolWorkspaceRoot
+
+$poolEnv = @{
+    CLAWMANAGER_BACKEND_URL = $poolCmUrl
+    CLAWMANAGER_CONTROL_UI_ORIGIN = $poolCmUrl
+    CLAWMANAGER_TRUSTED_PROXY_CIDRS = $poolProxyCidrs
+    CLAWMANAGER_RUNTIME_IMAGE_REF = $poolImage
+    RUNTIME_WORKSPACE_ROOT = $poolWorkspaceRoot
+}
+foreach ($entry in $poolContainer.env) {
+    if ($poolEnv.ContainsKey($entry.name)) { $entry.value = $poolEnv[$entry.name] }
+    if ($entry.valueFrom.secretKeyRef) { $entry.valueFrom.secretKeyRef.name = $poolSecret }
+}
+
+$poolManifest = '.\trial-target-hermes-pool.json'
+$poolSpec | ConvertTo-Json -Depth 32 | Set-Content -LiteralPath $poolManifest -Encoding ascii
+kubectl --context $targetContext -n $targetNs apply --dry-run=server -f $poolManifest
+if ($LASTEXITCODE -ne 0) { throw '目标运行池清单预检失败' }
+kubectl --context $targetContext -n $targetNs apply -f $poolManifest
+kubectl --context $targetContext -n $targetNs rollout status "deployment/$poolName"
+```
+
+#### 启用目标调度并验证实例
+
+运行池 Pod 和目标 CM 均就绪后，为目标运行入口启用调度。直接管理 Deployment 时执行以下命令：
+
+```powershell
+kubectl --context $targetContext -n $targetNs set env "deployment/$targetDeploy" `
+  --containers=$targetContainer RUNTIME_SCHEDULER_ENABLED=true
+kubectl --context $targetContext -n $targetNs rollout status "deployment/$targetDeploy"
+kubectl --context $targetContext -n $targetNs get pods -l 'clawmanager.io/runtime-type=hermes'
+```
+
+在 CM 的运行池页面确认目标 Hermes Pod 已上报且可调度。用恢复后的账号对一个 Hermes Lite 实例点一次 **启动**，等实例 Running、网关可用，再打开原会话和文件。若状态提示模型配置缺失，先在目标配置可用的模型路由，再启动验证。记录实例 ID、启动状态、会话读回和文件校验结果。
+
 ## 常见问题
 
 | 现象 | 怎么处理 |
 | --- | --- |
 | 备份或恢复按钮不可用 | 检查当前端的就绪和准备任务状态，按缺项联系平台管理员。 |
 | 找不到某场会话或某个目录 | 检查是否选择了对应实例，再核对平台登记的可采集范围和该内容在源端是否可读。 |
+| 导入提示交付包无效或源和目标不匹配 | 按 5.5 核对交付包的目标登记，必要时从源端为当前目标重新导出。 |
+| 启动时报 `no active models are configured` | 按 5.7 在目标端启用一个实例归属账号可用的聊天模型，然后重新点击启动。 |
 | 导入后摘要不一致 | 核对源端下载的原始包、目标登记和备份 ID。用原始交付包重新预检。 |
 | 目标已有业务数据 | 由平台准备新的空隔离目标，确认好环境后再恢复。 |
 | Hermes 页面从父会话入口打开续会话 | 这是 Hermes 的会话展示方式。选定续会话的内容可在该入口核对。 |
