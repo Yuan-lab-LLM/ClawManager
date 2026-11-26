@@ -60,7 +60,7 @@ func connect(cfg config.DatabaseConfig) (db.Session, error) {
 	// P0 restored databases are data-only drill targets. Every official business
 	// process uses this connection path; none may start consumers, retry Owner
 	// operations, reconcile upgrades, seed data or migrate a restored copy.
-	if regexp.MustCompile(`^cm_restore_[a-f0-9]{32}$`).MatchString(cfg.Database) {
+	if strings.HasPrefix(cfg.Database, "cm_drill_") || regexp.MustCompile(`^cm_(restore|import)_[a-f0-9]{32}$`).MatchString(cfg.Database) {
 		return nil, fmt.Errorf("isolated restore databases cannot run business services")
 	}
 	hostPort := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
@@ -78,19 +78,24 @@ func connect(cfg config.DatabaseConfig) (db.Session, error) {
 
 	var session db.Session
 	var err error
-	if scope := SQLGateScope(); scope != "" {
-		driverConfig, e := mysqldriver.ParseDSN(settings.String())
+	if scope := SQLGateScope(); scope != "" || businessMySQLTLSSelected(cfg) {
+		driverConfig, e := businessMySQLDriverConfig(cfg, settings.String())
 		if e != nil {
-			return nil, fmt.Errorf("invalid gated database configuration")
+			return nil, e
 		}
 		driverConfig.MultiStatements = false
 		connector, e := mysqldriver.NewConnector(driverConfig)
 		if e != nil {
 			return nil, e
 		}
-		pool, e := backupgate.Open(connector, scope)
-		if e != nil {
-			return nil, e
+		var pool *sql.DB
+		if scope != "" {
+			pool, e = backupgate.Open(connector, scope)
+			if e != nil {
+				return nil, e
+			}
+		} else {
+			pool = sql.OpenDB(connector)
 		}
 		session, err = mysql.New(pool)
 		if err != nil {

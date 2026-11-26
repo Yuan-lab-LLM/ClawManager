@@ -1,0 +1,164 @@
+# Render once per registered endpoint. Use only operator-approved inputs.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: "${PREPARE_SERVICE_ACCOUNT}"
+  namespace: "${NAMESPACE}"
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: "${PREPARE_JOB_NAME}-materials"
+  namespace: "${NAMESPACE}"
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ${LOCAL_OUTPUT_SECRET_NAMES_JSON}
+    verbs: ["get", "update"]
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    resourceNames: ${LOCAL_PVC_NAMES_JSON}
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: "${PREPARE_JOB_NAME}-materials"
+  namespace: "${NAMESPACE}"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: "${PREPARE_JOB_NAME}-materials"
+subjects:
+  - kind: ServiceAccount
+    name: "${PREPARE_SERVICE_ACCOUNT}"
+    namespace: "${NAMESPACE}"
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: "${PREPARE_JOB_NAME}-start"
+  namespace: "${NAMESPACE}"
+rules:
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    resourceNames: ["${PREPARE_JOB_NAME}"]
+    verbs: ["get", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: "${PREPARE_JOB_NAME}-start"
+  namespace: "${NAMESPACE}"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: "${PREPARE_JOB_NAME}-start"
+subjects:
+  - kind: ServiceAccount
+    name: "${APP_SERVICE_ACCOUNT}"
+    namespace: "${NAMESPACE}"
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: "${PREPARE_JOB_NAME}"
+  namespace: "${NAMESPACE}"
+  annotations:
+    clawmanager.io/trial-environment-revision: "${PROFILE_REVISION}"
+spec:
+  suspend: true
+  activeDeadlineSeconds: 600
+  backoffLimit: 2
+  template:
+    spec:
+      serviceAccountName: "${PREPARE_SERVICE_ACCOUNT}"
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: ${PREPARE_UID}
+        runAsGroup: ${PREPARE_GID}
+        fsGroup: ${TRIAL_VOLUME_GID}
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: prepare
+          image: "${APP_IMAGE_DIGEST}"
+          command: ["/usr/local/bin/system-backup-trial-prepare"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: SYSTEM_BACKUP_TRIAL_ENVIRONMENT_PROFILE_FILE
+              value: /trial/profile/environment.json
+            - name: SYSTEM_BACKUP_TRIAL_PREPARE_OWNER_DSN_FILE
+              value: /trial/owner/dsn
+            - name: SYSTEM_BACKUP_TRIAL_PREPARE_DATABASE
+              value: "${MYSQL_DATABASE}"
+            - name: SYSTEM_BACKUP_TRIAL_PREPARE_ACCOUNT_HOST
+              value: "${MYSQL_ACCOUNT_HOST}"
+            - name: SYSTEM_BACKUP_TRIAL_PREPARE_MIGRATION_CATALOG_SHA256
+              value: "${MIGRATION_CATALOG_SHA256}"
+            - name: SYSTEM_BACKUP_TRIAL_SOURCE_UUID
+              value: "${SOURCE_MYSQL_UUID}"
+            - name: SYSTEM_BACKUP_TRIAL_RESTORE_UUID
+              value: "${TARGET_MYSQL_UUID}"
+            - name: SYSTEM_BACKUP_TRIAL_RESTORE_NAMESPACE
+              value: "${TARGET_NAMESPACE}"
+            - name: SYSTEM_BACKUP_TRIAL_RESTORE_STORAGE_CLASS
+              value: "${TARGET_INSTANCE_STORAGE_CLASS}"
+            - name: SYSTEM_BACKUP_TRIAL_RESTORE_ISOLATED
+              value: "${TARGET_ISOLATION_CONFIRMED}"
+            - name: SYSTEM_BACKUP_TRIAL_READ_DIR
+              value: /trial/archive-read
+            - name: SYSTEM_BACKUP_TRIAL_WRITE_DIR
+              value: /trial/archive-write
+            # trial-workspace-begin
+            - name: SYSTEM_BACKUP_TRIAL_PREPARE_WORKSPACE_DIR
+              value: /trial/workspace
+            # trial-workspace-end
+            - name: SSL_CERT_FILE
+              value: /trial/ca/ca-bundle.crt
+          volumeMounts:
+            - name: profile
+              mountPath: /trial/profile
+              readOnly: true
+            - name: owner
+              mountPath: /trial/owner
+              readOnly: true
+            - name: database-ca
+              mountPath: /trial/ca
+              readOnly: true
+            - name: archive
+              mountPath: /trial/archive-read
+              readOnly: true
+            - name: archive
+              mountPath: /trial/archive-write
+              readOnly: ${ARCHIVE_WRITE_MOUNT_READ_ONLY}
+            # trial-workspace-begin
+            - name: workspace
+              mountPath: /trial/workspace
+              readOnly: ${WORKSPACE_MOUNT_READ_ONLY}
+            # trial-workspace-end
+      volumes:
+        - name: profile
+          configMap:
+            name: "${ENVIRONMENT_PROFILE_CONFIGMAP}"
+        - name: owner
+          secret:
+            secretName: "${MYSQL_OWNER_DSN_SECRET}"
+            defaultMode: 288 # 0440
+        - name: database-ca
+          configMap:
+            name: "${MYSQL_CA_CONFIGMAP}"
+        - name: archive
+          persistentVolumeClaim:
+            claimName: "${ARTIFACT_PVC}"
+        # trial-workspace-begin
+        - name: workspace
+          persistentVolumeClaim:
+            claimName: "${WORKSPACE_PVC}"
+        # trial-workspace-end

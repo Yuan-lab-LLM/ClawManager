@@ -33,6 +33,7 @@ import (
 	"clawreef/internal/services/k8s"
 	"clawreef/internal/services/leader"
 	"clawreef/internal/systembackup"
+	"clawreef/internal/systembackuptrial"
 	"clawreef/internal/teamtemplate"
 	"clawreef/internal/workbench"
 	"clawreef/internal/workspacedashboard"
@@ -71,7 +72,15 @@ func main() {
 	}
 
 	// Initialize database
-	database, err := db.Initialize(cfg.Database)
+	trialRuntimeBackupID := strings.TrimSpace(os.Getenv("SYSTEM_BACKUP_TRIAL_RUNTIME_BACKUP_ID"))
+	var database = db.Session
+	if trialRuntimeBackupID == "" {
+		database, err = db.Initialize(cfg.Database)
+	} else {
+		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+		database, err = systembackuptrial.New(os.Getenv).InitializeRuntime(ctx, cfg, trialRuntimeBackupID)
+		cancel()
+	}
 	if err != nil {
 		log.Fatalf("Failed to initialize database: %v", err)
 	}
@@ -848,7 +857,7 @@ func main() {
 		}
 	}
 	defer leaderCancel()
-	if err := startDatabaseMaintenance(leaderCtx, database, observationObjects, cfg.Database); err != nil {
+	if err := startDatabaseMaintenance(leaderCtx, database, observationObjects, cfg.Database, trialRuntimeBackupID != ""); err != nil {
 		log.Fatalf("Failed to start database maintenance: %v", err)
 	}
 	workspaceStore := workspacedashboard.NewStore(database)
@@ -1350,58 +1359,11 @@ func main() {
 			adminSystemSettings.POST("/routing-classifier/compare", routingClassifierHandler.Compare)
 		}
 
-		backupBindings, backupBindingErr := systembackup.ParseRoleBindings(os.Getenv("SYSTEM_BACKUP_ROLE_BINDINGS"))
-		if backupBindingErr != nil {
-			log.Println("System backup role bootstrap is invalid; access disabled")
-			backupBindings = nil
-		}
-		backupSQL, _ := database.Driver().(*sql.DB)
-		if controlFile := strings.TrimSpace(os.Getenv("SYSTEM_BACKUP_CONTROL_DSN_FILE")); controlFile != "" {
-			controlContext, controlCancel := context.WithTimeout(context.Background(), 10*time.Second)
-			controlSQL, controlErr := systembackup.OpenControlDatabase(controlContext, controlFile)
-			if controlErr == nil && db.SQLGateScope() != "" {
-				controlErr = backupgate.RequireSameDatabase(controlContext, backupSQL, controlSQL)
-			}
-			controlCancel()
-			if controlErr != nil {
-				if controlSQL != nil {
-					controlSQL.Close()
-				}
-				log.Println("System backup control database unavailable; access disabled")
-				backupSQL = nil
-			} else {
-				backupSQL = controlSQL
-				defer controlSQL.Close()
-			}
-		} else if db.SQLGateScope() != "" {
-			log.Println("System backup SQL gate requires a separate control credential; backup access disabled")
-			backupSQL = nil
-		}
-		backupStore := systembackup.Store{DB: backupSQL, InstallationID: strings.TrimSpace(os.Getenv("SYSTEM_BACKUP_INSTALLATION_ID"))}
-		backupHandler := handlers.NewSystemBackupHandler(backupStore, backupBindings)
-		backupMFA, backupMFAErr := systembackup.LoadStrongAuthVerifier(strings.TrimSpace(os.Getenv("SYSTEM_BACKUP_STRONG_AUTH_FILE")))
-		if backupMFAErr != nil || backupMFA != nil && backupMFA.Audience != backupStore.InstallationID {
-			log.Println("System backup MFA bootstrap is invalid; sensitive configuration changes disabled")
+		if trialRuntimeBackupID == "" {
+			systembackuptrial.New(os.Getenv).Register(api, userRepo)
 		} else {
-			backupHandler.SetStrongAuthVerifier(backupMFA)
+			systembackuptrial.RegisterRuntimeIdentity(api, userRepo, trialRuntimeBackupID, cfg.Runtime.Namespace)
 		}
-		backupAdmin := api.Group("/admin/system-backup")
-		backupAdmin.Use(middleware.Auth(), middleware.SetUserInfo(userRepo), middleware.NewAdminAuth(userRepo))
-		backupHandler.Register(backupAdmin)
-		var teamDataBackup *systembackup.TeamDataService
-		if path := strings.TrimSpace(os.Getenv("SYSTEM_TEAM_DATA_BACKUP_CONFIG")); path != "" {
-			setupCtx, setupCancel := context.WithTimeout(leaderCtx, 20*time.Second)
-			sourceSQL, _ := database.Driver().(*sql.DB)
-			teamDataBackup, err = systembackup.NewTeamDataService(setupCtx, sourceSQL, path)
-			setupCancel()
-			if err != nil {
-				log.Printf("Team data backup unavailable: %s", systembackup.PublicError(err))
-			} else {
-				defer teamDataBackup.Close()
-				go teamDataBackup.Run(leaderCtx)
-			}
-		}
-		handlers.NewTeamDataBackupHandler(teamDataBackup).Register(backupAdmin)
 
 		northboundSettings := api.Group("/admin/northbound")
 		northboundSettings.Use(middleware.Auth())

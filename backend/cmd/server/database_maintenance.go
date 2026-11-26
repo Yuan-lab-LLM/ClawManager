@@ -56,7 +56,7 @@ func configureDatabaseMaintenance(database db.Session, store services.ObjectStor
 	repository.ConfigureObservability(database, journal, objects)
 	return objects, nil
 }
-func startDatabaseMaintenance(ctx context.Context, database db.Session, objects *observability.EncryptedObjects, cfg config.DatabaseConfig) error {
+func startDatabaseMaintenance(ctx context.Context, database db.Session, objects *observability.EncryptedObjects, cfg config.DatabaseConfig, trialRuntime bool) error {
 	report := func(e error) { log.Printf("Database maintenance deferred; recovery records retained: %v", e) }
 	go repository.RunObservability(ctx, report)
 	go repository.RunObservationBodyMigration(ctx, report)
@@ -124,5 +124,5 @@ func startDatabaseMaintenance(ctx context.Context, database db.Session, objects 
 			}
 		}
 	}()
-	return startHistoryMaintenance(ctx, database, objects, cfg)
+	return startHistoryMaintenance(ctx, database, objects, cfg, trialRuntime)
 }

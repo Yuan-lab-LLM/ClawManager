@@ -1,0 +1,57 @@
+{
+  "migration_catalog_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "target_isolation_confirmed": true,
+  "source": {
+    "cluster": "site-a",
+    "namespace": "cm-drill-source",
+    "image": "registry.example/clawmanager@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "service_account": "trial-source-api",
+    "artifact_claim": "trial-export",
+    "artifact_storage_class": "isolated",
+    "key_secret": "trial-key",
+    "source_read_secret": "trial-source-reader",
+    "prepare": {
+      "revision": "trial-v1",
+      "job_name": "prepare-trial-v1",
+      "service_account": "trial-source-preparer",
+      "profile_configmap": "trial-environment",
+      "database": "clawmanager",
+      "server_uuid": "11111111-2222-4333-8444-555555555555",
+      "account_host": "%",
+      "owner_dsn_secret": "source-mysql-owner",
+      "ca_configmap": "trial-mysql-ca",
+      "run_as_user": 65532,
+      "run_as_group": 65532,
+      "volume_group": 65532
+    }
+  },
+  "target": {
+    "cluster": "site-a",
+    "namespace": "cm-drill-target",
+    "image": "registry.example/clawmanager@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "service_account": "trial-target-api",
+    "artifact_claim": "trial-import",
+    "artifact_storage_class": "isolated",
+    "workspace_claim": "trial-target-workspace",
+    "workspace_storage_class": "isolated",
+    "instance_storage_class": "isolated",
+    "key_secret": "trial-key",
+    "restore_write_secret": "trial-target-writer",
+    "restore_read_secret": "trial-target-reader",
+    "runtime_secret": "trial-target-runtime",
+    "prepare": {
+      "revision": "trial-v1",
+      "job_name": "prepare-trial-v1",
+      "service_account": "trial-target-preparer",
+      "profile_configmap": "trial-environment",
+      "database": "cm_drill_trial_target",
+      "server_uuid": "66666666-7777-4888-8999-aaaaaaaaaaaa",
+      "account_host": "%",
+      "owner_dsn_secret": "target-mysql-owner",
+      "ca_configmap": "trial-mysql-ca",
+      "run_as_user": 65532,
+      "run_as_group": 65532,
+      "volume_group": 65532
+    }
+  }
+}
