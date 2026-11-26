@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { isAxiosError } from 'axios';
 import { useI18n } from '../../../contexts/I18nContext';
 import api from '../../../services/api';
@@ -56,6 +56,7 @@ export default function TrialBackupPanel() {
   const [transferring, setTransferring] = useState<'download' | 'upload'>();
   const [importState, setImportState] = useState<'received' | 'invalid' | 'conflict' | 'unavailable'>();
   const [scopeOpen, setScopeOpen] = useState(false);
+  const deliveryInput = useRef<HTMLInputElement>(null);
   const profile = ready?.environment?.profile;
   const mayAutofillBackup = !!ready && profile?.side !== 'target';
   const running = task?.status === 'running';
@@ -318,6 +319,8 @@ export default function TrialBackupPanel() {
     unavailable: 'The import service is unavailable. Check trial readiness and retry.',
   };
   const button = 'app-button-secondary max-md:min-h-11';
+  const disclosure = 'w-fit cursor-pointer rounded-sm py-1 font-medium text-[var(--cm-muted)] hover:text-[var(--cm-ink)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--cm-focus)] max-md:py-3';
+  const importDeliveryLabel = zh ? '导入备份交付包' : 'Import backup delivery package';
   return <section className="min-w-0 space-y-4 rounded-[var(--cm-radius-panel)] border border-[var(--cm-border-subtle)] bg-[var(--cm-surface)] p-4" aria-labelledby="trial-backup-title">
     <h2 id="trial-backup-title" className="font-semibold text-[var(--cm-ink)]">{zh ? '备份（试行版）' : 'Backup (trial)'}</h2>
     <p className="text-sm text-[var(--cm-muted)]">{zh
@@ -339,45 +342,40 @@ export default function TrialBackupPanel() {
     </div>
     {scopeOpen && <TrialBackupScope disabled={!canStartBackup} onCreate={(selection) => void start(false, selection)} />}
     {error && <p role="alert" className="text-sm text-[var(--cm-error)]">{zh ? '试行请求失败，请检查就绪状态后重试。' : 'Trial request failed. Check readiness and try again.'}</p>}
-    {profile?.side === 'target' && <div className="space-y-1 text-sm text-[var(--cm-text)]">
-      <div className="flex flex-wrap items-center gap-2">
-        {ready?.import_available && <label className="flex min-w-0 flex-wrap items-center gap-2">
-          {transferring === 'upload' ? (zh ? '正在导入交付包…' : 'Importing the delivery package…')
-            : (zh ? '导入备份交付包' : 'Import backup delivery package')}
-          <input type="file" accept=".tar,application/x-tar" disabled={actionPending}
-            className="max-w-full text-xs file:mr-2 file:rounded-md file:border-0 file:bg-[var(--cm-subtle)] file:px-2 file:py-1"
-            onChange={(event) => {
-              const file = event.currentTarget.files?.[0];
-              event.currentTarget.value = '';
-              if (file) void uploadDelivery(file);
-            }} />
-        </label>}
-        <label className="flex min-w-0 flex-wrap items-center gap-2">
-          {zh ? '选择恢复交接单' : 'Select a restore handoff'}
-          <input type="file" accept=".json,application/json" disabled={actionPending}
-            className="max-w-full text-xs file:mr-2 file:rounded-md file:border-0 file:bg-[var(--cm-subtle)] file:px-2 file:py-1"
-            onChange={(event) => {
-              const file = event.currentTarget.files?.[0];
-              event.currentTarget.value = '';
-              if (file) void importHandoff(file);
-            }} />
-        </label>
-        {handoff && <button type="button" className={button} disabled={actionPending} onClick={clearHandoff}>
-          {zh ? '清除交接单' : 'Clear handoff'}
-        </button>}
-      </div>
-      {importState !== 'received' && <p>{ready?.import_available
-        ? (zh ? '交付包会传入原件。使用单独交接单时，先交付密文和回执。'
-          : 'The package transfers the original files. When using the standalone handoff, deliver the ciphertext and receipt first.')
-        : (zh ? '将密文和存储回执交付到目标导入卷后，再检查此备份。'
-          : 'Place the ciphertext and storage receipt on the target import volume before checking the backup.')}</p>}
-      {isTrialBackupID(backupID) && <p className="break-all">
-        {zh ? '目标导入卷 ' : 'Target import volume '}<code>{profile.target.artifact_claim}</code>
-        {zh ? ' 需要 ' : ' requires '}<code>{backupID}.trial</code>{zh ? ' 和 ' : ' and '}<code>{backupID}.receipt</code>
-      </p>}
-      {importState && <p role="status" className={importState === 'received' ? 'text-[var(--cm-success)]' : 'text-[var(--cm-error)]'}>
+    {profile?.side === 'target' && <div className="space-y-2 text-sm text-[var(--cm-text)]">
+      {ready?.import_available && <>
+        <button type="button" className={button} disabled={actionPending}
+          onClick={() => deliveryInput.current?.click()}>
+          {transferring === 'upload' ? (zh ? '正在导入交付包…' : 'Importing the delivery package…') : importDeliveryLabel}
+        </button>
+        <input ref={deliveryInput} type="file" accept=".tar,application/x-tar" aria-label={importDeliveryLabel} hidden
+          disabled={actionPending} onChange={(event) => {
+            const file = event.currentTarget.files?.[0];
+            event.currentTarget.value = '';
+            if (file) void uploadDelivery(file);
+          }} />
+      </>}
+      {importState && <p role={importState === 'received' ? 'status' : 'alert'} className={importState === 'received' ? 'text-[var(--cm-success)]' : 'text-[var(--cm-error)]'}>
         {importStatus[importState]}
       </p>}
+      <details open={!ready?.import_available || undefined}>
+        <summary className={disclosure}>{zh ? '已有备份原件' : 'Use backup files already on the import volume'}</summary>
+        <div className="space-y-2 py-1">
+          <p className="break-words">{zh ? '先将 .trial 密文和 .receipt 回执放入目标导入卷 ' : 'Place the .trial ciphertext and .receipt on the target import volume '}
+            <code>{profile.target.artifact_claim}</code>{zh ? '，再选择交接单。' : ', then select the handoff.'}
+          </p>
+          <label className="flex min-w-0 flex-wrap items-center gap-2">
+            {zh ? '选择恢复交接单' : 'Select a restore handoff'}
+            <input type="file" accept=".json,application/json" disabled={actionPending}
+              className="max-w-full text-xs file:mr-2 file:rounded-md file:border-0 file:bg-[var(--cm-subtle)] file:px-2 file:py-1"
+              onChange={(event) => {
+                const file = event.currentTarget.files?.[0];
+                event.currentTarget.value = '';
+                if (file) void importHandoff(file);
+              }} />
+          </label>
+        </div>
+      </details>
     </div>}
     {(handoffError || handoffPlacementDiffers) && <p role="alert" className="text-sm text-[var(--cm-error)]">
       {handoffError === 'invalid'
@@ -395,6 +393,9 @@ export default function TrialBackupPanel() {
         }}
           className="app-input w-72 max-w-full font-mono max-md:min-h-11" />
       </label>
+      {handoff && <button type="button" className={button} disabled={actionPending} onClick={clearHandoff}>
+        {zh ? '清除备份选择' : 'Clear backup selection'}
+      </button>}
       <button type="button" className={button} disabled={!canCheck} onClick={() => void checkBackup()}>
         {checkingBackup ? (zh ? '正在检查备份…' : 'Checking backup…') : (zh ? '检查此备份' : 'Check this backup')}
       </button>
@@ -427,19 +428,24 @@ export default function TrialBackupPanel() {
       {task.backup_mode === 'selected' && <p>{zh ? '范围：选定账号和实例' : 'Scope: selected accounts and instances'}</p>}
       {task.backup_id && <p>{zh ? '试行产物' : 'Trial artifact'} <code>{task.backup_id}</code></p>}
       {task.ciphertext_sha256 && <p className="break-all">{zh ? '密文 SHA-256' : 'Ciphertext SHA-256'} <code>{task.ciphertext_sha256}</code></p>}
-      {exportHandoff && <div className="space-y-1">
-        <button type="button" className={button} disabled={actionPending} onClick={() => void downloadDelivery()}>
+      {exportHandoff && <div className="space-y-2">
+        <button type="button" className="app-button-primary max-md:min-h-11" disabled={actionPending} onClick={() => void downloadDelivery()}>
           {transferring === 'download' ? (zh ? '正在下载交付包…' : 'Downloading delivery package…')
             : (zh ? '下载备份交付包' : 'Download backup delivery package')}
         </button>
-        <button type="button" className={button}
-          onClick={() => downloadTrialJson(`backup-trial-restore-${exportHandoff.backup_id}.json`, exportHandoff)}>
-          {zh ? '下载恢复交接单' : 'Download restore handoff'}
-        </button>
-        <p className="break-all">{zh ? '使用单独交接单时，请交付 ' : 'When using the standalone handoff, deliver '}
-          <code>{exportHandoff.backup_id}.trial</code>{zh ? ' 和 ' : ' and '}<code>{exportHandoff.backup_id}.receipt</code>
-          {zh ? ' 到目标导入卷 ' : ' to the target import volume '}<code>{exportHandoff.target.artifact_claim}</code>
-        </p>
+        <details>
+          <summary className={disclosure}>{zh ? '单独传输备份原件' : 'Transfer backup files separately'}</summary>
+          <div className="space-y-2 py-1">
+            <p className="break-all">{zh ? '请另行交付 ' : 'Deliver '}
+              <code>{exportHandoff.backup_id}.trial</code>{zh ? ' 和 ' : ' and '}<code>{exportHandoff.backup_id}.receipt</code>
+              {zh ? ' 到目标导入卷 ' : ' separately to the target import volume '}<code>{exportHandoff.target.artifact_claim}</code>{zh ? '。' : '.'}
+            </p>
+            <button type="button" className={button} disabled={actionPending}
+              onClick={() => downloadTrialJson(`backup-trial-restore-${exportHandoff.backup_id}.json`, exportHandoff)}>
+              {zh ? '下载恢复交接单' : 'Download restore handoff'}
+            </button>
+          </div>
+        </details>
       </div>}
       {task.readback_verified && <p className="text-[var(--cm-success)]">{zh ? '独立读回校验通过' : 'Independent readback verified'}</p>}
       {task.hermes_history && <p>{zh
